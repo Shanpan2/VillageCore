@@ -11,9 +11,7 @@ import os
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:
-    with open("config.json", "r", encoding="utf-8") as f:
-        config = json.load(f)
-    TOKEN = config["token"]
+    raise ValueError("DISCORD_TOKEN環境変数が設定されていません")
 
 # ============================================================
 # データファイルパス
