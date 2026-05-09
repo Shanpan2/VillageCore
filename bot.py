@@ -567,7 +567,40 @@ async def attend_record_all(interaction: discord.Interaction, date: str = ""):
         f"📋 **{record_date}** の一括出席記録\n全員の状況を選んで「✅ 一括保存する」を押してください：",
         view=view, ephemeral=True
     )
+@bot.tree.command(name="attend_add_members_bulk", description="【村長権限用】サーバーの全メンバーを一括で出席管理に追加します")
+@discord.app_commands.describe(initial_pt="初期ポイント（デフォルト: 10）")
+async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: int = 10):
+    if not await check_admin(interaction):
+        return
+    await interaction.response.defer(ephemeral=True)
 
+    added = []
+    skipped = []
+
+    for member in interaction.guild.members:
+        if member.bot:
+            continue  # Botは除外
+        uid = str(member.id)
+        if uid in attend_data["members"]:
+            skipped.append(member.display_name)
+            continue
+        attend_data["members"][uid] = {
+            "name": member.display_name,
+            "pt": max(0, min(10, initial_pt)),
+            "records": {}
+        }
+        added.append(member.display_name)
+
+    save_attend()
+
+    msg = f"✅ **{len(added)}人** を追加しました！\n"
+    if added:
+        msg += "追加: " + "、".join(added) + "\n"
+    if skipped:
+        msg += f"⏭️ 既に登録済み（スキップ）: {len(skipped)}人"
+
+    await interaction.followup.send(msg, ephemeral=True)
+    
 # ============================================================
 # 起動
 # ============================================================
