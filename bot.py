@@ -342,25 +342,40 @@ class AttendRecordView(discord.ui.View):
         self.add_item(AttendStatusSelect(uid, name, date))
 
 
-@bot.tree.command(name="attend_record", description="指定メンバーの出席を記録します")
-@discord.app_commands.describe(member="対象メンバー", date="記録日（省略すると今日）例: 2025-01-15")
-async def attend_record(interaction: discord.Interaction, member: discord.Member, date: str = ""):
+@bot.tree.command(name="attend_record", description="メンバーを選択して出席を記録します")
+@discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
+async def attend_record(interaction: discord.Interaction, date: str = ""):
     if not await check_admin(interaction):
         return
-    uid   = str(member.id)
-    entry = attend_data["members"].get(uid)
-    if entry is None:
-        await interaction.response.send_message(
-            f"❌ {member.display_name} は登録されていません。先に `/attend_add_member` で追加してください。",
-            ephemeral=True
-        )
+    members = attend_data["members"]
+    if not members:
+        await interaction.response.send_message("登録メンバーがいません。", ephemeral=True)
         return
     record_date = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
-    view = AttendRecordView(uid, entry["name"], record_date)
+
+    # メンバー選択ドロップダウン
+    options = [
+        discord.SelectOption(label=entry["name"], value=uid, description=f"現在: {entry['pt']}pt")
+        for uid, entry in members.items()
+    ]
+
+    class MemberSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(placeholder="メンバーを選択", options=options[:25])
+        async def callback(self, interaction2: discord.Interaction):
+            uid = self.values[0]
+            entry = attend_data["members"].get(uid)
+            view2 = AttendRecordView(uid, entry["name"], record_date)
+            await interaction2.response.send_message(
+                f"📋 **{entry['name']}** の出席記録（{record_date}）\n現在: **{entry['pt']}pt**",
+                view=view2, ephemeral=True
+            )
+
+    view = discord.ui.View(timeout=120)
+    view.add_item(MemberSelect())
     await interaction.response.send_message(
-        f"📋 **{entry['name']}** の出席記録（{record_date}）\n現在: **{entry['pt']}pt**",
-        view=view,
-        ephemeral=True
+        f"📋 出席記録（{record_date}）\nメンバーを選んでください：",
+        view=view, ephemeral=True
     )
 
 
@@ -486,6 +501,69 @@ async def attend_history(interaction: discord.Interaction, member: discord.Membe
 
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+class BulkAttendView(discord.ui.View):
+    def __init__(self, record_date: str):
+        super().__init__(timeout=600)
+        self.record_date = record_date
+        self.selections = {}  # uid -> status
+        for uid, entry in attend_data["members"].items():
+            self.add_item(BulkAttendSelect(uid, entry["name"], entry["pt"], record_date, self))
+
+    @discord.ui.button(label="✅ 一括保存する", style=discord.ButtonStyle.success, row=4)
+    async def save_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selections:
+            await interaction.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
+            return
+        results = []
+        for uid, status in self.selections.items():
+            entry = attend_data["members"].get(uid)
+            if entry is None:
+                continue
+            change = calc_point_change(entry["pt"], status)
+            new_pt = max(0, min(10, entry["pt"] + change))
+            entry["pt"] = new_pt
+            entry["records"][self.record_date] = status
+            sign = f"+{change}" if change >= 0 else str(change)
+            results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
+        save_attend()
+        await interaction.response.send_message(
+            f"✅ **{self.record_date}** の一括記録が完了しました！\n\n" + "\n".join(results),
+            ephemeral=True
+        )
+
+
+class BulkAttendSelect(discord.ui.Select):
+    def __init__(self, uid: str, name: str, current_pt: int, date: str, parent_view):
+        self.uid = uid
+        self.parent_view = parent_view
+        options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
+        super().__init__(placeholder=f"{name}（現在:{current_pt}pt）", options=options, row=None)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.selections[self.uid] = self.values[0]
+        await interaction.response.defer()
+
+
+@bot.tree.command(name="attend_record_all", description="【村長権限用】全メンバーの出席を一括で記録します")
+@discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
+async def attend_record_all(interaction: discord.Interaction, date: str = ""):
+    if not await check_admin(interaction):
+        return
+    members = attend_data["members"]
+    if not members:
+        await interaction.response.send_message("登録メンバーがいません。", ephemeral=True)
+        return
+    if len(members) > 20:
+        await interaction.response.send_message(
+            "❌ メンバーが多すぎます（最大20人）。個別に `/attend_record` を使ってください。", ephemeral=True
+        )
+        return
+    record_date = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
+    view = BulkAttendView(record_date)
+    await interaction.response.send_message(
+        f"📋 **{record_date}** の一括出席記録\n全員の状況を選んで「✅ 一括保存する」を押してください：",
+        view=view, ephemeral=True
+    )
 
 # ============================================================
 # 起動
