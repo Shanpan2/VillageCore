@@ -66,7 +66,7 @@ async def check_admin(interaction: discord.Interaction) -> bool:
     return True
 
 # ============================================================
-# ポイント計算ロジック
+# ポイント計算ロジック（マイナスあり・上限10）
 # ============================================================
 def calc_point_change(current_pt: int, status: str) -> int:
     if status == "投票して出席":
@@ -78,6 +78,11 @@ def calc_point_change(current_pt: int, status: str) -> int:
     if status == "投票して無断欠席":
         return -3
     return 0
+
+def apply_point(current_pt: int, status: str) -> int:
+    """マイナスも許容（下限なし）、上限10"""
+    change = calc_point_change(current_pt, status)
+    return min(10, current_pt + change)  # マイナスも許容
 
 ATTEND_STATUSES = [
     "投票して出席",
@@ -93,14 +98,131 @@ ATTEND_STATUSES = [
 def save_attend():
     save_json(ATTEND_DATA_FILE, attend_data)
 
+def get_badge(pt: int) -> str:
+    if pt <= 0:
+        return "🚨 退出対象"
+    elif pt <= 2:
+        return "⚠️ 第2警告"
+    elif pt <= 4:
+        return "❗ 第1警告"
+    return "✅"
+
 # ============================================================
-# 起動
+# 起動・名前同期
 # ============================================================
 @bot.event
 async def on_ready():
     print(f"✅ ログイン成功: {bot.user} (ID: {bot.user.id})")
+
+    # 登録済みメンバーの名前をDiscordの最新表示名に同期
+    for guild in bot.guilds:
+        for uid, entry in attend_data["members"].items():
+            member = guild.get_member(int(uid))
+            if member and member.display_name != entry["name"]:
+                print(f"🔄 名前同期: {entry['name']} → {member.display_name}")
+                entry["name"] = member.display_name
+    save_attend()
+
     await bot.tree.sync()
     print("✅ スラッシュコマンド同期完了")
+
+
+# ============================================================
+# /help コマンド
+# ============================================================
+@bot.tree.command(name="help", description="使えるコマンドの一覧と説明を表示します")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 コマンド一覧",
+        color=0x534AB7
+    )
+
+    embed.add_field(name="\u200b", value="**🗳️ Poll・ロール機能**", inline=False)
+    embed.add_field(
+        name="/setup_poll_role 【村長権限用】",
+        value="Pollの選択肢に投票したユーザーへ自動でロールを付与する設定をします。\n`message_id` `answer_text` `role_name` `assign_role`",
+        inline=False
+    )
+    embed.add_field(
+        name="/list_poll_roles",
+        value="現在登録されているPoll→ロールの紐付け一覧を表示します。",
+        inline=False
+    )
+
+    embed.add_field(name="\u200b", value="**📋 出席管理機能（村長権限用）**", inline=False)
+    embed.add_field(
+        name="/attend_add_member 【村長権限用】",
+        value="メンバーを1人出席管理に追加します。初期ポイントは10pt。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_add_members_bulk 【村長権限用】",
+        value="複数のメンバーをまとめて出席管理に追加します（選択式）。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_remove_member 【村長権限用】",
+        value="メンバーを出席管理から削除します。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_record 【村長権限用】",
+        value="メンバーを1人選んで出席状況を記録します。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_record_all 【村長権限用】",
+        value="全メンバーの出席状況を一括で記録します。4人ずつページを移動して全員選択し「保存する」を押してください。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_set_pt 【村長権限用】",
+        value="メンバーのポイントを直接指定して修正します（ミス修正用）。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_set_channel 【村長権限用】",
+        value="警告通知を送るチャンネルを現在のチャンネルに設定します。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_notify 【村長権限用】",
+        value="警告対象メンバーを通知チャンネルに送信します。",
+        inline=False
+    )
+
+    embed.add_field(name="\u200b", value="**📊 確認コマンド（誰でも使用可）**", inline=False)
+    embed.add_field(
+        name="/attend_status",
+        value="全メンバーの出席ポイント一覧を表示します。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_warnings",
+        value="警告対象（4pt以下）のメンバーだけを表示します。",
+        inline=False
+    )
+    embed.add_field(
+        name="/attend_history",
+        value="指定メンバーの出席履歴（直近20件）を表示します。",
+        inline=False
+    )
+
+    embed.add_field(name="\u200b", value="**📈 ポイント基準**", inline=False)
+    embed.add_field(
+        name="付与・減算ルール",
+        value=(
+            "✅ 投票して出席：+2pt（4pt以下なら+3pt）\n"
+            "✅ 生存確認(DM回答済み)：+3pt\n"
+            "➖ 欠席系（投票あり）：-1pt\n"
+            "➖ 無断遅刻：-1pt\n"
+            "❌ 無断欠席：-3pt\n"
+            "⚠️ 4pt以下：第1警告 / 2pt以下：第2警告 / 0pt以下：退出対象"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ============================================================
@@ -197,15 +319,29 @@ async def list_poll_roles(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
+# ── Poll投票イベント（修正版）────────────────────────────────
 @bot.event
 async def on_poll_vote_add(member: discord.Member, answer: discord.PollAnswer):
-    msg_id = str(answer.poll.message.id)
+    try:
+        # poll.message が取得できない場合があるため安全に処理
+        poll = answer.poll
+        message = await poll.channel.fetch_message(poll.message.id)
+        msg_id = str(message.id)
+    except Exception as e:
+        print(f"⚠️ Poll投票イベントエラー: {e}")
+        return
+
     ans_id = str(answer.id)
     info   = poll_data.get(msg_id, {}).get(ans_id)
-    if info is None or not info.get("assign_role", True):
+    if info is None:
+        print(f"⚠️ msg_id={msg_id} ans_id={ans_id} が poll_data に見つかりません")
         return
+    if not info.get("assign_role", True):
+        return
+
     role = member.guild.get_role(info["role_id"])
     if role is None:
+        print(f"⚠️ ロールID {info['role_id']} が見つかりません")
         return
     try:
         await member.add_roles(role, reason="Poll投票によるロール付与")
@@ -216,11 +352,19 @@ async def on_poll_vote_add(member: discord.Member, answer: discord.PollAnswer):
 
 @bot.event
 async def on_poll_vote_remove(member: discord.Member, answer: discord.PollAnswer):
-    msg_id = str(answer.poll.message.id)
+    try:
+        poll = answer.poll
+        message = await poll.channel.fetch_message(poll.message.id)
+        msg_id = str(message.id)
+    except Exception as e:
+        print(f"⚠️ Poll投票取り消しイベントエラー: {e}")
+        return
+
     ans_id = str(answer.id)
     info   = poll_data.get(msg_id, {}).get(ans_id)
     if info is None or not info.get("assign_role", True):
         return
+
     role = member.guild.get_role(info["role_id"])
     if role is None:
         return
@@ -233,7 +377,12 @@ async def on_poll_vote_remove(member: discord.Member, answer: discord.PollAnswer
 
 @bot.event
 async def on_poll_finish(poll: discord.Poll):
-    msg_id = str(poll.message.id)
+    try:
+        message = await poll.channel.fetch_message(poll.message.id)
+        msg_id = str(message.id)
+    except Exception:
+        return
+
     if msg_id not in poll_data:
         return
 
@@ -255,7 +404,7 @@ async def on_poll_finish(poll: discord.Poll):
 
     if deleted_roles:
         try:
-            await poll.message.channel.send(
+            await poll.channel.send(
                 f"📢 Pollが終了しました。以下のロールを削除しました：{', '.join(f'**{r}**' for r in deleted_roles)}"
             )
         except Exception:
@@ -286,7 +435,7 @@ async def attend_add_member(interaction: discord.Interaction, member: discord.Me
         return
     attend_data["members"][uid] = {
         "name": member.display_name,
-        "pt": max(0, min(10, initial_pt)),
+        "pt": initial_pt,
         "records": {}
     }
     save_attend()
@@ -333,7 +482,7 @@ async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: 
                     continue
                 attend_data["members"][uid] = {
                     "name": member.display_name,
-                    "pt": max(0, min(10, initial_pt)),
+                    "pt": initial_pt,
                     "records": {}
                 }
                 added.append(member.display_name)
@@ -370,9 +519,9 @@ async def attend_remove_member(interaction: discord.Interaction, member: discord
 
 class AttendStatusSelect(discord.ui.Select):
     def __init__(self, uid: str, name: str, date: str):
-        self.uid = uid
+        self.uid  = uid
         self.date = date
-        options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
+        options   = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
         super().__init__(placeholder=f"{name} の出席状況を選択", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -382,7 +531,7 @@ class AttendStatusSelect(discord.ui.Select):
             await interaction.response.send_message("❌ メンバーが見つかりません。", ephemeral=True)
             return
         change = calc_point_change(entry["pt"], status)
-        new_pt = max(0, min(10, entry["pt"] + change))
+        new_pt = apply_point(entry["pt"], status)
         entry["pt"] = new_pt
         entry["records"][self.date] = status
         save_attend()
@@ -440,9 +589,9 @@ async def attend_record(interaction: discord.Interaction, date: str = ""):
 
 class BulkAttendSelect(discord.ui.Select):
     def __init__(self, uid: str, placeholder: str, date: str, parent_view, row: int):
-        self.uid = uid
+        self.uid         = uid
         self.parent_view = parent_view
-        self.date = date
+        self.date        = date
         options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
         super().__init__(placeholder=placeholder, options=options, row=row)
 
@@ -456,12 +605,12 @@ class BulkAttendView(discord.ui.View):
         super().__init__(timeout=600)
         self.record_date = record_date
         self.member_list = member_list
-        self.page = page
-        self.selections = selections if selections is not None else {}
+        self.page        = page
+        self.selections  = selections if selections is not None else {}
 
-        total_pages = (len(member_list) - 1) // 4 + 1
-        start = page * 4
-        end   = min(start + 4, len(member_list))
+        total_pages  = max(1, (len(member_list) - 1) // 4 + 1)
+        start        = page * 4
+        end          = min(start + 4, len(member_list))
         page_members = member_list[start:end]
 
         for i, (uid, name, pt) in enumerate(page_members):
@@ -499,7 +648,7 @@ class BulkAttendView(discord.ui.View):
                 if entry is None:
                     continue
                 change = calc_point_change(entry["pt"], status)
-                new_pt = max(0, min(10, entry["pt"] + change))
+                new_pt = apply_point(entry["pt"], status)
                 entry["pt"] = new_pt
                 entry["records"][record_date] = status
                 sign = f"+{change}" if change >= 0 else str(change)
@@ -513,12 +662,12 @@ class BulkAttendView(discord.ui.View):
         self.add_item(save_btn)
 
     def content(self) -> str:
-        total_pages = (len(self.member_list) - 1) // 4 + 1
+        total_pages = max(1, (len(self.member_list) - 1) // 4 + 1)
         return (
             f"📋 **{self.record_date}** の一括出席記録 "
             f"（{self.page + 1}/{total_pages}ページ）\n"
             f"選択済み: {len(self.selections)}人 ／ 全{len(self.member_list)}人\n"
-            f"ページを移動しながら全員選択して「✅ 保存する」を押してください："
+            f"各メンバーの出席状況を選んで「✅ 保存する」を押してください："
         )
 
 
@@ -529,10 +678,13 @@ async def attend_record_all(interaction: discord.Interaction, date: str = ""):
         return
     members = attend_data["members"]
     if not members:
-        await interaction.response.send_message("登録メンバーがいません。先に /attend_add_members_bulk でメンバーを登録してください。", ephemeral=True)
+        await interaction.response.send_message(
+            "登録メンバーがいません。先に /attend_add_members_bulk でメンバーを登録してください。",
+            ephemeral=True
+        )
         return
-    record_date  = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
-    member_list  = [(uid, entry["name"], entry["pt"]) for uid, entry in members.items()]
+    record_date = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
+    member_list = [(uid, entry["name"], entry["pt"]) for uid, entry in members.items()]
     view = BulkAttendView(record_date, member_list, page=0)
     await interaction.response.send_message(view.content(), view=view, ephemeral=True)
 
@@ -549,15 +701,8 @@ async def attend_status(interaction: discord.Interaction):
     sorted_members = sorted(members.items(), key=lambda x: x[1]["pt"])
     lines = ["**📊 出席ポイント一覧**\n"]
     for uid, entry in sorted_members:
-        pt = entry["pt"]
-        if pt <= 0:
-            badge = "🚨 退出対象"
-        elif pt <= 2:
-            badge = "⚠️ 第2警告"
-        elif pt <= 4:
-            badge = "❗ 第1警告"
-        else:
-            badge = "✅"
+        pt    = entry["pt"]
+        badge = get_badge(pt)
         lines.append(f"{badge} <@{uid}> **{entry['name']}** : **{pt}pt**")
 
     await interaction.response.send_message("\n".join(lines))
@@ -573,14 +718,9 @@ async def attend_warnings(interaction: discord.Interaction):
     warnings = []
     for uid, entry in sorted(members.items(), key=lambda x: x[1]["pt"]):
         pt = entry["pt"]
-        if pt <= 0:
-            badge = "🚨 退出対象"
-        elif pt <= 2:
-            badge = "⚠️ 第2警告"
-        elif pt <= 4:
-            badge = "❗ 第1警告"
-        else:
+        if pt > 4:
             continue
+        badge = get_badge(pt)
         warnings.append(f"{badge} <@{uid}> **{entry['name']}** : **{pt}pt**")
 
     if warnings:
@@ -601,15 +741,10 @@ async def attend_notify(interaction: discord.Interaction):
     warnings = []
     for uid, entry in members.items():
         pt = entry["pt"]
-        if pt <= 0:
-            label = "🚨 **退出対象**"
-        elif pt <= 2:
-            label = "⚠️ **第2警告**"
-        elif pt <= 4:
-            label = "❗ **第1警告**"
-        else:
+        if pt > 4:
             continue
-        warnings.append(f"{label} <@{uid}> **{entry['name']}** : **{pt}pt**")
+        badge = get_badge(pt)
+        warnings.append(f"{badge} <@{uid}> **{entry['name']}** : **{pt}pt**")
 
     msg = "📢 **出席ポイント警告通知**\n"
     msg += "\n".join(warnings) if warnings else "✅ 現在、警告対象のメンバーはいません。"
@@ -625,7 +760,7 @@ async def attend_notify(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="attend_set_pt", description="【村長権限用】メンバーのポイントをミス修正などで直接設定します")
-@discord.app_commands.describe(member="対象メンバー", pt="設定するポイント（0〜10）")
+@discord.app_commands.describe(member="対象メンバー", pt="設定するポイント（マイナスも可）")
 async def attend_set_pt(interaction: discord.Interaction, member: discord.Member, pt: int):
     if not await check_admin(interaction):
         return
@@ -633,11 +768,13 @@ async def attend_set_pt(interaction: discord.Interaction, member: discord.Member
     if uid not in attend_data["members"]:
         await interaction.response.send_message(f"❌ {member.display_name} は登録されていません。", ephemeral=True)
         return
-    new_pt = max(0, min(10, pt))
+    new_pt = min(10, pt)  # 上限10、下限なし（マイナスも可）
     attend_data["members"][uid]["pt"] = new_pt
     save_attend()
+    badge = get_badge(new_pt)
     await interaction.response.send_message(
-        f"✅ **{member.display_name}** のポイントを **{new_pt}pt** に設定しました。", ephemeral=True
+        f"✅ **{member.display_name}** のポイントを **{new_pt}pt** に設定しました。{badge}",
+        ephemeral=True
     )
 
 
