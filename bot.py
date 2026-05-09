@@ -4,6 +4,9 @@ import os
 from datetime import datetime
 import asyncpg
 import json
+import random
+import re
+import asyncio
 
 # ============================================================
 # トークン読み込み
@@ -26,7 +29,7 @@ intents.polls = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-db: asyncpg.Pool = None  # DBコネクションプール
+db: asyncpg.Pool = None
 
 # ============================================================
 # 管理者ロールチェック
@@ -90,7 +93,6 @@ async def init_db():
     global db
     db = await asyncpg.create_pool(DATABASE_URL)
     async with db.acquire() as conn:
-        # メンバーテーブル
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS members (
                 discord_id TEXT PRIMARY KEY,
@@ -98,7 +100,6 @@ async def init_db():
                 pt         INTEGER NOT NULL DEFAULT 10
             )
         """)
-        # 出席記録テーブル
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS records (
                 discord_id TEXT NOT NULL,
@@ -107,17 +108,15 @@ async def init_db():
                 PRIMARY KEY (discord_id, date)
             )
         """)
-        # Poll設定テーブル
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS poll_roles (
-                message_id TEXT NOT NULL,
-                answer_id  TEXT NOT NULL,
-                role_id    BIGINT NOT NULL,
+                message_id  TEXT NOT NULL,
+                answer_id   TEXT NOT NULL,
+                role_id     BIGINT NOT NULL,
                 assign_role BOOLEAN NOT NULL DEFAULT TRUE,
                 PRIMARY KEY (message_id, answer_id)
             )
         """)
-        # Bot設定テーブル
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS bot_config (
                 key   TEXT PRIMARY KEY,
@@ -126,15 +125,14 @@ async def init_db():
         """)
     print("✅ DB初期化完了")
 
-
 # ============================================================
 # DBヘルパー関数
 # ============================================================
-async def db_get_members() -> list[asyncpg.Record]:
+async def db_get_members():
     async with db.acquire() as conn:
         return await conn.fetch("SELECT * FROM members ORDER BY pt ASC")
 
-async def db_get_member(discord_id: str) -> asyncpg.Record | None:
+async def db_get_member(discord_id: str):
     async with db.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM members WHERE discord_id=$1", discord_id)
 
@@ -151,11 +149,11 @@ async def db_delete_member(discord_id: str):
         await conn.execute("DELETE FROM members WHERE discord_id=$1", discord_id)
         await conn.execute("DELETE FROM records WHERE discord_id=$1", discord_id)
 
-async def db_get_records(discord_id: str) -> list[asyncpg.Record]:
+async def db_get_records(discord_id: str):
     async with db.acquire() as conn:
         return await conn.fetch("SELECT * FROM records WHERE discord_id=$1 ORDER BY date DESC", discord_id)
 
-async def db_get_record_on_date(discord_id: str, date: str) -> asyncpg.Record | None:
+async def db_get_record_on_date(discord_id: str, date: str):
     async with db.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM records WHERE discord_id=$1 AND date=$2", discord_id, date)
 
@@ -167,7 +165,7 @@ async def db_upsert_record(discord_id: str, date: str, status: str):
             ON CONFLICT (discord_id, date) DO UPDATE SET status=$3
         """, discord_id, date, status)
 
-async def db_get_poll_roles(message_id: str) -> list[asyncpg.Record]:
+async def db_get_poll_roles(message_id: str):
     async with db.acquire() as conn:
         return await conn.fetch("SELECT * FROM poll_roles WHERE message_id=$1", message_id)
 
@@ -183,7 +181,7 @@ async def db_delete_poll_roles(message_id: str):
     async with db.acquire() as conn:
         await conn.execute("DELETE FROM poll_roles WHERE message_id=$1", message_id)
 
-async def db_get_config(key: str) -> str | None:
+async def db_get_config(key: str):
     async with db.acquire() as conn:
         row = await conn.fetchrow("SELECT value FROM bot_config WHERE key=$1", key)
         return row["value"] if row else None
@@ -196,7 +194,6 @@ async def db_set_config(key: str, value):
             ON CONFLICT (key) DO UPDATE SET value=$2
         """, key, val)
 
-
 # ============================================================
 # 起動
 # ============================================================
@@ -204,20 +201,15 @@ async def db_set_config(key: str, value):
 async def on_ready():
     print(f"✅ ログイン成功: {bot.user} (ID: {bot.user.id})")
     await init_db()
-
-    # 登録済みメンバーの名前をDiscordの最新表示名に同期
-    members = await db_get_members()
-    for row in members:
-        for guild in bot.guilds:
+    for guild in bot.guilds:
+        for row in await db_get_members():
             member = guild.get_member(int(row["discord_id"]))
             if member and member.display_name != row["name"]:
                 print(f"🔄 名前同期: {row['name']} → {member.display_name}")
                 await db_upsert_member(row["discord_id"], member.display_name, row["pt"])
-
     weekly_reminder.start()
     await bot.tree.sync()
     print("✅ スラッシュコマンド同期完了")
-
 
 # ============================================================
 # 毎週定期リマインド
@@ -225,23 +217,19 @@ async def on_ready():
 @tasks.loop(minutes=1)
 async def weekly_reminder():
     cfg_str = await db_get_config("reminder")
-    if not cfg_str:
-        return
+    if not cfg_str: return
     cfg = json.loads(cfg_str)
-    if not cfg.get("enabled"):
-        return
+    if not cfg.get("enabled"): return
     now = datetime.now()
     if now.weekday() != cfg.get("weekday", 0): return
     if now.hour    != cfg.get("hour", 20):     return
     if now.minute  != cfg.get("minute", 0):    return
     ch_id = cfg.get("channel_id")
-    if not ch_id:
-        return
+    if not ch_id: return
     ch = bot.get_channel(ch_id)
     if ch:
         await ch.send(cfg.get("message", "📢 活動日です！Pollに投票して出席を記録してください！"))
         print("✅ 週次リマインド送信完了")
-
 
 # ============================================================
 # 新規メンバー歓迎
@@ -249,19 +237,15 @@ async def weekly_reminder():
 @bot.event
 async def on_member_join(member: discord.Member):
     cfg_str = await db_get_config("welcome")
-    if not cfg_str:
-        return
+    if not cfg_str: return
     cfg = json.loads(cfg_str)
-    if not cfg.get("enabled"):
-        return
+    if not cfg.get("enabled"): return
     ch_id = cfg.get("channel_id")
-    if not ch_id:
-        return
+    if not ch_id: return
     ch = bot.get_channel(ch_id)
     if ch:
         msg = cfg.get("message", "🎉 {mention} さん、ようこそ！").replace("{mention}", member.mention)
         await ch.send(msg)
-
 
 # ============================================================
 # ボイスチャンネル入退室ロール
@@ -269,28 +253,19 @@ async def on_member_join(member: discord.Member):
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     cfg_str = await db_get_config("voice_role")
-    if not cfg_str:
-        return
+    if not cfg_str: return
     cfg = json.loads(cfg_str)
-    if not cfg.get("enabled"):
-        return
+    if not cfg.get("enabled"): return
     role_id = cfg.get("role_id")
-    if not role_id:
-        return
+    if not role_id: return
     role = member.guild.get_role(role_id)
-    if not role:
-        return
+    if not role: return
     if before.channel is None and after.channel is not None:
-        try:
-            await member.add_roles(role, reason="VC入室")
-        except discord.Forbidden:
-            pass
+        try: await member.add_roles(role, reason="VC入室")
+        except discord.Forbidden: pass
     elif before.channel is not None and after.channel is None:
-        try:
-            await member.remove_roles(role, reason="VC退室")
-        except discord.Forbidden:
-            pass
-
+        try: await member.remove_roles(role, reason="VC退室")
+        except discord.Forbidden: pass
 
 # ============================================================
 # /help
@@ -307,7 +282,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/attend_remove_member", value="メンバーを出席管理から削除します。", inline=False)
     embed.add_field(name="/attend_record", value="メンバーを1人選んで出席状況を記録します。", inline=False)
     embed.add_field(name="/attend_record_all", value="全メンバーの出席を一括記録します。", inline=False)
-    embed.add_field(name="/attend_set_pt", value="ポイントを直接修正します（ミス修正用）。マイナスも可。", inline=False)
+    embed.add_field(name="/attend_set_pt", value="ポイントを直接修正します（ミス修正用・マイナスも可）。", inline=False)
     embed.add_field(name="/attend_set_channel", value="警告通知チャンネルを設定します。", inline=False)
     embed.add_field(name="/attend_notify", value="警告対象メンバーを通知チャンネルに送信します。", inline=False)
     embed.add_field(name="/attend_kick_targets", value="退出対象（0pt以下）を表示してキックを確認します。", inline=False)
@@ -316,6 +291,14 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/attend_warnings", value="警告対象（4pt以下）のメンバーだけを表示します。", inline=False)
     embed.add_field(name="/attend_history", value="指定メンバーの出席履歴（直近20件）を表示します。", inline=False)
     embed.add_field(name="/attend_stats", value="メンバーの出席率・欠席回数を集計して表示します。", inline=False)
+    embed.add_field(name="\u200b", value="**🎮 楽しいコマンド**", inline=False)
+    embed.add_field(name="/roll 2d6", value="ダイスロール！クリティカル・ファンブル演出あり。", inline=False)
+    embed.add_field(name="/omikuji", value="おみくじを引きます！大吉〜大凶。", inline=False)
+    embed.add_field(name="/janken", value="Botとじゃんけん対決！", inline=False)
+    embed.add_field(name="/choose A B C", value="選択肢からランダムに1つ選びます。", inline=False)
+    embed.add_field(name="/timer 60", value="カウントダウンタイマー（最大300秒）。終了時にあなたをメンション。", inline=False)
+    embed.add_field(name="/meigen", value="村の名言をランダム表示。", inline=False)
+    embed.add_field(name="/meigen_add 【村長権限用】", value="オリジナル名言を追加します。", inline=False)
     embed.add_field(name="\u200b", value="**⚙️ Bot設定【村長権限用】**", inline=False)
     embed.add_field(name="/config_reminder", value="定期リマインドの曜日・時間・メッセージを設定します。", inline=False)
     embed.add_field(name="/config_welcome", value="新規メンバー歓迎メッセージを設定します。", inline=False)
@@ -330,11 +313,9 @@ async def help_command(interaction: discord.Interaction):
     ), inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 # ============================================================
 # POLL ROLE 機能
 # ============================================================
-
 @bot.tree.command(name="setup_poll_role", description="【村長権限用】Pollの選択肢にロールを紐付けます（ロールは自動作成）")
 @discord.app_commands.describe(
     message_id="PollのメッセージID", answer_text="投票選択肢のテキスト（完全一致）",
@@ -349,7 +330,6 @@ async def setup_poll_role(interaction: discord.Interaction, message_id: str, ans
         await interaction.followup.send("❌ メッセージが見つかりません。", ephemeral=True); return
     if msg.poll is None:
         await interaction.followup.send("❌ そのメッセージにはPollがありません。", ephemeral=True); return
-
     answer_id = None
     for ans in msg.poll.answers:
         if ans.text == answer_text:
@@ -357,16 +337,14 @@ async def setup_poll_role(interaction: discord.Interaction, message_id: str, ans
     if answer_id is None:
         choices = "\n".join(f"• {a.text}" for a in msg.poll.answers)
         await interaction.followup.send(f"❌ 選択肢が見つかりません：\n{choices}", ephemeral=True); return
-
     final_role_name = role_name.strip() if role_name.strip() else answer_text
     role = discord.utils.get(interaction.guild.roles, name=final_role_name)
     if role is None:
-        role = await interaction.guild.create_role(name=final_role_name, mentionable=True, reason=f"Poll投票ロール自動作成")
+        role = await interaction.guild.create_role(name=final_role_name, mentionable=True, reason="Poll投票ロール自動作成")
         created_msg = f"✨ ロール **{final_role_name}** を新規作成しました"
     else:
         if not role.mentionable: await role.edit(mentionable=True)
         created_msg = f"ℹ️ 既存ロール **{final_role_name}** を使用します"
-
     await db_upsert_poll_role(message_id, answer_id, role.id, assign_role)
     assign_str = "✅ ロール付与: あり" if assign_role else "⛔ ロール付与: なし"
     await interaction.followup.send(f"{created_msg}\n「{answer_text}」→ **{final_role_name}** を紐付けました\n{assign_str}", ephemeral=True)
@@ -379,7 +357,6 @@ async def list_poll_roles(interaction: discord.Interaction):
     if not rows:
         await interaction.response.send_message("登録されているPollロール紐付けはありません。", ephemeral=True); return
     lines = []
-    from itertools import groupby
     msg_ids = {}
     for row in rows:
         msg_ids.setdefault(row["message_id"], []).append(row)
@@ -454,11 +431,9 @@ async def on_poll_finish(poll: discord.Poll):
             await poll.channel.send(f"📢 Pollが終了しました。以下のロールを削除しました：{', '.join(f'**{r}**' for r in deleted_roles)}")
         except Exception: pass
 
-
 # ============================================================
 # 出席管理機能
 # ============================================================
-
 @bot.tree.command(name="attend_set_channel", description="【村長権限用】出席管理の通知チャンネルを現在のチャンネルに設定します")
 async def attend_set_channel(interaction: discord.Interaction):
     if not await check_admin(interaction): return
@@ -471,8 +446,7 @@ async def attend_set_channel(interaction: discord.Interaction):
 async def attend_add_member(interaction: discord.Interaction, member: discord.Member, initial_pt: int = 10):
     if not await check_admin(interaction): return
     uid = str(member.id)
-    existing = await db_get_member(uid)
-    if existing:
+    if await db_get_member(uid):
         await interaction.response.send_message(f"⚠️ {member.display_name} は既に登録されています。", ephemeral=True); return
     await db_upsert_member(uid, member.display_name, initial_pt)
     await interaction.response.send_message(f"✅ {member.display_name} を追加しました（{initial_pt}pt）", ephemeral=True)
@@ -513,37 +487,31 @@ async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: 
 async def attend_remove_member(interaction: discord.Interaction, member: discord.Member):
     if not await check_admin(interaction): return
     uid = str(member.id)
-    existing = await db_get_member(uid)
-    if not existing:
+    if not await db_get_member(uid):
         await interaction.response.send_message(f"❌ {member.display_name} は登録されていません。", ephemeral=True); return
     await db_delete_member(uid)
     await interaction.response.send_message(f"🗑️ {member.display_name} を削除しました。", ephemeral=True)
 
 
-# ── 個別出席記録 ──────────────────────────────────────────────
-
 class AttendStatusSelect(discord.ui.Select):
     def __init__(self, uid: str, name: str, date: str, current_pt: int):
-        self.uid        = uid
-        self.date       = date
+        self.uid = uid
+        self.date = date
         self.current_pt = current_pt
         options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
         super().__init__(placeholder=f"{name} の出席状況を選択", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # 二重登録チェック
-        existing_record = await db_get_record_on_date(self.uid, self.date)
-        if existing_record:
+        existing = await db_get_record_on_date(self.uid, self.date)
+        if existing:
             await interaction.response.send_message(
-                f"⚠️ **{self.date}** の記録は既に登録されています（{existing_record['status']}）。\nミス修正は `/attend_set_pt` を使ってください。",
+                f"⚠️ **{self.date}** の記録は既に登録されています（{existing['status']}）。\nミス修正は `/attend_set_pt` を使ってください。",
                 ephemeral=True
             ); return
-
         status = self.values[0]
-        row    = await db_get_member(self.uid)
+        row = await db_get_member(self.uid)
         if row is None:
             await interaction.response.send_message("❌ メンバーが見つかりません。", ephemeral=True); return
-
         change = calc_point_change(row["pt"], status)
         new_pt = apply_point(row["pt"], status)
         await db_upsert_member(self.uid, row["name"], new_pt)
@@ -591,11 +559,9 @@ async def attend_record(interaction: discord.Interaction, date: str = ""):
     await interaction.response.send_message(f"📋 出席記録（{record_date}）\nメンバーを選んでください：", view=view, ephemeral=True)
 
 
-# ── 一括出席記録 ──────────────────────────────────────────────
-
 class BulkAttendSelect(discord.ui.Select):
     def __init__(self, uid: str, placeholder: str, parent_view, row_num: int):
-        self.uid         = uid
+        self.uid = uid
         self.parent_view = parent_view
         options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
         super().__init__(placeholder=placeholder, options=options, row=row_num)
@@ -610,12 +576,12 @@ class BulkAttendView(discord.ui.View):
         super().__init__(timeout=600)
         self.record_date = record_date
         self.member_list = member_list
-        self.page        = page
-        self.selections  = selections if selections is not None else {}
+        self.page = page
+        self.selections = selections if selections is not None else {}
 
-        total_pages  = max(1, (len(member_list) - 1) // 4 + 1)
-        start        = page * 4
-        end          = min(start + 4, len(member_list))
+        total_pages = max(1, (len(member_list) - 1) // 4 + 1)
+        start = page * 4
+        end   = min(start + 4, len(member_list))
 
         for i, (uid, name, pt) in enumerate(member_list[start:end]):
             already = self.selections.get(uid, "")
@@ -647,11 +613,9 @@ class BulkAttendView(discord.ui.View):
             for uid, status in self.selections.items():
                 row = await db_get_member(uid)
                 if row is None: continue
-                # 二重登録チェック
                 existing = await db_get_record_on_date(uid, record_date)
                 if existing:
-                    skipped.append(f"{row['name']}（登録済み）")
-                    continue
+                    skipped.append(f"{row['name']}（登録済み）"); continue
                 change = calc_point_change(row["pt"], status)
                 new_pt = apply_point(row["pt"], status)
                 await db_upsert_member(uid, row["name"], new_pt)
@@ -688,8 +652,6 @@ async def attend_record_all(interaction: discord.Interaction, date: str = ""):
     await interaction.response.send_message(view.content(), view=view, ephemeral=True)
 
 
-# ── ポイント確認・通知 ────────────────────────────────────────
-
 @bot.tree.command(name="attend_status", description="出席ポイント一覧を表示します")
 async def attend_status(interaction: discord.Interaction):
     members = await db_get_members()
@@ -703,7 +665,7 @@ async def attend_status(interaction: discord.Interaction):
 
 @bot.tree.command(name="attend_warnings", description="警告対象のメンバーだけを表示します")
 async def attend_warnings(interaction: discord.Interaction):
-    members = await db_get_members()
+    members  = await db_get_members()
     warnings = [
         f"{get_badge(row['pt'])} <@{row['discord_id']}> **{row['name']}** : **{row['pt']}pt**"
         for row in members if row["pt"] <= 4
@@ -715,9 +677,9 @@ async def attend_warnings(interaction: discord.Interaction):
 @bot.tree.command(name="attend_notify", description="【村長権限用】警告対象メンバーを通知チャンネルに送信します")
 async def attend_notify(interaction: discord.Interaction):
     if not await check_admin(interaction): return
-    members  = await db_get_members()
+    members   = await db_get_members()
     ch_id_str = await db_get_config("notify_channel_id")
-    warnings = [
+    warnings  = [
         f"{get_badge(row['pt'])} <@{row['discord_id']}> **{row['name']}** : **{row['pt']}pt**"
         for row in members if row["pt"] <= 4
     ]
@@ -750,8 +712,8 @@ async def attend_set_pt(interaction: discord.Interaction, member: discord.Member
 @bot.tree.command(name="attend_history", description="メンバーの出席履歴を表示します")
 @discord.app_commands.describe(member="対象メンバー")
 async def attend_history(interaction: discord.Interaction, member: discord.Member):
-    uid  = str(member.id)
-    row  = await db_get_member(uid)
+    uid     = str(member.id)
+    row     = await db_get_member(uid)
     if row is None:
         await interaction.response.send_message(f"❌ {member.display_name} は登録されていません。", ephemeral=True); return
     records = await db_get_records(uid)
@@ -788,7 +750,6 @@ async def attend_kick_targets(interaction: discord.Interaction):
     targets = [(row["discord_id"], row["name"], row["pt"]) for row in members if row["pt"] <= 0]
     if not targets:
         await interaction.response.send_message("✅ 現在、退出対象のメンバーはいません。", ephemeral=True); return
-
     lines = ["**🚨 退出対象メンバー（0pt以下）**\n"]
     for uid, name, pt in targets:
         lines.append(f"• <@{uid}> **{name}** : **{pt}pt**")
@@ -819,11 +780,9 @@ async def attend_kick_targets(interaction: discord.Interaction):
 
     await interaction.response.send_message("\n".join(lines), view=KickView(), ephemeral=True)
 
-
 # ============================================================
 # Bot設定コマンド
 # ============================================================
-
 @bot.tree.command(name="config_reminder", description="【村長権限用】定期リマインドを設定します")
 @discord.app_commands.describe(enabled="リマインドを有効にするか", weekday="曜日（0=月〜6=日）", hour="時間（0〜23）", minute="分（0〜59）", message="送信するメッセージ（省略可）")
 async def config_reminder(interaction: discord.Interaction, enabled: bool, weekday: int, hour: int, minute: int, message: str = ""):
@@ -863,6 +822,205 @@ async def config_voice_role(interaction: discord.Interaction, enabled: bool, rol
     await db_set_config("voice_role", cfg)
     status = "✅ 有効" if enabled else "⛔ 無効"
     await interaction.response.send_message(f"VC入室ロール設定完了！\n状態: {status}\nロール: **{role.name if role else '未設定'}**", ephemeral=True)
+
+
+# ============================================================
+# 🎲 ダイスロール
+# ============================================================
+@bot.tree.command(name="roll", description="ダイスを振ります。例: /roll 2d6 → 6面ダイスを2個")
+@discord.app_commands.describe(dice="ダイスの形式（例: 2d6, 1d20, 3d8）")
+async def roll_dice(interaction: discord.Interaction, dice: str):
+    match = re.fullmatch(r"(\d+)d(\d+)", dice.strip().lower())
+    if not match:
+        await interaction.response.send_message("❌ 形式が正しくありません。例: `2d6`、`1d20`", ephemeral=True); return
+    count = int(match.group(1))
+    sides = int(match.group(2))
+    if count < 1 or count > 100:
+        await interaction.response.send_message("❌ ダイスの数は1〜100にしてください。", ephemeral=True); return
+    if sides < 2 or sides > 1000:
+        await interaction.response.send_message("❌ 面数は2〜1000にしてください。", ephemeral=True); return
+    results = [random.randint(1, sides) for _ in range(count)]
+    total   = sum(results)
+    max_val = sides * count
+    min_val = count
+    if total == max_val:   comment = "🌟 **クリティカル！！** 最高の出目！"
+    elif total == min_val: comment = "💀 **ファンブル...** 最低の出目..."
+    elif total >= max_val * 0.8: comment = "✨ かなりいい出目！"
+    elif total <= max_val * 0.2: comment = "😰 かなり低い出目..."
+    else: comment = "🎲 普通の出目。"
+    dice_str = " + ".join(str(r) for r in results) if count > 1 else str(results[0])
+    await interaction.response.send_message(
+        f"🎲 **{interaction.user.display_name}** が `{dice}` を振りました！\n"
+        f"出目: {dice_str}\n合計: **{total}** / {max_val}\n{comment}"
+    )
+
+
+# ============================================================
+# 🎋 おみくじ
+# ============================================================
+OMIKUJI_LIST = [
+    ("大吉", "🌟", "最高の運勢です！何事も積極的に挑戦しましょう！村の活動も絶好調になるでしょう！"),
+    ("中吉", "✨", "良い運勢です。努力が実を結ぶ時期。今日も元気に活動しましょう！"),
+    ("小吉", "🌸", "まずまずの運勢。地道な努力が大切。村人との絆を大切に！"),
+    ("吉",   "🍀", "平穏な一日になりそう。焦らずゆっくり進みましょう。"),
+    ("末吉", "🌿", "運勢は後から上向きに。今は準備期間と考えて！"),
+    ("凶",   "⚠️", "少し注意が必要な日。慎重に行動しましょう。無断欠席には気をつけて！"),
+    ("大凶", "💀", "今日は慎重に！でも大丈夫、明日はきっと良くなります。出席だけは忘れずに！"),
+]
+OMIKUJI_WEIGHTS = [10, 20, 20, 25, 15, 7, 3]
+
+@bot.tree.command(name="omikuji", description="おみくじを引きます！今日の運勢は？")
+async def omikuji(interaction: discord.Interaction):
+    result, emoji, message = random.choices(OMIKUJI_LIST, weights=OMIKUJI_WEIGHTS, k=1)[0]
+    color_map = {
+        "大吉": 0xFFD700, "中吉": 0xFF69B4, "小吉": 0x98FB98,
+        "吉": 0x87CEEB, "末吉": 0xDDA0DD, "凶": 0xFFA500, "大凶": 0xFF4500
+    }
+    embed = discord.Embed(title=f"{emoji} {result}", description=message, color=color_map.get(result, 0x534AB7))
+    embed.set_author(name=f"{interaction.user.display_name} のおみくじ結果")
+    embed.set_footer(text="また明日も引いてみてね！")
+    await interaction.response.send_message(embed=embed)
+
+
+# ============================================================
+# ✊ じゃんけん
+# ============================================================
+JANKEN_HANDS = {"グー": "✊", "チョキ": "✌️", "パー": "🖐️"}
+JANKEN_WINS  = {"グー": "チョキ", "チョキ": "パー", "パー": "グー"}
+
+class JankenView(discord.ui.View):
+    def __init__(self, challenger: discord.Member):
+        super().__init__(timeout=30)
+        self.challenger = challenger
+
+    async def resolve(self, interaction: discord.Interaction, user_hand: str):
+        bot_hand   = random.choice(list(JANKEN_HANDS.keys()))
+        user_emoji = JANKEN_HANDS[user_hand]
+        bot_emoji  = JANKEN_HANDS[bot_hand]
+        if user_hand == bot_hand:
+            result = "🤝 **あいこ！** もう一度！"; color = 0x87CEEB
+        elif JANKEN_WINS[user_hand] == bot_hand:
+            result = "🎉 **あなたの勝ち！** やったね！"; color = 0x00C851
+        else:
+            result = "😈 **Botの勝ち！** 残念！"; color = 0xFF4444
+        embed = discord.Embed(title="✊ じゃんけん結果", color=color)
+        embed.add_field(name=f"{interaction.user.display_name}", value=f"{user_emoji} {user_hand}", inline=True)
+        embed.add_field(name="Bot", value=f"{bot_emoji} {bot_hand}", inline=True)
+        embed.add_field(name="結果", value=result, inline=False)
+        self.clear_items()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="✊ グー", style=discord.ButtonStyle.primary)
+    async def goo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenger.id:
+            await interaction.response.send_message("他の人のじゃんけんです！", ephemeral=True); return
+        await self.resolve(interaction, "グー")
+
+    @discord.ui.button(label="✌️ チョキ", style=discord.ButtonStyle.primary)
+    async def choki(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenger.id:
+            await interaction.response.send_message("他の人のじゃんけんです！", ephemeral=True); return
+        await self.resolve(interaction, "チョキ")
+
+    @discord.ui.button(label="🖐️ パー", style=discord.ButtonStyle.primary)
+    async def paa(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenger.id:
+            await interaction.response.send_message("他の人のじゃんけんです！", ephemeral=True); return
+        await self.resolve(interaction, "パー")
+
+
+@bot.tree.command(name="janken", description="Botとじゃんけんで勝負！")
+async def janken(interaction: discord.Interaction):
+    embed = discord.Embed(title="✊ じゃんけん！", description="グー・チョキ・パーを選んでください！", color=0x534AB7)
+    await interaction.response.send_message(embed=embed, view=JankenView(interaction.user))
+
+
+# ============================================================
+# 🎯 ランダム選択
+# ============================================================
+@bot.tree.command(name="choose", description="選択肢からランダムに1つ選びます。例: /choose ラーメン カレー 寿司")
+@discord.app_commands.describe(choices="スペース区切りで選択肢を入力（例: A B C）")
+async def choose(interaction: discord.Interaction, choices: str):
+    items = [c.strip() for c in choices.split() if c.strip()]
+    if len(items) < 2:
+        await interaction.response.send_message("❌ 選択肢を2つ以上スペースで区切って入力してください。", ephemeral=True); return
+    if len(items) > 20:
+        await interaction.response.send_message("❌ 選択肢は20個までです。", ephemeral=True); return
+    chosen = random.choice(items)
+    embed  = discord.Embed(title="🎯 ランダム選択", color=0x534AB7)
+    embed.add_field(name="選択肢", value=" / ".join(items), inline=False)
+    embed.add_field(name="選ばれたのは...", value=f"# **{chosen}** 🎉", inline=False)
+    embed.set_footer(text=f"選んだ人: {interaction.user.display_name}")
+    await interaction.response.send_message(embed=embed)
+
+
+# ============================================================
+# ⏱️ カウントダウンタイマー
+# ============================================================
+@bot.tree.command(name="timer", description="カウントダウンタイマーを開始します")
+@discord.app_commands.describe(seconds="秒数（最大300秒）", message="終了時のメッセージ（省略可）")
+async def timer(interaction: discord.Interaction, seconds: int, message: str = ""):
+    if seconds < 1 or seconds > 300:
+        await interaction.response.send_message("❌ 秒数は1〜300で指定してください。", ephemeral=True); return
+    end_msg = message if message else "時間です！"
+    embed   = discord.Embed(
+        title="⏱️ タイマースタート！",
+        description=f"**{seconds}秒**後に通知します\n終了メッセージ: {end_msg}",
+        color=0x534AB7
+    )
+    embed.set_footer(text=f"開始: {interaction.user.display_name}")
+    await interaction.response.send_message(embed=embed)
+    await asyncio.sleep(seconds)
+    finish_embed = discord.Embed(
+        title="⏰ タイマー終了！",
+        description=f"⏱️ **{seconds}秒**が経過しました！\n\n{end_msg}",
+        color=0xFF4444
+    )
+    finish_embed.set_footer(text=f"セットした人: {interaction.user.display_name}")
+    await interaction.followup.send(content=interaction.user.mention, embed=finish_embed)
+
+
+# ============================================================
+# 💬 村の名言Bot
+# ============================================================
+DEFAULT_MEIGEN = [
+    "「出席は義務ではなく、愛情だ。」― 村の古老",
+    "「無断欠席は村の心を傷つける。」― 村長語録",
+    "「ポイントは信頼の証。」― 村の憲法第一条",
+    "「今日の出席が、明日の村を作る。」― 初代村長",
+    "「遅刻するくらいなら、一言声をかけよ。」― 村の教え",
+]
+
+@bot.tree.command(name="meigen", description="村の名言をランダムに表示します")
+async def meigen(interaction: discord.Interaction):
+    cfg_str  = await db_get_config("meigen_list")
+    all_list = json.loads(cfg_str) if cfg_str else []
+    combined = DEFAULT_MEIGEN + all_list
+    quote    = random.choice(combined)
+    embed    = discord.Embed(title="💬 村の名言", description=f"*{quote}*", color=0xF0A500)
+    embed.set_footer(text="/meigen_add で名言を追加できます（村長権限用）")
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="meigen_add", description="【村長権限用】村の名言を追加します")
+@discord.app_commands.describe(quote="追加する名言（作者も書くと味が出ます）")
+async def meigen_add(interaction: discord.Interaction, quote: str):
+    if not await check_admin(interaction): return
+    cfg_str  = await db_get_config("meigen_list")
+    all_list = json.loads(cfg_str) if cfg_str else []
+    all_list.append(quote)
+    await db_set_config("meigen_list", all_list)
+    await interaction.response.send_message(f"✅ 名言を追加しました！\n*{quote}*", ephemeral=True)
+
+
+@bot.tree.command(name="meigen_list", description="登録されている村の名言一覧を表示します")
+async def meigen_list_cmd(interaction: discord.Interaction):
+    cfg_str  = await db_get_config("meigen_list")
+    all_list = json.loads(cfg_str) if cfg_str else []
+    if not all_list:
+        await interaction.response.send_message("まだオリジナル名言は登録されていません。`/meigen_add` で追加してください！", ephemeral=True); return
+    lines = [f"{i+1}. *{q}*" for i, q in enumerate(all_list)]
+    await interaction.response.send_message("**💬 登録済み名言一覧**\n\n" + "\n".join(lines), ephemeral=True)
 
 
 # ============================================================
