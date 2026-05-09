@@ -503,105 +503,91 @@ async def attend_history(interaction: discord.Interaction, member: discord.Membe
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 class BulkAttendView(discord.ui.View):
-    def __init__(self, record_date: str, member_list: list, page: int = 0):
+    def __init__(self, record_date: str, member_list: list, page: int = 0, selections: dict = None):
         super().__init__(timeout=600)
         self.record_date = record_date
-        self.member_list = member_list  # [(uid, name, pt), ...]
+        self.member_list = member_list
         self.page = page
-        self.selections = {}
+        self.selections = selections or {}
 
-        # 1ページ4人ずつ表示（ボタン用に row=4 を残す）
         start = page * 4
         end = min(start + 4, len(member_list))
         page_members = member_list[start:end]
+        total_pages = (len(member_list) - 1) // 4 + 1
 
         for i, (uid, name, pt) in enumerate(page_members):
-            self.add_item(BulkAttendSelect(uid, name, pt, record_date, self, row=i))
+            already = self.selections.get(uid, "")
+            placeholder = f"{name}（{pt}pt）" + (f" ✅{already}" if already else "")
+            self.add_item(BulkAttendSelect(uid, placeholder[:100], record_date, self, row=i))
 
-        # 前へ・次へボタン
-        total_pages = (len(member_list) - 1) // 4 + 1
+        # ナビゲーションボタン
         if page > 0:
-            self.add_item(PrevPageButton(record_date, member_list, page, row=4))
+            prev_btn = discord.ui.Button(label="← 前へ", style=discord.ButtonStyle.secondary, row=4)
+            async def prev_cb(interaction: discord.Interaction, p=page):
+                new_view = BulkAttendView(record_date, member_list, p - 1, self.selections)
+                await interaction.response.edit_message(
+                    content=self._content(p - 1, total_pages),
+                    view=new_view
+                )
+            prev_btn.callback = prev_cb
+            self.add_item(prev_btn)
+
         if end < len(member_list):
-            self.add_item(NextPageButton(record_date, member_list, page, row=4))
-        if page == total_pages - 1 or end >= len(member_list):
-            self.add_item(SaveAllButton(self, row=4))
+            next_btn = discord.ui.Button(label="次へ →", style=discord.ButtonStyle.primary, row=4)
+            async def next_cb(interaction: discord.Interaction, p=page):
+                new_view = BulkAttendView(record_date, member_list, p + 1, self.selections)
+                await interaction.response.edit_message(
+                    content=self._content(p + 1, total_pages),
+                    view=new_view
+                )
+            next_btn.callback = next_cb
+            self.add_item(next_btn)
+
+        # 最終ページか全ページに保存ボタン
+        save_btn = discord.ui.Button(label="✅ 保存する", style=discord.ButtonStyle.success, row=4)
+        async def save_cb(interaction: discord.Interaction):
+            if not self.selections:
+                await interaction.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
+                return
+            results = []
+            for uid, status in self.selections.items():
+                entry = attend_data["members"].get(uid)
+                if entry is None:
+                    continue
+                change = calc_point_change(entry["pt"], status)
+                new_pt = max(0, min(10, entry["pt"] + change))
+                entry["pt"] = new_pt
+                entry["records"][record_date] = status
+                sign = f"+{change}" if change >= 0 else str(change)
+                results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
+            save_attend()
+            await interaction.response.send_message(
+                f"✅ **{record_date}** の記録が完了しました！\n\n" + "\n".join(results),
+                ephemeral=True
+            )
+        save_btn.callback = save_cb
+        self.add_item(save_btn)
+
+    def _content(self, page: int, total_pages: int) -> str:
+        selected_count = len(self.selections)
+        return (
+            f"📋 **{self.record_date}** の一括出席記録 "
+            f"（{page + 1}/{total_pages}ページ）\n"
+            f"選択済み: {selected_count}人 ／ 全{len(self.member_list)}人\n"
+            f"ページを移動しながら全員を選択して「✅ 保存する」を押してください："
+        )
 
 
 class BulkAttendSelect(discord.ui.Select):
-    def __init__(self, uid: str, name: str, current_pt: int, date: str, parent_view, row: int):
+    def __init__(self, uid: str, placeholder: str, date: str, parent_view, row: int):
         self.uid = uid
         self.parent_view = parent_view
         options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
-        # 既に選択済みならデフォルト表示
-        selected = parent_view.selections.get(uid)
-        placeholder = f"{name}（{current_pt}pt）" + (f" → {selected}" if selected else "")
-        super().__init__(placeholder=placeholder[:100], options=options, row=row)
+        super().__init__(placeholder=placeholder, options=options, row=row)
 
     async def callback(self, interaction: discord.Interaction):
         self.parent_view.selections[self.uid] = self.values[0]
         await interaction.response.defer()
-
-
-class SaveAllButton(discord.ui.Button):
-    def __init__(self, parent_view, row: int):
-        self.parent_view = parent_view
-        super().__init__(label="✅ 一括保存する", style=discord.ButtonStyle.success, row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.selections:
-            await interaction.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
-            return
-        results = []
-        for uid, status in self.parent_view.selections.items():
-            entry = attend_data["members"].get(uid)
-            if entry is None:
-                continue
-            change = calc_point_change(entry["pt"], status)
-            new_pt = max(0, min(10, entry["pt"] + change))
-            entry["pt"] = new_pt
-            entry["records"][self.parent_view.record_date] = status
-            sign = f"+{change}" if change >= 0 else str(change)
-            results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
-        save_attend()
-        await interaction.response.send_message(
-            f"✅ **{self.parent_view.record_date}** の一括記録が完了しました！\n\n" + "\n".join(results),
-            ephemeral=True
-        )
-
-
-class PrevPageButton(discord.ui.Button):
-    def __init__(self, record_date, member_list, page, row):
-        self.record_date = record_date
-        self.member_list = member_list
-        self.page = page
-        super().__init__(label="← 前へ", style=discord.ButtonStyle.secondary, row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        new_view = BulkAttendView(self.record_date, self.member_list, self.page - 1)
-        new_view.selections = self.view.selections
-        total_pages = (len(self.member_list) - 1) // 4 + 1
-        await interaction.response.edit_message(
-            content=f"📋 **{self.record_date}** の一括出席記録（{self.page}/{total_pages}ページ）\n各メンバーの状況を選んでください：",
-            view=new_view
-        )
-
-
-class NextPageButton(discord.ui.Button):
-    def __init__(self, record_date, member_list, page, row):
-        self.record_date = record_date
-        self.member_list = member_list
-        self.page = page
-        super().__init__(label="次へ →", style=discord.ButtonStyle.secondary, row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        new_view = BulkAttendView(self.record_date, self.member_list, self.page + 1)
-        new_view.selections = self.view.selections
-        total_pages = (len(self.member_list) - 1) // 4 + 1
-        await interaction.response.edit_message(
-            content=f"📋 **{self.record_date}** の一括出席記録（{self.page + 2}/{total_pages}ページ）\n各メンバーの状況を選んでください：",
-            view=new_view
-        )
 
 
 @bot.tree.command(name="attend_record_all", description="【村長権限用】全メンバーの出席を一括で記録します")
@@ -618,7 +604,7 @@ async def attend_record_all(interaction: discord.Interaction, date: str = ""):
     total_pages = (len(member_list) - 1) // 4 + 1
     view = BulkAttendView(record_date, member_list, page=0)
     await interaction.response.send_message(
-        f"📋 **{record_date}** の一括出席記録（1/{total_pages}ページ）\n各メンバーの状況を選んでください：",
+        view._content(0, total_pages),
         view=view,
         ephemeral=True
     )
