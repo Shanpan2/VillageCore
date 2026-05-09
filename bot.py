@@ -567,39 +567,65 @@ async def attend_record_all(interaction: discord.Interaction, date: str = ""):
         f"📋 **{record_date}** の一括出席記録\n全員の状況を選んで「✅ 一括保存する」を押してください：",
         view=view, ephemeral=True
     )
-@bot.tree.command(name="attend_add_members_bulk", description="【村長権限用】サーバーの全メンバーを一括で出席管理に追加します")
+@bot.tree.command(name="attend_add_members_bulk", description="【村長権限用】メンバーを選択して一括で出席管理に追加します")
 @discord.app_commands.describe(initial_pt="初期ポイント（デフォルト: 10）")
 async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: int = 10):
     if not await check_admin(interaction):
         return
-    await interaction.response.defer(ephemeral=True)
 
-    added = []
-    skipped = []
-
+    # 未登録メンバーだけ選択肢に出す
+    options = []
     for member in interaction.guild.members:
         if member.bot:
-            continue  # Botは除外
-        uid = str(member.id)
-        if uid in attend_data["members"]:
-            skipped.append(member.display_name)
             continue
-        attend_data["members"][uid] = {
-            "name": member.display_name,
-            "pt": max(0, min(10, initial_pt)),
-            "records": {}
-        }
-        added.append(member.display_name)
+        if str(member.id) in attend_data["members"]:
+            continue  # 登録済みは除外
+        options.append(discord.SelectOption(
+            label=member.display_name,
+            value=str(member.id),
+        ))
 
-    save_attend()
+    if not options:
+        await interaction.response.send_message("✅ 全員すでに登録済みです。", ephemeral=True)
+        return
 
-    msg = f"✅ **{len(added)}人** を追加しました！\n"
-    if added:
-        msg += "追加: " + "、".join(added) + "\n"
-    if skipped:
-        msg += f"⏭️ 既に登録済み（スキップ）: {len(skipped)}人"
+    # 25人までしか選択肢に出せないので制限
+    options = options[:25]
 
-    await interaction.followup.send(msg, ephemeral=True)
+    class MemberMultiSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(
+                placeholder="追加するメンバーを選択（複数可）",
+                options=options,
+                min_values=1,
+                max_values=len(options)
+            )
+
+        async def callback(self, interaction2: discord.Interaction):
+            added = []
+            for uid in self.values:
+                member = interaction2.guild.get_member(int(uid))
+                if member is None:
+                    continue
+                attend_data["members"][uid] = {
+                    "name": member.display_name,
+                    "pt": max(0, min(10, initial_pt)),
+                    "records": {}
+                }
+                added.append(member.display_name)
+            save_attend()
+            await interaction2.response.send_message(
+                f"✅ **{len(added)}人** を追加しました！\n" + "、".join(added),
+                ephemeral=True
+            )
+
+    view = discord.ui.View(timeout=120)
+    view.add_item(MemberMultiSelect())
+    await interaction.response.send_message(
+        "追加するメンバーを選んでください（複数選択可）：",
+        view=view,
+        ephemeral=True
+    )
     
 # ============================================================
 # 起動
