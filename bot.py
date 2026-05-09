@@ -7,10 +7,13 @@ from datetime import datetime
 # ============================================================
 # 設定読み込み
 # ============================================================
-with open("config.json", "r", encoding="utf-8") as f:
-    config = json.load(f)
+import os
 
-TOKEN = config["token"]
+TOKEN = os.environ.get("DISCORD_TOKEN")
+if not TOKEN:
+    with open("config.json", "r", encoding="utf-8") as f:
+        config = json.load(f)
+    TOKEN = config["token"]
 
 # ============================================================
 # データファイルパス
