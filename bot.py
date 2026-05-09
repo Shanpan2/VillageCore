@@ -319,30 +319,29 @@ async def list_poll_roles(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
-# ── Poll投票イベント（修正版）────────────────────────────────
+# ── Poll投票イベント ──────────────────────────────────────────
 @bot.event
-async def on_poll_vote_add(member: discord.Member, answer: discord.PollAnswer):
-    try:
-        # poll.message が取得できない場合があるため安全に処理
-        poll = answer.poll
-        message = await poll.channel.fetch_message(poll.message.id)
-        msg_id = str(message.id)
-    except Exception as e:
-        print(f"⚠️ Poll投票イベントエラー: {e}")
+async def on_raw_poll_vote_add(payload: discord.RawPollVoteActionEvent):
+    msg_id = str(payload.message_id)
+    ans_id = str(payload.answer_id)
+
+    info = poll_data.get(msg_id, {}).get(ans_id)
+    if info is None or not info.get("assign_role", True):
         return
 
-    ans_id = str(answer.id)
-    info   = poll_data.get(msg_id, {}).get(ans_id)
-    if info is None:
-        print(f"⚠️ msg_id={msg_id} ans_id={ans_id} が poll_data に見つかりません")
-        return
-    if not info.get("assign_role", True):
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
         return
 
-    role = member.guild.get_role(info["role_id"])
+    member = guild.get_member(payload.user_id)
+    if member is None or member.bot:
+        return
+
+    role = guild.get_role(info["role_id"])
     if role is None:
         print(f"⚠️ ロールID {info['role_id']} が見つかりません")
         return
+
     try:
         await member.add_roles(role, reason="Poll投票によるロール付与")
         print(f"✅ {member.display_name} に {role.name} を付与")
@@ -351,23 +350,26 @@ async def on_poll_vote_add(member: discord.Member, answer: discord.PollAnswer):
 
 
 @bot.event
-async def on_poll_vote_remove(member: discord.Member, answer: discord.PollAnswer):
-    try:
-        poll = answer.poll
-        message = await poll.channel.fetch_message(poll.message.id)
-        msg_id = str(message.id)
-    except Exception as e:
-        print(f"⚠️ Poll投票取り消しイベントエラー: {e}")
-        return
+async def on_raw_poll_vote_remove(payload: discord.RawPollVoteActionEvent):
+    msg_id = str(payload.message_id)
+    ans_id = str(payload.answer_id)
 
-    ans_id = str(answer.id)
-    info   = poll_data.get(msg_id, {}).get(ans_id)
+    info = poll_data.get(msg_id, {}).get(ans_id)
     if info is None or not info.get("assign_role", True):
         return
 
-    role = member.guild.get_role(info["role_id"])
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+
+    member = guild.get_member(payload.user_id)
+    if member is None or member.bot:
+        return
+
+    role = guild.get_role(info["role_id"])
     if role is None:
         return
+
     try:
         await member.remove_roles(role, reason="Poll投票取り消しによるロール削除")
         print(f"🗑️ {member.display_name} から {role.name} を削除")
