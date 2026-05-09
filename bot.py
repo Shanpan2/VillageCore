@@ -1,14 +1,12 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import json
 import os
 from datetime import datetime
 
 # ============================================================
-# 設定読み込み
+# トークン読み込み
 # ============================================================
-import os
-
 TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN環境変数が設定されていません")
@@ -35,7 +33,7 @@ def save_json(path: str, data):
 # ============================================================
 # インメモリデータ
 # ============================================================
-poll_data: dict = load_json(POLL_DATA_FILE, {})
+poll_data: dict   = load_json(POLL_DATA_FILE, {})
 attend_data: dict = load_json(ATTEND_DATA_FILE, {"members": {}, "notify_channel_id": None})
 
 # ============================================================
@@ -54,13 +52,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 ADMIN_ROLE_NAME = "村長権限用"
 
 def is_admin(interaction: discord.Interaction) -> bool:
-    """「村長権限用」ロールを持つか、またはサーバーオーナーかどうか確認"""
     if interaction.user.id == interaction.guild.owner_id:
         return True
     return any(role.name == ADMIN_ROLE_NAME for role in interaction.user.roles)
 
 async def check_admin(interaction: discord.Interaction) -> bool:
-    """管理者チェックして、違反なら拒否メッセージを送る。Trueなら続行可能。"""
     if not is_admin(interaction):
         await interaction.response.send_message(
             f"❌ このコマンドは **{ADMIN_ROLE_NAME}** ロールを持つ人のみ使用できます。",
@@ -94,6 +90,9 @@ ATTEND_STATUSES = [
     "投票して無断欠席",
 ]
 
+def save_attend():
+    save_json(ATTEND_DATA_FILE, attend_data)
+
 # ============================================================
 # 起動
 # ============================================================
@@ -110,7 +109,7 @@ async def on_ready():
 
 @bot.tree.command(
     name="setup_poll_role",
-    description="Pollの選択肢にロールを紐付けます（ロールは自動作成）"
+    description="【村長権限用】Pollの選択肢にロールを紐付けます（ロールは自動作成）"
 )
 @discord.app_commands.describe(
     message_id="PollのメッセージID",
@@ -267,11 +266,7 @@ async def on_poll_finish(poll: discord.Poll):
 #  出席管理機能
 # ============================================================
 
-def save_attend():
-    save_json(ATTEND_DATA_FILE, attend_data)
-
-
-@bot.tree.command(name="attend_set_channel", description="出席管理の通知チャンネルを現在のチャンネルに設定します")
+@bot.tree.command(name="attend_set_channel", description="【村長権限用】出席管理の通知チャンネルを現在のチャンネルに設定します")
 async def attend_set_channel(interaction: discord.Interaction):
     if not await check_admin(interaction):
         return
@@ -280,7 +275,7 @@ async def attend_set_channel(interaction: discord.Interaction):
     await interaction.response.send_message(f"✅ 通知チャンネルを {interaction.channel.mention} に設定しました。", ephemeral=True)
 
 
-@bot.tree.command(name="attend_add_member", description="出席管理にメンバーを追加します")
+@bot.tree.command(name="attend_add_member", description="【村長権限用】出席管理にメンバーを1人追加します")
 @discord.app_commands.describe(member="追加するメンバー", initial_pt="初期ポイント（デフォルト: 10）")
 async def attend_add_member(interaction: discord.Interaction, member: discord.Member, initial_pt: int = 10):
     if not await check_admin(interaction):
@@ -298,7 +293,66 @@ async def attend_add_member(interaction: discord.Interaction, member: discord.Me
     await interaction.response.send_message(f"✅ {member.display_name} を追加しました（{initial_pt}pt）", ephemeral=True)
 
 
-@bot.tree.command(name="attend_remove_member", description="出席管理からメンバーを削除します")
+@bot.tree.command(name="attend_add_members_bulk", description="【村長権限用】メンバーを選択して一括で出席管理に追加します")
+@discord.app_commands.describe(initial_pt="初期ポイント（デフォルト: 10）")
+async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: int = 10):
+    if not await check_admin(interaction):
+        return
+
+    options = []
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+        if str(member.id) in attend_data["members"]:
+            continue
+        options.append(discord.SelectOption(
+            label=member.display_name,
+            value=str(member.id),
+        ))
+
+    if not options:
+        await interaction.response.send_message("✅ 全員すでに登録済みです。", ephemeral=True)
+        return
+
+    options = options[:25]
+
+    class MemberMultiSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(
+                placeholder="追加するメンバーを選択（複数可）",
+                options=options,
+                min_values=1,
+                max_values=len(options)
+            )
+
+        async def callback(self, interaction2: discord.Interaction):
+            added = []
+            for uid in self.values:
+                member = interaction2.guild.get_member(int(uid))
+                if member is None:
+                    continue
+                attend_data["members"][uid] = {
+                    "name": member.display_name,
+                    "pt": max(0, min(10, initial_pt)),
+                    "records": {}
+                }
+                added.append(member.display_name)
+            save_attend()
+            await interaction2.response.send_message(
+                f"✅ **{len(added)}人** を追加しました！\n" + "、".join(added),
+                ephemeral=True
+            )
+
+    view = discord.ui.View(timeout=120)
+    view.add_item(MemberMultiSelect())
+    await interaction.response.send_message(
+        "追加するメンバーを選んでください（複数選択可）：",
+        view=view,
+        ephemeral=True
+    )
+
+
+@bot.tree.command(name="attend_remove_member", description="【村長権限用】出席管理からメンバーを削除します")
 @discord.app_commands.describe(member="削除するメンバー")
 async def attend_remove_member(interaction: discord.Interaction, member: discord.Member):
     if not await check_admin(interaction):
@@ -311,6 +365,8 @@ async def attend_remove_member(interaction: discord.Interaction, member: discord
     save_attend()
     await interaction.response.send_message(f"🗑️ {member.display_name} を削除しました。", ephemeral=True)
 
+
+# ── 個別出席記録 ──────────────────────────────────────────────
 
 class AttendStatusSelect(discord.ui.Select):
     def __init__(self, uid: str, name: str, date: str):
@@ -343,7 +399,7 @@ class AttendRecordView(discord.ui.View):
         self.add_item(AttendStatusSelect(uid, name, date))
 
 
-@bot.tree.command(name="attend_record", description="メンバーを選択して出席を記録します")
+@bot.tree.command(name="attend_record", description="【村長権限用】メンバーを選択して出席を記録します")
 @discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
 async def attend_record(interaction: discord.Interaction, date: str = ""):
     if not await check_admin(interaction):
@@ -354,7 +410,6 @@ async def attend_record(interaction: discord.Interaction, date: str = ""):
         return
     record_date = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
 
-    # メンバー選択ドロップダウン
     options = [
         discord.SelectOption(label=entry["name"], value=uid, description=f"現在: {entry['pt']}pt")
         for uid, entry in members.items()
@@ -363,8 +418,9 @@ async def attend_record(interaction: discord.Interaction, date: str = ""):
     class MemberSelect(discord.ui.Select):
         def __init__(self):
             super().__init__(placeholder="メンバーを選択", options=options[:25])
+
         async def callback(self, interaction2: discord.Interaction):
-            uid = self.values[0]
+            uid   = self.values[0]
             entry = attend_data["members"].get(uid)
             view2 = AttendRecordView(uid, entry["name"], record_date)
             await interaction2.response.send_message(
@@ -380,7 +436,110 @@ async def attend_record(interaction: discord.Interaction, date: str = ""):
     )
 
 
-@bot.tree.command(name="attend_status", description="出席管理の現在のポイント一覧を表示します")
+# ── 一括出席記録 ──────────────────────────────────────────────
+
+class BulkAttendSelect(discord.ui.Select):
+    def __init__(self, uid: str, placeholder: str, date: str, parent_view, row: int):
+        self.uid = uid
+        self.parent_view = parent_view
+        self.date = date
+        options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
+        super().__init__(placeholder=placeholder, options=options, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.selections[self.uid] = self.values[0]
+        await interaction.response.defer()
+
+
+class BulkAttendView(discord.ui.View):
+    def __init__(self, record_date: str, member_list: list, page: int = 0, selections: dict = None):
+        super().__init__(timeout=600)
+        self.record_date = record_date
+        self.member_list = member_list
+        self.page = page
+        self.selections = selections if selections is not None else {}
+
+        total_pages = (len(member_list) - 1) // 4 + 1
+        start = page * 4
+        end   = min(start + 4, len(member_list))
+        page_members = member_list[start:end]
+
+        for i, (uid, name, pt) in enumerate(page_members):
+            already = self.selections.get(uid, "")
+            ph = f"{name}（{pt}pt）" + (f" ✅{already[:6]}" if already else "")
+            self.add_item(BulkAttendSelect(uid, ph[:100], record_date, self, row=i))
+
+        # 前へボタン
+        if page > 0:
+            prev_btn = discord.ui.Button(label="← 前へ", style=discord.ButtonStyle.secondary, row=4)
+            async def prev_cb(inter: discord.Interaction, p=page):
+                new_view = BulkAttendView(record_date, member_list, p - 1, self.selections)
+                await inter.response.edit_message(content=new_view.content(), view=new_view)
+            prev_btn.callback = prev_cb
+            self.add_item(prev_btn)
+
+        # 次へボタン
+        if end < len(member_list):
+            next_btn = discord.ui.Button(label="次へ →", style=discord.ButtonStyle.primary, row=4)
+            async def next_cb(inter: discord.Interaction, p=page):
+                new_view = BulkAttendView(record_date, member_list, p + 1, self.selections)
+                await inter.response.edit_message(content=new_view.content(), view=new_view)
+            next_btn.callback = next_cb
+            self.add_item(next_btn)
+
+        # 保存ボタン（常に表示）
+        save_btn = discord.ui.Button(label="✅ 保存する", style=discord.ButtonStyle.success, row=4)
+        async def save_cb(inter: discord.Interaction):
+            if not self.selections:
+                await inter.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
+                return
+            results = []
+            for uid, status in self.selections.items():
+                entry = attend_data["members"].get(uid)
+                if entry is None:
+                    continue
+                change = calc_point_change(entry["pt"], status)
+                new_pt = max(0, min(10, entry["pt"] + change))
+                entry["pt"] = new_pt
+                entry["records"][record_date] = status
+                sign = f"+{change}" if change >= 0 else str(change)
+                results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
+            save_attend()
+            await inter.response.send_message(
+                f"✅ **{record_date}** の記録が完了しました！\n\n" + "\n".join(results),
+                ephemeral=True
+            )
+        save_btn.callback = save_cb
+        self.add_item(save_btn)
+
+    def content(self) -> str:
+        total_pages = (len(self.member_list) - 1) // 4 + 1
+        return (
+            f"📋 **{self.record_date}** の一括出席記録 "
+            f"（{self.page + 1}/{total_pages}ページ）\n"
+            f"選択済み: {len(self.selections)}人 ／ 全{len(self.member_list)}人\n"
+            f"ページを移動しながら全員選択して「✅ 保存する」を押してください："
+        )
+
+
+@bot.tree.command(name="attend_record_all", description="【村長権限用】全メンバーの出席を一括で記録します")
+@discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
+async def attend_record_all(interaction: discord.Interaction, date: str = ""):
+    if not await check_admin(interaction):
+        return
+    members = attend_data["members"]
+    if not members:
+        await interaction.response.send_message("登録メンバーがいません。先に /attend_add_members_bulk でメンバーを登録してください。", ephemeral=True)
+        return
+    record_date  = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
+    member_list  = [(uid, entry["name"], entry["pt"]) for uid, entry in members.items()]
+    view = BulkAttendView(record_date, member_list, page=0)
+    await interaction.response.send_message(view.content(), view=view, ephemeral=True)
+
+
+# ── ポイント確認・通知 ────────────────────────────────────────
+
+@bot.tree.command(name="attend_status", description="出席ポイント一覧を表示します")
 async def attend_status(interaction: discord.Interaction):
     members = attend_data["members"]
     if not members:
@@ -432,7 +591,7 @@ async def attend_warnings(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines))
 
 
-@bot.tree.command(name="attend_notify", description="警告対象メンバーを通知チャンネルに送信します")
+@bot.tree.command(name="attend_notify", description="【村長権限用】警告対象メンバーを通知チャンネルに送信します")
 async def attend_notify(interaction: discord.Interaction):
     if not await check_admin(interaction):
         return
@@ -502,113 +661,7 @@ async def attend_history(interaction: discord.Interaction, member: discord.Membe
 
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-class BulkAttendView(discord.ui.View):
-    def __init__(self, record_date: str, member_list: list, page: int = 0, selections: dict = None):
-        super().__init__(timeout=600)
-        self.record_date = record_date
-        self.member_list = member_list
-        self.page = page
-        self.selections = selections or {}
 
-        start = page * 4
-        end = min(start + 4, len(member_list))
-        page_members = member_list[start:end]
-        total_pages = (len(member_list) - 1) // 4 + 1
-
-        for i, (uid, name, pt) in enumerate(page_members):
-            already = self.selections.get(uid, "")
-            placeholder = f"{name}（{pt}pt）" + (f" ✅{already}" if already else "")
-            self.add_item(BulkAttendSelect(uid, placeholder[:100], record_date, self, row=i))
-
-        # ナビゲーションボタン
-        if page > 0:
-            prev_btn = discord.ui.Button(label="← 前へ", style=discord.ButtonStyle.secondary, row=4)
-            async def prev_cb(interaction: discord.Interaction, p=page):
-                new_view = BulkAttendView(record_date, member_list, p - 1, self.selections)
-                await interaction.response.edit_message(
-                    content=self._content(p - 1, total_pages),
-                    view=new_view
-                )
-            prev_btn.callback = prev_cb
-            self.add_item(prev_btn)
-
-        if end < len(member_list):
-            next_btn = discord.ui.Button(label="次へ →", style=discord.ButtonStyle.primary, row=4)
-            async def next_cb(interaction: discord.Interaction, p=page):
-                new_view = BulkAttendView(record_date, member_list, p + 1, self.selections)
-                await interaction.response.edit_message(
-                    content=self._content(p + 1, total_pages),
-                    view=new_view
-                )
-            next_btn.callback = next_cb
-            self.add_item(next_btn)
-
-        # 最終ページか全ページに保存ボタン
-        save_btn = discord.ui.Button(label="✅ 保存する", style=discord.ButtonStyle.success, row=4)
-        async def save_cb(interaction: discord.Interaction):
-            if not self.selections:
-                await interaction.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
-                return
-            results = []
-            for uid, status in self.selections.items():
-                entry = attend_data["members"].get(uid)
-                if entry is None:
-                    continue
-                change = calc_point_change(entry["pt"], status)
-                new_pt = max(0, min(10, entry["pt"] + change))
-                entry["pt"] = new_pt
-                entry["records"][record_date] = status
-                sign = f"+{change}" if change >= 0 else str(change)
-                results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
-            save_attend()
-            await interaction.response.send_message(
-                f"✅ **{record_date}** の記録が完了しました！\n\n" + "\n".join(results),
-                ephemeral=True
-            )
-        save_btn.callback = save_cb
-        self.add_item(save_btn)
-
-    def _content(self, page: int, total_pages: int) -> str:
-        selected_count = len(self.selections)
-        return (
-            f"📋 **{self.record_date}** の一括出席記録 "
-            f"（{page + 1}/{total_pages}ページ）\n"
-            f"選択済み: {selected_count}人 ／ 全{len(self.member_list)}人\n"
-            f"ページを移動しながら全員を選択して「✅ 保存する」を押してください："
-        )
-
-
-class BulkAttendSelect(discord.ui.Select):
-    def __init__(self, uid: str, placeholder: str, date: str, parent_view, row: int):
-        self.uid = uid
-        self.parent_view = parent_view
-        options = [discord.SelectOption(label=s, value=s) for s in ATTEND_STATUSES]
-        super().__init__(placeholder=placeholder, options=options, row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.selections[self.uid] = self.values[0]
-        await interaction.response.defer()
-
-
-@bot.tree.command(name="attend_record_all", description="【村長権限用】全メンバーの出席を一括で記録します")
-@discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
-async def attend_record_all(interaction: discord.Interaction, date: str = ""):
-    if not await check_admin(interaction):
-        return
-    members = attend_data["members"]
-    if not members:
-        await interaction.response.send_message("登録メンバーがいません。", ephemeral=True)
-        return
-    record_date = date.strip() if date.strip() else datetime.now().strftime("%Y-%m-%d")
-    member_list = [(uid, entry["name"], entry["pt"]) for uid, entry in members.items()]
-    total_pages = (len(member_list) - 1) // 4 + 1
-    view = BulkAttendView(record_date, member_list, page=0)
-    await interaction.response.send_message(
-        view._content(0, total_pages),
-        view=view,
-        ephemeral=True
-    )
-    
 # ============================================================
 # 起動
 # ============================================================
