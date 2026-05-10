@@ -245,7 +245,7 @@ async def on_message(message: discord.Message):
                     try:
                         response = await asyncio.to_thread(
                         ai_client.models.generate_content,
-                        model="gemini-1.5-flash",
+                        model="gemini-1.5-flash-latest",
                         contents=content,
                     )
                         await message.reply(response.text)
