@@ -7,22 +7,29 @@ import json
 import random
 import re
 import asyncio
-from anthropic import AsyncAnthropic
-
-# ============================================================
-# トークン読み込み
-# ============================================================
+import google.generativeai as genai
 
 TOKEN        = os.environ.get("DISCORD_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN環境変数が設定されていません")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL環境変数が設定されていません")
 
-ai_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    ai_model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=(
+            "あなたはDiscordサーバー「村」の管理Botです。"
+            "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
+            "回答は300文字以内に収めてください。"
+        )
+    )
+else:
+    ai_model = None
 
 # ============================================================
 # Bot 初期化
@@ -239,22 +246,15 @@ async def on_message(message: discord.Message):
     if bot.user.mentioned_in(message) and not message.mention_everyone:
         content = re.sub(r"<@!?\d+>", "", message.content).strip()
         if content:
-            if ai_client is None:
-                await message.reply("❌ ANTHROPIC_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
+            if ai_model is None:
+                await message.reply("❌ GEMINI_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
             else:
                 async with message.channel.typing():
                     try:
-                        response = await ai_client.messages.create(
-                            model="claude-haiku-4-5-20251001",
-                            max_tokens=400,
-                            system=(
-                                "あなたはDiscordサーバー「村」の管理Botです。"
-                                "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
-                                "回答は300文字以内に収めてください。"
-                            ),
-                            messages=[{"role": "user", "content": content}]
+                        response = await asyncio.to_thread(
+                            ai_model.generate_content, content
                         )
-                        await message.reply(response.content[0].text)
+                        await message.reply(response.text)
                     except Exception as e:
                         await message.reply(f"❌ AIの応答に失敗しました: {e}")
             return
