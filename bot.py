@@ -7,7 +7,7 @@ import json
 import random
 import re
 import asyncio
-import google.generativeai as genai
+import google.genai as genai
 
 TOKEN        = os.environ.get("DISCORD_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -19,17 +19,9 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL環境変数が設定されていません")
 
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=(
-            "あなたはDiscordサーバー「村」の管理Botです。"
-            "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
-            "回答は300文字以内に収めてください。"
-        )
-    )
+    ai_client = genai.Client(api_key=GEMINI_API_KEY)
 else:
-    ai_model = None
+    ai_client = None
 
 # ============================================================
 # Bot 初期化
@@ -246,13 +238,15 @@ async def on_message(message: discord.Message):
     if bot.user.mentioned_in(message) and not message.mention_everyone:
         content = re.sub(r"<@!?\d+>", "", message.content).strip()
         if content:
-            if ai_model is None:
-                await message.reply("❌ GEMINI_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
+            if ai_client is None:
+                await message.reply("❌ GEMINI_API_KEYが設定されていません。")
             else:
                 async with message.channel.typing():
                     try:
                         response = await asyncio.to_thread(
-                            ai_model.generate_content, content
+                            ai_client.models.generate_content,
+                            model="gemini-2.0-flash",
+                            contents=content,
                         )
                         await message.reply(response.text)
                     except Exception as e:
