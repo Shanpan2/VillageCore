@@ -7,21 +7,22 @@ import json
 import random
 import re
 import asyncio
-from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 
 # ============================================================
 # トークン読み込み
 # ============================================================
+
 TOKEN        = os.environ.get("DISCORD_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN環境変数が設定されていません")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL環境変数が設定されていません")
 
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+ai_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 # ============================================================
 # Bot 初期化
@@ -238,28 +239,22 @@ async def on_message(message: discord.Message):
     if bot.user.mentioned_in(message) and not message.mention_everyone:
         content = re.sub(r"<@!?\d+>", "", message.content).strip()
         if content:
-            if openai_client is None:
-                await message.reply("❌ OPENAI_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
+            if ai_client is None:
+                await message.reply("❌ ANTHROPIC_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
             else:
                 async with message.channel.typing():
                     try:
-                        response = await openai_client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        "あなたはDiscordサーバー「村」の管理Botです。"
-                                        "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
-                                        "回答は300文字以内に収めてください。"
-                                    )
-                                },
-                                {"role": "user", "content": content}
-                            ],
-                            max_tokens=400
+                        response = await ai_client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=400,
+                            system=(
+                                "あなたはDiscordサーバー「村」の管理Botです。"
+                                "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
+                                "回答は300文字以内に収めてください。"
+                            ),
+                            messages=[{"role": "user", "content": content}]
                         )
-                        reply = response.choices[0].message.content
-                        await message.reply(reply)
+                        await message.reply(response.content[0].text)
                     except Exception as e:
                         await message.reply(f"❌ AIの応答に失敗しました: {e}")
             return
@@ -399,16 +394,25 @@ async def help_command(interaction: discord.Interaction):
 # ============================================================
 # 管理者ロール設定
 # ============================================================
-@bot.tree.command(name="config_admin_role", description="【サーバーオーナー専用】管理者ロール名を設定します")
+@bot.tree.command(name="config_admin_role", description="管理者ロールを設定します（サーバーオーナーまたは現在の管理者ロールを持つ人）")
 @discord.app_commands.describe(role="管理者として設定するロール")
 async def config_admin_role(interaction: discord.Interaction, role: discord.Role):
-    # サーバーオーナーチェック
-    if interaction.user.id != interaction.guild.owner_id:
-        await interaction.response.send_message("❌ このコマンドはサーバーオーナーのみ使用できます。", ephemeral=True)
+    # サーバーオーナーまたは現在の管理者ロールを持つ人が設定可能
+    is_owner = interaction.user.id == interaction.guild.owner_id
+    current_role_name = await get_admin_role_name(interaction.guild.id)
+    has_admin_role = any(r.name == current_role_name for r in interaction.user.roles)
+    # Discordのサーバー管理権限を持つ人も設定可能
+    has_manage_guild = interaction.user.guild_permissions.manage_guild
+
+    if not (is_owner or has_admin_role or has_manage_guild):
+        await interaction.response.send_message(
+            "❌ このコマンドはサーバーオーナー・管理者ロール・サーバー管理権限を持つ人のみ使用できます。",
+            ephemeral=True
+        )
         return
     await db_set_config(f"admin_role_{interaction.guild.id}", role.name)
     await interaction.response.send_message(
-        f"✅ 管理者ロールを **{role.name}** に設定しました！",
+        f"✅ 管理者ロールを **{role.name}** に設定しました！\nこのロールを持つ人が管理者コマンドを使えます。",
         ephemeral=True
     )
 
