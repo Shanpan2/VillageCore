@@ -1324,7 +1324,7 @@ async def othello_cmd(interaction: discord.Interaction, opponent: discord.Member
         f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番！（* = 置ける場所）",
 
         # ColSelect callback内のedit_message
-        content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（* = 置ける場所）",,
+        content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（* = 置ける場所）",
         view=view
             )
 
