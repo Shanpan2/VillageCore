@@ -1192,13 +1192,13 @@ class OthelloGame:
         return b, w
 
     def render(self, valid_moves=None):
-        # ヘッダー行：A〜H をシンプルに表示
-        header = "　ＡＢＣＤＥＦＧＨ"
+        COLS = ["🇦","🇧","🇨","🇩","🇪","🇫","🇬","🇭"]
+        ROWS = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"]
         vm_set = set(valid_moves) if valid_moves else set()
+        header = "⬛" + "".join(COLS)
         lines = [header]
-        row_emojis = ["１","２","３","４","５","６","７","８"]
         for r in range(8):
-            row_str = row_emojis[r]
+            row_str = ROWS[r]
             for c in range(8):
                 if self.board[r][c] == 1:   row_str += OTHELLO_BLACK
                 elif self.board[r][c] == 2: row_str += OTHELLO_WHITE
