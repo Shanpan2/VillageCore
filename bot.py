@@ -1192,11 +1192,11 @@ class OthelloGame:
         return b, w
 
     def render(self, valid_moves=None):
-        # ヘッダー行：空白＋A〜H
-        header = "⬛" + "".join(f"{c}️⃣" if c.isdigit() else {"A":"🇦","B":"🇧","C":"🇨","D":"🇩","E":"🇪","F":"🇫","G":"🇬","H":"🇭"}[c] for c in COL_LABELS)
+        # ヘッダー行：A〜H をシンプルに表示
+        header = "＿ＡＢＣＤＥＦＧＨ"
         vm_set = set(valid_moves) if valid_moves else set()
         lines = [header]
-        row_emojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"]
+        row_emojis = ["１","２","３","４","５","６","７","８"]
         for r in range(8):
             row_str = row_emojis[r]
             for c in range(8):
