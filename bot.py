@@ -1194,17 +1194,20 @@ class OthelloGame:
     def render(self, valid_moves=None):
         vm_set = set(valid_moves) if valid_moves else set()
         lines = ["```"]
-        lines.append("  A B C D E F G H")
+        lines.append("┌───┬─A─┬─B─┬─C─┬─D─┬─E─┬─F─┬─G─┬─H─┐")
         for r in range(8):
-            row_str = f"{r+1} "
+            row_str = f"│ {r+1} │"
             for c in range(8):
-                if self.board[r][c] == 1:      row_str += "● "
-                elif self.board[r][c] == 2:    row_str += "○ "
-                elif (r, c) in vm_set:         row_str += "* "
-                else:                           row_str += ". "
+                if self.board[r][c] == 1:   row_str += " ● │"
+                elif self.board[r][c] == 2: row_str += " ○ │"
+                elif (r, c) in vm_set:      row_str += " * │"
+                else:                        row_str += "   │"
             lines.append(row_str)
+            if r < 7:
+                lines.append("├───┼───┼───┼───┼───┼───┼───┼───┼───┤")
+        lines.append("└───┴───┴───┴───┴───┴───┴───┴───┴───┘")
         lines.append("```")
-        lines.append("● = 黒  ○ = 白  * = 置ける場所")
+        lines.append("● = 黒  ○ = 白  \\* = 置ける場所")
         return "\n".join(lines)
 
 
