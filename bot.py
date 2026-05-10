@@ -238,21 +238,11 @@ async def on_message(message: discord.Message):
     if bot.user.mentioned_in(message) and not message.mention_everyone:
         content = re.sub(r"<@!?\d+>", "", message.content).strip()
         if content:
-            if ai_client is None:
-                await message.reply("❌ GEMINI_API_KEYが設定されていません。")
-            else:
-                async with message.channel.typing():
-                    try:
-                        response = await asyncio.to_thread(
-                            lambda: ai_client.models.generate_content(
-                                model="gemini-2.0-flash-lite",
-                                contents=content,
-                            )
-                        )
-                        await message.reply(response.text)
-                    except Exception as e:
-                        await message.reply(f"❌ AIの応答に失敗しました: {e}")
-            return
+            await message.reply(
+                "🤖 現在AI機能は準備中です。\n"
+                "他のコマンドは `/help` で確認できます！"
+            )
+        return
 
     # xdy 形式のダイスロール
     dice_match = re.search(r"\b(\d+)d(\d+)\b", message.content.lower())
