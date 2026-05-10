@@ -7,17 +7,21 @@ import json
 import random
 import re
 import asyncio
+from openai import AsyncOpenAI
 
 # ============================================================
 # トークン読み込み
 # ============================================================
 TOKEN        = os.environ.get("DISCORD_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 if not TOKEN:
     raise ValueError("DISCORD_TOKEN環境変数が設定されていません")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL環境変数が設定されていません")
+
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 # ============================================================
 # Bot 初期化
@@ -34,17 +38,26 @@ db: asyncpg.Pool = None
 # ============================================================
 # 管理者ロールチェック
 # ============================================================
-ADMIN_ROLE_NAME = "村長権限用"
+DEFAULT_ADMIN_ROLE = "村長権限用"
 
-def is_admin(interaction: discord.Interaction) -> bool:
-    if interaction.user.id == interaction.guild.owner_id:
+async def get_admin_role_name(guild_id: int) -> str:
+    cfg_str = await db_get_config(f"admin_role_{guild_id}")
+    return cfg_str if cfg_str else DEFAULT_ADMIN_ROLE
+
+def is_owner(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == interaction.guild.owner_id
+
+async def is_admin(interaction: discord.Interaction) -> bool:
+    if is_owner(interaction):
         return True
-    return any(role.name == ADMIN_ROLE_NAME for role in interaction.user.roles)
+    role_name = await get_admin_role_name(interaction.guild.id)
+    return any(role.name == role_name for role in interaction.user.roles)
 
 async def check_admin(interaction: discord.Interaction) -> bool:
-    if not is_admin(interaction):
+    if not await is_admin(interaction):
+        role_name = await get_admin_role_name(interaction.guild.id)
         await interaction.response.send_message(
-            f"❌ このコマンドは **{ADMIN_ROLE_NAME}** ロールを持つ人のみ使用できます。",
+            f"❌ このコマンドは **{role_name}** ロールを持つ人のみ使用できます。",
             ephemeral=True
         )
         return False
@@ -212,6 +225,67 @@ async def on_ready():
     print("✅ スラッシュコマンド同期完了")
 
 # ============================================================
+# メッセージイベント（ダイスロール・AIメンション）
+# ============================================================
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # Botメンションでアドバイス
+    if bot.user in message.mentions and openai_client:
+        # メンション部分を除去してテキスト取得
+        content = re.sub(r"<@!?\d+>", "", message.content).strip()
+        if content:
+            async with message.channel.typing():
+                try:
+                    response = await openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "あなたはDiscordサーバー「村」の管理Botです。"
+                                    "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
+                                    "回答は300文字以内に収めてください。"
+                                )
+                            },
+                            {"role": "user", "content": content}
+                        ],
+                        max_tokens=400
+                    )
+                    reply = response.choices[0].message.content
+                    await message.reply(reply)
+                except Exception as e:
+                    await message.reply(f"❌ AIの応答に失敗しました: {e}")
+        return
+
+    # xdy 形式のダイスロール（メッセージで反応）
+    dice_match = re.search(r"\b(\d+)d(\d+)\b", message.content.lower())
+    if dice_match:
+        count = int(dice_match.group(1))
+        sides = int(dice_match.group(2))
+        if 1 <= count <= 100 and 2 <= sides <= 1000:
+            results = [random.randint(1, sides) for _ in range(count)]
+            total   = sum(results)
+            max_val = sides * count
+            min_val = count
+            if total == max_val:        comment = "🌟 **クリティカル！！** 最高の出目！"
+            elif total == min_val:      comment = "💀 **ファンブル...** 最低の出目..."
+            elif total >= max_val * 0.8: comment = "✨ かなりいい出目！"
+            elif total <= max_val * 0.2: comment = "😰 かなり低い出目..."
+            else:                       comment = "🎲 普通の出目。"
+            dice_str = " + ".join(str(r) for r in results) if count > 1 else str(results[0])
+            await message.reply(
+                f"🎲 `{count}d{sides}` を振りました！\n"
+                f"出目: {dice_str}\n"
+                f"合計: **{total}** / {max_val}\n"
+                f"{comment}"
+            )
+
+    await bot.process_commands(message)
+
+# ============================================================
 # 毎週定期リマインド
 # ============================================================
 @tasks.loop(minutes=1)
@@ -272,11 +346,13 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 # ============================================================
 @bot.tree.command(name="help", description="使えるコマンドの一覧と説明を表示します")
 async def help_command(interaction: discord.Interaction):
+    role_name = await get_admin_role_name(interaction.guild.id)
     embed = discord.Embed(title="📖 コマンド一覧", color=0x534AB7)
+    embed.add_field(name="\u200b", value=f"**現在の管理者ロール: `{role_name}`**", inline=False)
     embed.add_field(name="\u200b", value="**🗳️ Poll・ロール機能**", inline=False)
-    embed.add_field(name="/setup_poll_role 【村長権限用】", value="Pollの選択肢に投票したユーザーへ自動でロールを付与する設定をします。", inline=False)
+    embed.add_field(name="/setup_poll_role 【管理者】", value="Pollの選択肢に投票したユーザーへ自動でロールを付与する設定をします。", inline=False)
     embed.add_field(name="/list_poll_roles", value="現在登録されているPoll→ロールの紐付け一覧を表示します。", inline=False)
-    embed.add_field(name="\u200b", value="**📋 出席管理【村長権限用】**", inline=False)
+    embed.add_field(name="\u200b", value="**📋 出席管理【管理者】**", inline=False)
     embed.add_field(name="/attend_add_member", value="メンバーを1人出席管理に追加します。", inline=False)
     embed.add_field(name="/attend_add_members_bulk", value="複数のメンバーをまとめて追加します（選択式）。", inline=False)
     embed.add_field(name="/attend_remove_member", value="メンバーを出席管理から削除します。", inline=False)
@@ -292,14 +368,17 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/attend_history", value="指定メンバーの出席履歴（直近20件）を表示します。", inline=False)
     embed.add_field(name="/attend_stats", value="メンバーの出席率・欠席回数を集計して表示します。", inline=False)
     embed.add_field(name="\u200b", value="**🎮 楽しいコマンド**", inline=False)
-    embed.add_field(name="/roll 2d6", value="ダイスロール！クリティカル・ファンブル演出あり。", inline=False)
+    embed.add_field(name="xdy（例: 2d6）", value="メッセージに打つだけでダイスロール！", inline=False)
+    embed.add_field(name="/roll 2d6", value="スラッシュコマンドでダイスロール。", inline=False)
     embed.add_field(name="/omikuji", value="おみくじを引きます！大吉〜大凶。", inline=False)
     embed.add_field(name="/janken", value="Botとじゃんけん対決！", inline=False)
     embed.add_field(name="/choose A B C", value="選択肢からランダムに1つ選びます。", inline=False)
     embed.add_field(name="/timer 60", value="カウントダウンタイマー（最大300秒）。終了時にあなたをメンション。", inline=False)
     embed.add_field(name="/meigen", value="村の名言をランダム表示。", inline=False)
-    embed.add_field(name="/meigen_add 【村長権限用】", value="オリジナル名言を追加します。", inline=False)
-    embed.add_field(name="\u200b", value="**⚙️ Bot設定【村長権限用】**", inline=False)
+    embed.add_field(name="/meigen_add 【管理者】", value="オリジナル名言を追加します。", inline=False)
+    embed.add_field(name="@Bot名 質問", value="BotをメンションするとAIが回答します！", inline=False)
+    embed.add_field(name="\u200b", value="**⚙️ Bot設定【管理者】**", inline=False)
+    embed.add_field(name="/config_admin_role", value="管理者ロール名を変更します。", inline=False)
     embed.add_field(name="/config_reminder", value="定期リマインドの曜日・時間・メッセージを設定します。", inline=False)
     embed.add_field(name="/config_welcome", value="新規メンバー歓迎メッセージを設定します。", inline=False)
     embed.add_field(name="/config_voice_role", value="VC入室時に付与するロールを設定します。", inline=False)
@@ -314,9 +393,24 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ============================================================
+# 管理者ロール設定
+# ============================================================
+@bot.tree.command(name="config_admin_role", description="【サーバーオーナー専用】管理者ロール名を設定します")
+@discord.app_commands.describe(role="管理者として設定するロール")
+async def config_admin_role(interaction: discord.Interaction, role: discord.Role):
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ このコマンドはサーバーオーナーのみ使用できます。", ephemeral=True)
+        return
+    await db_set_config(f"admin_role_{interaction.guild.id}", role.name)
+    await interaction.response.send_message(
+        f"✅ 管理者ロールを **{role.name}** に設定しました。\nこのロールを持つ人が管理者コマンドを使えます。",
+        ephemeral=True
+    )
+
+# ============================================================
 # POLL ROLE 機能
 # ============================================================
-@bot.tree.command(name="setup_poll_role", description="【村長権限用】Pollの選択肢にロールを紐付けます（ロールは自動作成）")
+@bot.tree.command(name="setup_poll_role", description="【管理者】Pollの選択肢にロールを紐付けます（ロールは自動作成）")
 @discord.app_commands.describe(
     message_id="PollのメッセージID", answer_text="投票選択肢のテキスト（完全一致）",
     role_name="作成するロール名（省略すると選択肢名と同じ）", assign_role="投票したらロールを付与するか",
@@ -434,14 +528,14 @@ async def on_poll_finish(poll: discord.Poll):
 # ============================================================
 # 出席管理機能
 # ============================================================
-@bot.tree.command(name="attend_set_channel", description="【村長権限用】出席管理の通知チャンネルを現在のチャンネルに設定します")
+@bot.tree.command(name="attend_set_channel", description="【管理者】出席管理の通知チャンネルを現在のチャンネルに設定します")
 async def attend_set_channel(interaction: discord.Interaction):
     if not await check_admin(interaction): return
     await db_set_config("notify_channel_id", str(interaction.channel.id))
     await interaction.response.send_message(f"✅ 通知チャンネルを {interaction.channel.mention} に設定しました。", ephemeral=True)
 
 
-@bot.tree.command(name="attend_add_member", description="【村長権限用】出席管理にメンバーを1人追加します")
+@bot.tree.command(name="attend_add_member", description="【管理者】出席管理にメンバーを1人追加します")
 @discord.app_commands.describe(member="追加するメンバー", initial_pt="初期ポイント（デフォルト: 10）")
 async def attend_add_member(interaction: discord.Interaction, member: discord.Member, initial_pt: int = 10):
     if not await check_admin(interaction): return
@@ -452,7 +546,7 @@ async def attend_add_member(interaction: discord.Interaction, member: discord.Me
     await interaction.response.send_message(f"✅ {member.display_name} を追加しました（{initial_pt}pt）", ephemeral=True)
 
 
-@bot.tree.command(name="attend_add_members_bulk", description="【村長権限用】メンバーを選択して一括で出席管理に追加します")
+@bot.tree.command(name="attend_add_members_bulk", description="【管理者】メンバーを選択して一括で出席管理に追加します")
 @discord.app_commands.describe(initial_pt="初期ポイント（デフォルト: 10）")
 async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: int = 10):
     if not await check_admin(interaction): return
@@ -482,7 +576,7 @@ async def attend_add_members_bulk(interaction: discord.Interaction, initial_pt: 
     await interaction.response.send_message("追加するメンバーを選んでください（複数選択可）：", view=view, ephemeral=True)
 
 
-@bot.tree.command(name="attend_remove_member", description="【村長権限用】出席管理からメンバーを削除します")
+@bot.tree.command(name="attend_remove_member", description="【管理者】出席管理からメンバーを削除します")
 @discord.app_commands.describe(member="削除するメンバー")
 async def attend_remove_member(interaction: discord.Interaction, member: discord.Member):
     if not await check_admin(interaction): return
@@ -529,7 +623,7 @@ class AttendRecordView(discord.ui.View):
         self.add_item(AttendStatusSelect(uid, name, date, current_pt))
 
 
-@bot.tree.command(name="attend_record", description="【村長権限用】メンバーを選択して出席を記録します")
+@bot.tree.command(name="attend_record", description="【管理者】メンバーを選択して出席を記録します")
 @discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
 async def attend_record(interaction: discord.Interaction, date: str = ""):
     if not await check_admin(interaction): return
@@ -639,7 +733,7 @@ class BulkAttendView(discord.ui.View):
         )
 
 
-@bot.tree.command(name="attend_record_all", description="【村長権限用】全メンバーの出席を一括で記録します")
+@bot.tree.command(name="attend_record_all", description="【管理者】全メンバーの出席を一括で記録します")
 @discord.app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
 async def attend_record_all(interaction: discord.Interaction, date: str = ""):
     if not await check_admin(interaction): return
@@ -659,7 +753,8 @@ async def attend_status(interaction: discord.Interaction):
         await interaction.response.send_message("登録メンバーがいません。", ephemeral=True); return
     lines = ["**📊 出席ポイント一覧**\n"]
     for row in members:
-        lines.append(f"{get_badge(row['pt'])} <@{row['discord_id']}> **{row['name']}** : **{row['pt']}pt**")
+        # メンションのみ表示（名前の重複なし）
+        lines.append(f"{get_badge(row['pt'])} <@{row['discord_id']}> : **{row['pt']}pt**")
     await interaction.response.send_message("\n".join(lines))
 
 
@@ -667,20 +762,20 @@ async def attend_status(interaction: discord.Interaction):
 async def attend_warnings(interaction: discord.Interaction):
     members  = await db_get_members()
     warnings = [
-        f"{get_badge(row['pt'])} <@{row['discord_id']}> **{row['name']}** : **{row['pt']}pt**"
+        f"{get_badge(row['pt'])} <@{row['discord_id']}> : **{row['pt']}pt**"
         for row in members if row["pt"] <= 4
     ]
     lines = ["**⚠️ 警告対象メンバー一覧**\n"] + warnings if warnings else ["✅ 現在、警告対象のメンバーはいません。"]
     await interaction.response.send_message("\n".join(lines))
 
 
-@bot.tree.command(name="attend_notify", description="【村長権限用】警告対象メンバーを通知チャンネルに送信します")
+@bot.tree.command(name="attend_notify", description="【管理者】警告対象メンバーを通知チャンネルに送信します")
 async def attend_notify(interaction: discord.Interaction):
     if not await check_admin(interaction): return
     members   = await db_get_members()
     ch_id_str = await db_get_config("notify_channel_id")
     warnings  = [
-        f"{get_badge(row['pt'])} <@{row['discord_id']}> **{row['name']}** : **{row['pt']}pt**"
+        f"{get_badge(row['pt'])} <@{row['discord_id']}> : **{row['pt']}pt**"
         for row in members if row["pt"] <= 4
     ]
     msg = "📢 **出席ポイント警告通知**\n"
@@ -693,7 +788,7 @@ async def attend_notify(interaction: discord.Interaction):
     await interaction.response.send_message(msg)
 
 
-@bot.tree.command(name="attend_set_pt", description="【村長権限用】メンバーのポイントをミス修正などで直接設定します")
+@bot.tree.command(name="attend_set_pt", description="【管理者】メンバーのポイントをミス修正などで直接設定します")
 @discord.app_commands.describe(member="対象メンバー", pt="設定するポイント（マイナスも可）")
 async def attend_set_pt(interaction: discord.Interaction, member: discord.Member, pt: int):
     if not await check_admin(interaction): return
@@ -735,15 +830,15 @@ async def attend_stats(interaction: discord.Interaction):
         records = await db_get_records(row["discord_id"])
         total   = len(records)
         if total == 0:
-            lines.append(f"• **{row['name']}** : 記録なし（{row['pt']}pt）"); continue
+            lines.append(f"• <@{row['discord_id']}> : 記録なし（{row['pt']}pt）"); continue
         attend  = sum(1 for r in records if "出席" in r["status"] or "生存確認" in r["status"])
         absence = sum(1 for r in records if "欠席" in r["status"] or "不参加" in r["status"] or "無断" in r["status"])
         rate    = int(attend / total * 100)
-        lines.append(f"• **{row['name']}** : 出席率 **{rate}%** （出席{attend}回 / 欠席{absence}回 / 全{total}回）{get_badge(row['pt'])}")
+        lines.append(f"• <@{row['discord_id']}> : 出席率 **{rate}%** （出席{attend}回 / 欠席{absence}回）{get_badge(row['pt'])}")
     await interaction.response.send_message("\n".join(lines))
 
 
-@bot.tree.command(name="attend_kick_targets", description="【村長権限用】退出対象（0pt以下）を表示してキックを確認します")
+@bot.tree.command(name="attend_kick_targets", description="【管理者】退出対象（0pt以下）を表示してキックを確認します")
 async def attend_kick_targets(interaction: discord.Interaction):
     if not await check_admin(interaction): return
     members = await db_get_members()
@@ -752,7 +847,7 @@ async def attend_kick_targets(interaction: discord.Interaction):
         await interaction.response.send_message("✅ 現在、退出対象のメンバーはいません。", ephemeral=True); return
     lines = ["**🚨 退出対象メンバー（0pt以下）**\n"]
     for uid, name, pt in targets:
-        lines.append(f"• <@{uid}> **{name}** : **{pt}pt**")
+        lines.append(f"• <@{uid}> : **{pt}pt**")
     lines.append("\n以下のボタンでキックできます：")
 
     class KickView(discord.ui.View):
@@ -783,7 +878,7 @@ async def attend_kick_targets(interaction: discord.Interaction):
 # ============================================================
 # Bot設定コマンド
 # ============================================================
-@bot.tree.command(name="config_reminder", description="【村長権限用】定期リマインドを設定します")
+@bot.tree.command(name="config_reminder", description="【管理者】定期リマインドを設定します")
 @discord.app_commands.describe(enabled="リマインドを有効にするか", weekday="曜日（0=月〜6=日）", hour="時間（0〜23）", minute="分（0〜59）", message="送信するメッセージ（省略可）")
 async def config_reminder(interaction: discord.Interaction, enabled: bool, weekday: int, hour: int, minute: int, message: str = ""):
     if not await check_admin(interaction): return
@@ -801,7 +896,7 @@ async def config_reminder(interaction: discord.Interaction, enabled: bool, weekd
     )
 
 
-@bot.tree.command(name="config_welcome", description="【村長権限用】新規メンバー歓迎メッセージを設定します")
+@bot.tree.command(name="config_welcome", description="【管理者】新規メンバー歓迎メッセージを設定します")
 @discord.app_commands.describe(enabled="歓迎メッセージを有効にするか", message="歓迎メッセージ（{mention}でメンションに置換）")
 async def config_welcome(interaction: discord.Interaction, enabled: bool, message: str = ""):
     if not await check_admin(interaction): return
@@ -814,7 +909,7 @@ async def config_welcome(interaction: discord.Interaction, enabled: bool, messag
     await interaction.response.send_message(f"歓迎メッセージ設定完了！\n状態: {status}\nチャンネル: {interaction.channel.mention}", ephemeral=True)
 
 
-@bot.tree.command(name="config_voice_role", description="【村長権限用】VC入室時に付与するロールを設定します")
+@bot.tree.command(name="config_voice_role", description="【管理者】VC入室時に付与するロールを設定します")
 @discord.app_commands.describe(enabled="入退室ロールを有効にするか", role="入室時に付与するロール")
 async def config_voice_role(interaction: discord.Interaction, enabled: bool, role: discord.Role = None):
     if not await check_admin(interaction): return
@@ -823,9 +918,8 @@ async def config_voice_role(interaction: discord.Interaction, enabled: bool, rol
     status = "✅ 有効" if enabled else "⛔ 無効"
     await interaction.response.send_message(f"VC入室ロール設定完了！\n状態: {status}\nロール: **{role.name if role else '未設定'}**", ephemeral=True)
 
-
 # ============================================================
-# 🎲 ダイスロール
+# 🎲 ダイスロール（スラッシュコマンド版）
 # ============================================================
 @bot.tree.command(name="roll", description="ダイスを振ります。例: /roll 2d6 → 6面ダイスを2個")
 @discord.app_commands.describe(dice="ダイスの形式（例: 2d6, 1d20, 3d8）")
@@ -843,17 +937,16 @@ async def roll_dice(interaction: discord.Interaction, dice: str):
     total   = sum(results)
     max_val = sides * count
     min_val = count
-    if total == max_val:   comment = "🌟 **クリティカル！！** 最高の出目！"
-    elif total == min_val: comment = "💀 **ファンブル...** 最低の出目..."
+    if total == max_val:         comment = "🌟 **クリティカル！！** 最高の出目！"
+    elif total == min_val:       comment = "💀 **ファンブル...** 最低の出目..."
     elif total >= max_val * 0.8: comment = "✨ かなりいい出目！"
     elif total <= max_val * 0.2: comment = "😰 かなり低い出目..."
-    else: comment = "🎲 普通の出目。"
+    else:                        comment = "🎲 普通の出目。"
     dice_str = " + ".join(str(r) for r in results) if count > 1 else str(results[0])
     await interaction.response.send_message(
         f"🎲 **{interaction.user.display_name}** が `{dice}` を振りました！\n"
         f"出目: {dice_str}\n合計: **{total}** / {max_val}\n{comment}"
     )
-
 
 # ============================================================
 # 🎋 おみくじ
@@ -880,7 +973,6 @@ async def omikuji(interaction: discord.Interaction):
     embed.set_author(name=f"{interaction.user.display_name} のおみくじ結果")
     embed.set_footer(text="また明日も引いてみてね！")
     await interaction.response.send_message(embed=embed)
-
 
 # ============================================================
 # ✊ じゃんけん
@@ -934,7 +1026,6 @@ async def janken(interaction: discord.Interaction):
     embed = discord.Embed(title="✊ じゃんけん！", description="グー・チョキ・パーを選んでください！", color=0x534AB7)
     await interaction.response.send_message(embed=embed, view=JankenView(interaction.user))
 
-
 # ============================================================
 # 🎯 ランダム選択
 # ============================================================
@@ -953,7 +1044,6 @@ async def choose(interaction: discord.Interaction, choices: str):
     embed.set_footer(text=f"選んだ人: {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
-
 # ============================================================
 # ⏱️ カウントダウンタイマー
 # ============================================================
@@ -965,7 +1055,7 @@ async def timer(interaction: discord.Interaction, seconds: int, message: str = "
     end_msg = message if message else "時間です！"
     embed   = discord.Embed(
         title="⏱️ タイマースタート！",
-        description=f"**{seconds}秒**後に通知します\n終了メッセージ: {end_msg}",
+        description=f"**{seconds}秒**後に {interaction.user.mention} に通知します\n終了メッセージ: {end_msg}",
         color=0x534AB7
     )
     embed.set_footer(text=f"開始: {interaction.user.display_name}")
@@ -978,7 +1068,6 @@ async def timer(interaction: discord.Interaction, seconds: int, message: str = "
     )
     finish_embed.set_footer(text=f"セットした人: {interaction.user.display_name}")
     await interaction.followup.send(content=interaction.user.mention, embed=finish_embed)
-
 
 # ============================================================
 # 💬 村の名言Bot
@@ -998,11 +1087,11 @@ async def meigen(interaction: discord.Interaction):
     combined = DEFAULT_MEIGEN + all_list
     quote    = random.choice(combined)
     embed    = discord.Embed(title="💬 村の名言", description=f"*{quote}*", color=0xF0A500)
-    embed.set_footer(text="/meigen_add で名言を追加できます（村長権限用）")
+    embed.set_footer(text="/meigen_add で名言を追加できます（管理者）")
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="meigen_add", description="【村長権限用】村の名言を追加します")
+@bot.tree.command(name="meigen_add", description="【管理者】村の名言を追加します")
 @discord.app_commands.describe(quote="追加する名言（作者も書くと味が出ます）")
 async def meigen_add(interaction: discord.Interaction, quote: str):
     if not await check_admin(interaction): return
@@ -1021,7 +1110,6 @@ async def meigen_list_cmd(interaction: discord.Interaction):
         await interaction.response.send_message("まだオリジナル名言は登録されていません。`/meigen_add` で追加してください！", ephemeral=True); return
     lines = [f"{i+1}. *{q}*" for i, q in enumerate(all_list)]
     await interaction.response.send_message("**💬 登録済み名言一覧**\n\n" + "\n".join(lines), ephemeral=True)
-
 
 # ============================================================
 # 起動
