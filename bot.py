@@ -1106,11 +1106,32 @@ async def meigen_list_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("**💬 登録済み名言一覧**\n\n" + "\n".join(lines), ephemeral=True)
 
 # ============================================================
-# ♟️ オセロ
+# 以下を bot.py の bot.run(TOKEN) の直前に追加してください
+# （既存のオセロ・UNO・自動削除コードがあれば全部削除してから追加）
+# ============================================================
+
+# ============================================================
+# 🗑️ メッセージ一括削除（purge）
+# ============================================================
+@bot.tree.command(name="purge", description="【管理者】直近のメッセージを指定した件数削除します")
+@discord.app_commands.describe(count="削除するメッセージ数（1〜100）")
+async def purge(interaction: discord.Interaction, count: int):
+    if not await check_admin(interaction): return
+    if count < 1 or count > 100:
+        await interaction.response.send_message("❌ 1〜100の範囲で指定してください。", ephemeral=True); return
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=count)
+    await interaction.followup.send(f"🗑️ **{len(deleted)}件** のメッセージを削除しました。", ephemeral=True)
+
+
+# ============================================================
+# ♟️ オセロ（修正版）
 # ============================================================
 OTHELLO_EMPTY = "⬜"
 OTHELLO_BLACK = "⚫"
 OTHELLO_WHITE = "⚪"
+OTHELLO_HINT  = "🟩"
+COL_LABELS    = "ABCDEFGH"
 
 class OthelloGame:
     def __init__(self, player_black: discord.Member, player_white: discord.Member):
@@ -1119,10 +1140,18 @@ class OthelloGame:
         self.board = [[0]*8 for _ in range(8)]
         self.board[3][3] = 2; self.board[4][4] = 2
         self.board[3][4] = 1; self.board[4][3] = 1
-        self.current = 1
+        self.current = 1  # 1=黒, 2=白
+
+    @property
+    def current_player(self):
+        return self.player_black if self.current == 1 else self.player_white
+
+    @property
+    def current_emoji(self):
+        return "⚫" if self.current == 1 else "⚪"
 
     def get_valid_moves(self, color):
-        return [(r,c) for r in range(8) for c in range(8)
+        return [(r, c) for r in range(8) for c in range(8)
                 if self.board[r][c] == 0 and self._can_place(r, c, color)]
 
     def _can_place(self, row, col, color):
@@ -1131,9 +1160,12 @@ class OthelloGame:
             r, c = row+dr, col+dc
             found_opp = False
             while 0 <= r < 8 and 0 <= c < 8:
-                if self.board[r][c] == opp: found_opp = True
-                elif self.board[r][c] == color and found_opp: return True
-                else: break
+                if self.board[r][c] == opp:
+                    found_opp = True
+                elif self.board[r][c] == color and found_opp:
+                    return True
+                else:
+                    break
                 r += dr; c += dc
         return False
 
@@ -1144,11 +1176,14 @@ class OthelloGame:
             r, c = row+dr, col+dc
             to_flip = []
             while 0 <= r < 8 and 0 <= c < 8:
-                if self.board[r][c] == opp: to_flip.append((r,c))
+                if self.board[r][c] == opp:
+                    to_flip.append((r, c))
                 elif self.board[r][c] == color:
-                    for fr, fc in to_flip: self.board[fr][fc] = color
+                    for fr, fc in to_flip:
+                        self.board[fr][fc] = color
                     break
-                else: break
+                else:
+                    break
                 r += dr; c += dc
 
     def count(self):
@@ -1157,88 +1192,153 @@ class OthelloGame:
         return b, w
 
     def render(self, valid_moves=None):
-        cols = "　ａｂｃｄｅｆｇｈ"
-        rows_label = ["１","２","３","４","５","６","７","８"]
+        # ヘッダー行：空白＋A〜H
+        header = "⬛" + "".join(f"{c}️⃣" if c.isdigit() else {"A":"🇦","B":"🇧","C":"🇨","D":"🇩","E":"🇪","F":"🇫","G":"🇬","H":"🇭"}[c] for c in COL_LABELS)
         vm_set = set(valid_moves) if valid_moves else set()
-        lines = [cols]
+        lines = [header]
+        row_emojis = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣"]
         for r in range(8):
-            row_str = rows_label[r]
+            row_str = row_emojis[r]
             for c in range(8):
-                if self.board[r][c] == 1: row_str += OTHELLO_BLACK
+                if self.board[r][c] == 1:   row_str += OTHELLO_BLACK
                 elif self.board[r][c] == 2: row_str += OTHELLO_WHITE
-                elif (r,c) in vm_set: row_str += "🟩"
-                else: row_str += OTHELLO_EMPTY
+                elif (r, c) in vm_set:      row_str += OTHELLO_HINT
+                else:                        row_str += OTHELLO_EMPTY
             lines.append(row_str)
         return "\n".join(lines)
 
-othello_games: dict = {}
 
-class OthelloMoveSelect(discord.ui.Select):
-    def __init__(self, valid_moves, game):
-        self.game = game
-        col_labels = "abcdefgh"
-        options = [discord.SelectOption(label=f"{col_labels[c]}{r+1}", value=f"{r},{c}") for r,c in valid_moves[:25]]
-        super().__init__(placeholder="置く場所を選択してください", options=options)
+othello_games: dict = {}  # channel_id -> OthelloGame
 
-    async def callback(self, interaction: discord.Interaction):
-        game = self.game
-        current_player = game.player_black if game.current == 1 else game.player_white
-        if interaction.user.id != current_player.id:
-            await interaction.response.send_message("あなたの番ではありません！", ephemeral=True); return
-        r, c = map(int, self.values[0].split(","))
-        color = game.current
-        game.place(r, c, color)
-        game.current = 3 - color
-        next_moves = game.get_valid_moves(game.current)
-        skip_msg = ""
-        if not next_moves:
-            game.current = 3 - game.current
-            skip_moves = game.get_valid_moves(game.current)
-            if not skip_moves:
-                b, w = game.count()
-                if b > w: result = f"🎉 {game.player_black.mention} の勝ち！（⚫{b} vs ⚪{w}）"
-                elif w > b: result = f"🎉 {game.player_white.mention} の勝ち！（⚫{b} vs ⚪{w}）"
-                else: result = f"🤝 引き分け！（⚫{b} vs ⚪{w}）"
-                del othello_games[interaction.channel.id]
-                await interaction.response.edit_message(content=f"{game.render()}\n\n**ゲーム終了！**\n{result}", view=None)
-                return
-            next_moves = skip_moves
-            skip_msg = f"\n⏭️ スキップ！"
-        next_player = game.player_black if game.current == 1 else game.player_white
-        color_emoji = "⚫" if game.current == 1 else "⚪"
-        b, w = game.count()
-        view = discord.ui.View(timeout=300)
-        view.add_item(OthelloMoveSelect(next_moves, game))
-        await interaction.response.edit_message(
-            content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{color_emoji} {next_player.mention} の番です！",
-            view=view
-        )
+
+def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=300)
+
+    # 座標選択（行を選ぶSelect）
+    row_options = []
+    valid_rows = sorted(set(r for r, c in valid_moves))
+    for r in valid_rows:
+        row_options.append(discord.SelectOption(
+            label=f"{r+1}行目",
+            value=str(r),
+            description=f"置ける列: {', '.join(COL_LABELS[c] for _, c in valid_moves if _ == r)}"
+        ))
+
+    class RowSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(placeholder="① 行を選択（1〜8）", options=row_options, row=0)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != game.current_player.id:
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
+            selected_row = int(self.values[0])
+            col_options = [
+                discord.SelectOption(label=f"{COL_LABELS[c]}列", value=f"{selected_row},{c}")
+                for r, c in valid_moves if r == selected_row
+            ]
+            new_view = discord.ui.View(timeout=300)
+            new_view.add_item(ColSelect(col_options))
+            new_view.add_item(SurrenderButton())
+            await interaction.response.edit_message(
+                content=game.render(valid_moves) + f"\n\n{game.current_emoji} {game.current_player.mention} の番\n② 列を選択してください：",
+                view=new_view
+            )
+
+    class ColSelect(discord.ui.Select):
+        def __init__(self, col_options):
+            super().__init__(placeholder="② 列を選択（A〜H）", options=col_options, row=0)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != game.current_player.id:
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
+            r, c = map(int, self.values[0].split(","))
+            color = game.current
+            game.place(r, c, color)
+            game.current = 3 - color
+
+            next_moves = game.get_valid_moves(game.current)
+            skip_msg = ""
+            if not next_moves:
+                game.current = 3 - game.current
+                skip_moves = game.get_valid_moves(game.current)
+                if not skip_moves:
+                    # ゲーム終了
+                    b, w = game.count()
+                    if b > w:   result = f"🎉 {game.player_black.mention} の勝ち！（⚫{b} vs ⚪{w}）"
+                    elif w > b: result = f"🎉 {game.player_white.mention} の勝ち！（⚫{b} vs ⚪{w}）"
+                    else:       result = f"🤝 引き分け！（⚫{b} vs ⚪{w}）"
+                    del othello_games[interaction.channel.id]
+                    await interaction.response.edit_message(
+                        content=f"{game.render()}\n\n**ゲーム終了！**\n{result}", view=None
+                    )
+                    return
+                next_moves = skip_moves
+                skipped_emoji = "⚫" if game.current == 2 else "⚪"
+                skip_msg = f"\n⏭️ {skipped_emoji} は置ける場所がないためスキップ！"
+
+            b, w = game.count()
+            new_view = make_othello_view(game, next_moves, interaction.channel.id)
+            await interaction.response.edit_message(
+                content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（🟩 = 置ける場所）",
+                view=new_view
+            )
+
+    class SurrenderButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="🏳️ 降参する", style=discord.ButtonStyle.danger, row=1)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id not in [game.player_black.id, game.player_white.id]:
+                await interaction.response.send_message("❌ このゲームの参加者ではありません。", ephemeral=True); return
+            winner = game.player_white if interaction.user.id == game.player_black.id else game.player_black
+            del othello_games[interaction.channel.id]
+            await interaction.response.edit_message(
+                content=f"🏳️ **{interaction.user.display_name}** が降参しました！\n🎉 {winner.mention} の勝ち！",
+                view=None
+            )
+
+    view.add_item(RowSelect())
+    view.add_item(SurrenderButton())
+    return view
+
 
 @bot.tree.command(name="othello", description="オセロで対戦します！")
 @discord.app_commands.describe(opponent="対戦相手")
-async def othello(interaction: discord.Interaction, opponent: discord.Member):
+async def othello_cmd(interaction: discord.Interaction, opponent: discord.Member):
     if opponent.bot or opponent.id == interaction.user.id:
         await interaction.response.send_message("❌ その相手とは対戦できません。", ephemeral=True); return
     if interaction.channel.id in othello_games:
-        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True); return
+        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。`/othello_cancel` でキャンセルできます。", ephemeral=True); return
+
     game = OthelloGame(interaction.user, opponent)
     othello_games[interaction.channel.id] = game
     valid_moves = game.get_valid_moves(1)
     b, w = game.count()
-    view = discord.ui.View(timeout=300)
-    view.add_item(OthelloMoveSelect(valid_moves, game))
+    view = make_othello_view(game, valid_moves, interaction.channel.id)
     await interaction.response.send_message(
         f"♟️ **オセロ開始！**\n⚫ {interaction.user.mention} vs ⚪ {opponent.mention}\n\n"
-        f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番です！",
+        f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番！（🟩 = 置ける場所）",
         view=view
     )
 
+
+@bot.tree.command(name="othello_cancel", description="進行中のオセロをキャンセルします")
+async def othello_cancel(interaction: discord.Interaction):
+    game = othello_games.get(interaction.channel.id)
+    if not game:
+        await interaction.response.send_message("このチャンネルでオセロは進行していません。", ephemeral=True); return
+    if interaction.user.id not in [game.player_black.id, game.player_white.id] and not await is_admin(interaction):
+        await interaction.response.send_message("❌ 参加者か管理者のみキャンセルできます。", ephemeral=True); return
+    del othello_games[interaction.channel.id]
+    await interaction.response.send_message(f"🏳️ オセロをキャンセルしました。")
+
+
 # ============================================================
-# 🃏 UNO
+# 🃏 UNO（修正版）
 # ============================================================
-UNO_COLORS = ["🔴","🔵","🟢","🟡"]
+UNO_COLORS  = ["🔴", "🔵", "🟢", "🟡"]
 UNO_NUMBERS = ["0","1","2","3","4","5","6","7","8","9","Skip","Reverse","Draw2"]
-UNO_WILDS = ["Wild","Wild4"]
+UNO_WILDS   = ["Wild", "Wild4"]
 
 def make_uno_deck():
     deck = []
@@ -1251,22 +1351,30 @@ def make_uno_deck():
     random.shuffle(deck)
     return deck
 
-def uno_card_display(card):
-    return f"🌈{card}" if card.startswith("Wild") else card
+def uno_display(card: str) -> str:
+    if card == "Wild":   return "🌈ワイルド"
+    if card == "Wild4":  return "🌈+4ワイルド"
+    color = card[:2]
+    num   = card[2:]
+    num_map = {"Skip":"スキップ","Reverse":"リバース","Draw2":"+2"}
+    return f"{color}{num_map.get(num, num)}"
+
 
 class UNOGame:
-    def __init__(self, players):
-        self.players = players
-        self.hands = {p.id: [] for p in players}
-        self.deck = make_uno_deck()
-        self.discard = []
+    def __init__(self, players: list):
+        self.players    = players
+        self.hands      = {p.id: [] for p in players}
+        self.deck       = make_uno_deck()
+        self.discard    = []
         self.current_idx = 0
-        self.direction = 1
+        self.direction  = 1
         for _ in range(7):
-            for p in players: self.hands[p.id].append(self.deck.pop())
+            for p in players:
+                self.hands[p.id].append(self.deck.pop())
         while True:
             card = self.deck.pop()
-            if not card.startswith("Wild"): self.discard.append(card); break
+            if not card.startswith("Wild"):
+                self.discard.append(card); break
             self.deck.insert(0, card)
 
     @property
@@ -1274,92 +1382,156 @@ class UNOGame:
     @property
     def top_card(self): return self.discard[-1]
 
-    def can_play(self, card):
+    def can_play(self, card: str) -> bool:
         top = self.top_card
         if card.startswith("Wild"): return True
-        if top.startswith("Wild"): return False
+        if top.startswith("Wild"):  return False
         return card[:2] == top[:2] or card[2:] == top[2:]
 
-    def play_card(self, pid, card):
-        self.hands[pid].remove(card); self.discard.append(card)
+    def play_card(self, pid: int, card: str):
+        self.hands[pid].remove(card)
+        self.discard.append(card)
 
-    def draw_card(self, pid, count=1):
+    def draw_card(self, pid: int, count: int = 1) -> list:
         drawn = []
         for _ in range(count):
             if not self.deck:
-                self.deck = self.discard[:-1]; random.shuffle(self.deck)
+                self.deck = self.discard[:-1]
+                random.shuffle(self.deck)
                 self.discard = [self.discard[-1]]
             if self.deck:
-                card = self.deck.pop(); self.hands[pid].append(card); drawn.append(card)
+                c = self.deck.pop()
+                self.hands[pid].append(c)
+                drawn.append(c)
         return drawn
 
     def next_turn(self):
         self.current_idx = (self.current_idx + self.direction) % len(self.players)
 
-uno_games: dict = {}
-uno_lobbies: dict = {}
+    def skip_next(self):
+        self.next_turn()
+        self.next_turn()
 
-async def send_uno_status(channel, game, channel_id):
-    player = game.current_player
-    hand_counts = " / ".join(f"{p.display_name}:{len(game.hands[p.id])}枚" for p in game.players)
-    options = [discord.SelectOption(label=uno_card_display(c), value=c) for c in game.hands[player.id][:25]]
+    def hand_summary(self) -> str:
+        return " | ".join(f"{p.display_name}:{len(self.hands[p.id])}枚" for p in self.players)
 
-    class UNOCardSelect(discord.ui.Select):
+
+uno_games:   dict = {}  # channel_id -> UNOGame
+uno_lobbies: dict = {}  # channel_id -> [members]
+
+
+async def send_uno_turn(channel: discord.TextChannel, game: UNOGame, channel_id: int, extra_msg: str = ""):
+    player  = game.current_player
+    hand    = game.hands[player.id]
+    playable = [c for c in hand if game.can_play(c)]
+
+    # 手札をDMに送信
+    hand_str = "  ".join(uno_display(c) for c in hand)
+    dm_msg = (
+        f"🃏 **あなたの手札（{len(hand)}枚）**\n{hand_str}\n\n"
+        f"▶️ 場のカード: **{uno_display(game.top_card)}**\n"
+        f"出せるカード: {', '.join(uno_display(c) for c in playable) if playable else 'なし（カードを引いてください）'}\n\n"
+        f"⚠️ **操作はDiscordのチャンネルで行ってください！**"
+    )
+    try:
+        await player.send(dm_msg)
+    except Exception:
+        pass
+
+    # チャンネルに操作UIを送信
+    options = [discord.SelectOption(label=uno_display(c), value=c, description="✅ 出せる" if game.can_play(c) else "❌ 出せない") for c in hand[:25]]
+
+    class CardSelect(discord.ui.Select):
         def __init__(self):
-            super().__init__(placeholder="出すカードを選択", options=options)
+            super().__init__(placeholder="出すカードを選択してください", options=options)
+
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != game.current_player.id:
-                await interaction.response.send_message("あなたの番ではありません！", ephemeral=True); return
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
             card = self.values[0]
             if not game.can_play(card):
-                await interaction.response.send_message(f"❌ そのカードは出せません！", ephemeral=True); return
+                await interaction.response.send_message(f"❌ **{uno_display(card)}** は今出せません！", ephemeral=True); return
+
             game.play_card(interaction.user.id, card)
-            msg = f"🃏 {interaction.user.display_name} が **{uno_card_display(card)}** を出しました！"
+            msg = f"🃏 {interaction.user.display_name} が **{uno_display(card)}** を出しました！"
+
+            # 勝利チェック
             if not game.hands[interaction.user.id]:
                 del uno_games[channel_id]
-                await interaction.response.send_message(msg + f"\n\n🎉 **{interaction.user.mention} の勝利！！** 🎊")
+                await interaction.response.edit_message(content=msg + f"\n\n🎉 **{interaction.user.mention} の勝利！！** 🎊", view=None)
                 return
+
             if len(game.hands[interaction.user.id]) == 1:
-                msg += f"\n🔔 **UNO！**"
-            card_num = card[2:] if not card.startswith("Wild") else card
-            if card_num == "Skip":
+                msg += f"\n🔔 **UNO！** {interaction.user.display_name} 残り1枚！"
+
+            # 特殊カード処理
+            num = card[2:] if not card.startswith("Wild") else card
+            if num == "Skip":
                 game.next_turn()
                 msg += f"\n⏭️ {game.current_player.display_name} はスキップ！"
-            elif card_num == "Reverse":
-                game.direction *= -1; msg += "\n🔄 方向逆転！"
-            elif card_num == "Draw2":
-                game.next_turn(); victim = game.current_player
-                game.draw_card(victim.id, 2); msg += f"\n+2！ {victim.display_name} が2枚引きました！"
-            elif card_num == "Wild4":
-                game.next_turn(); victim = game.current_player
-                game.draw_card(victim.id, 4); msg += f"\n+4！ {victim.display_name} が4枚引きました！"
-            game.next_turn()
-            await interaction.response.send_message(msg)
-            await send_uno_status(interaction.channel, game, channel_id)
+                game.next_turn()
+            elif num == "Reverse":
+                game.direction *= -1
+                msg += "\n🔄 順番が逆転！"
+                game.next_turn()
+            elif num == "Draw2":
+                game.next_turn()
+                victim = game.current_player
+                game.draw_card(victim.id, 2)
+                msg += f"\n+2！ {victim.display_name} が2枚引きます！"
+                game.next_turn()
+            elif num == "Wild4":
+                game.next_turn()
+                victim = game.current_player
+                game.draw_card(victim.id, 4)
+                msg += f"\n+4！ {victim.display_name} が4枚引きます！"
+                game.next_turn()
+            else:
+                game.next_turn()
+
+            await interaction.response.edit_message(content=msg, view=None)
+            await send_uno_turn(interaction.channel, game, channel_id)
 
     class DrawButton(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="カードを引く", style=discord.ButtonStyle.secondary, row=1)
+            super().__init__(label="🎴 カードを引く", style=discord.ButtonStyle.secondary, row=1)
+
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != game.current_player.id:
-                await interaction.response.send_message("あなたの番ではありません！", ephemeral=True); return
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
             drawn = game.draw_card(interaction.user.id, 1)
+            msg = f"🎴 {interaction.user.display_name} が **{uno_display(drawn[0])}** を引きました。"
             game.next_turn()
-            await interaction.response.send_message(f"🎴 {interaction.user.display_name} が1枚引きました。")
-            await send_uno_status(interaction.channel, game, channel_id)
+            await interaction.response.edit_message(content=msg, view=None)
+            await send_uno_turn(interaction.channel, game, channel_id)
+
+    class SurrenderButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="🏳️ 降参", style=discord.ButtonStyle.danger, row=1)
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id not in game.hands:
+                await interaction.response.send_message("❌ このゲームの参加者ではありません。", ephemeral=True); return
+            del uno_games[channel_id]
+            await interaction.response.edit_message(
+                content=f"🏳️ **{interaction.user.display_name}** が降参しました！ゲームを終了します。",
+                view=None
+            )
 
     view = discord.ui.View(timeout=300)
-    view.add_item(UNOCardSelect())
+    view.add_item(CardSelect())
     view.add_item(DrawButton())
-    await channel.send(
-        f"**🃏 UNO** | 場: **{uno_card_display(game.top_card)}** | {hand_counts}\n"
-        f"➡️ **{player.display_name}** の番！",
-        view=view
+    view.add_item(SurrenderButton())
+
+    status = (
+        f"{extra_msg}\n" if extra_msg else ""
+        f"**🃏 UNO** | 場: **{uno_display(game.top_card)}**\n"
+        f"手札枚数: {game.hand_summary()}\n\n"
+        f"➡️ **{player.display_name}** の番！\n"
+        f"手札はDMを確認してください 📩"
     )
-    hand = game.hands[player.id]
-    hand_str = "  ".join(uno_card_display(c) for c in hand)
-    try: await player.send(f"🃏 手札（{len(hand)}枚）:\n{hand_str}")
-    except Exception: pass
+    await channel.send(status, view=view)
+
 
 @bot.tree.command(name="uno_start", description="UNOのロビーを作成します（2〜6人）")
 async def uno_start(interaction: discord.Interaction):
@@ -1372,48 +1544,81 @@ async def uno_start(interaction: discord.Interaction):
     class LobbyView(discord.ui.View):
         def __init__(self): super().__init__(timeout=120)
 
-        @discord.ui.button(label="参加する！", style=discord.ButtonStyle.success)
+        @discord.ui.button(label="✋ 参加する", style=discord.ButtonStyle.success)
         async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
             lobby = uno_lobbies.get(inter.channel.id, [])
             if inter.user in lobby:
                 await inter.response.send_message("既に参加しています！", ephemeral=True); return
             if len(lobby) >= 6:
-                await inter.response.send_message("満員です！", ephemeral=True); return
+                await inter.response.send_message("満員です！（最大6人）", ephemeral=True); return
             lobby.append(inter.user)
-            await inter.response.send_message(f"✅ {inter.user.display_name} が参加！（{len(lobby)}人）")
+            names = ", ".join(p.display_name for p in lobby)
+            await inter.response.send_message(f"✅ {inter.user.display_name} が参加！\n現在の参加者（{len(lobby)}人）: {names}")
 
-        @discord.ui.button(label="ゲーム開始！", style=discord.ButtonStyle.primary)
+        @discord.ui.button(label="🎮 ゲーム開始", style=discord.ButtonStyle.primary)
         async def start_btn(self, inter: discord.Interaction, button: discord.ui.Button):
             lobby = uno_lobbies.get(inter.channel.id, [])
             if inter.user.id != lobby[0].id:
-                await inter.response.send_message("ホストのみ開始できます！", ephemeral=True); return
+                await inter.response.send_message("❌ ホストのみ開始できます！", ephemeral=True); return
             if len(lobby) < 2:
-                await inter.response.send_message("2人以上必要です！", ephemeral=True); return
+                await inter.response.send_message("❌ 2人以上必要です！", ephemeral=True); return
             game = UNOGame(lobby)
             uno_games[inter.channel.id] = game
             del uno_lobbies[inter.channel.id]
-            await inter.response.send_message(f"🃏 **UNO開始！** 参加者: {', '.join(p.display_name for p in lobby)}")
-            await send_uno_status(inter.channel, game, inter.channel.id)
+            names = ", ".join(p.display_name for p in lobby)
+            await inter.response.send_message(
+                f"🃏 **UNO開始！**\n参加者（{len(lobby)}人）: {names}\n"
+                f"各自DMに手札を送ります。DMが受け取れるか確認してください！"
+            )
+            await send_uno_turn(inter.channel, game, inter.channel.id)
+
+        @discord.ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger)
+        async def cancel_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            lobby = uno_lobbies.get(inter.channel.id, [])
+            if inter.user.id != lobby[0].id:
+                await inter.response.send_message("❌ ホストのみキャンセルできます！", ephemeral=True); return
+            del uno_lobbies[inter.channel.id]
+            await inter.response.send_message("❌ ロビーをキャンセルしました。")
 
     await interaction.response.send_message(
-        f"🃏 **UNOロビー作成！** ホスト: {interaction.user.display_name}\n「参加する！」→「ゲーム開始！」",
+        f"🃏 **UNOロビー作成！**\nホスト: {interaction.user.display_name}\n\n"
+        f"「✋ 参加する」で参加 → 2人以上集まったら「🎮 ゲーム開始」を押してください！\n"
+        f"（最大6人）",
         view=LobbyView()
     )
 
-@bot.tree.command(name="uno_hand", description="自分の手札をDMで確認します")
+
+@bot.tree.command(name="uno_hand", description="自分の手札をDMで再送します")
 async def uno_hand(interaction: discord.Interaction):
     game = uno_games.get(interaction.channel.id)
     if not game:
-        await interaction.response.send_message("UNOは進行していません。", ephemeral=True); return
+        await interaction.response.send_message("現在UNOは進行していません。", ephemeral=True); return
     hand = game.hands.get(interaction.user.id)
     if hand is None:
-        await interaction.response.send_message("あなたはこのゲームに参加していません。", ephemeral=True); return
-    hand_str = "  ".join(uno_card_display(c) for c in hand)
+        await interaction.response.send_message("このゲームに参加していません。", ephemeral=True); return
+    hand_str = "  ".join(uno_display(c) for c in hand)
+    playable = [c for c in hand if game.can_play(c)]
     try:
-        await interaction.user.send(f"🃏 手札（{len(hand)}枚）:\n{hand_str}")
-        await interaction.response.send_message("✅ DMに手札を送りました！", ephemeral=True)
+        await interaction.user.send(
+            f"🃏 **手札（{len(hand)}枚）**\n{hand_str}\n\n"
+            f"▶️ 場のカード: **{uno_display(game.top_card)}**\n"
+            f"出せるカード: {', '.join(uno_display(c) for c in playable) if playable else 'なし'}\n\n"
+            f"⚠️ **操作はDiscordのチャンネルで行ってください！**"
+        )
+        await interaction.response.send_message("✅ DMに手札を送りました！チャンネルで操作してください。", ephemeral=True)
     except Exception:
         await interaction.response.send_message(f"🃏 手札（{len(hand)}枚）:\n{hand_str}", ephemeral=True)
+
+
+@bot.tree.command(name="uno_cancel", description="【管理者または参加者】進行中のUNOをキャンセルします")
+async def uno_cancel(interaction: discord.Interaction):
+    game = uno_games.get(interaction.channel.id)
+    if not game:
+        await interaction.response.send_message("UNOは進行していません。", ephemeral=True); return
+    if interaction.user.id not in game.hands and not await is_admin(interaction):
+        await interaction.response.send_message("❌ 参加者か管理者のみキャンセルできます。", ephemeral=True); return
+    del uno_games[interaction.channel.id]
+    await interaction.response.send_message("❌ UNOをキャンセルしました。")
         
 # ============================================================
 # 起動
