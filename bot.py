@@ -1320,9 +1320,13 @@ async def othello_cmd(interaction: discord.Interaction, opponent: discord.Member
     view = make_othello_view(game, valid_moves, interaction.channel.id)
     await interaction.response.send_message(
         f"♟️ **オセロ開始！**\n⚫ {interaction.user.mention} vs ⚪ {opponent.mention}\n\n"
-        f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番！（🟩 = 置ける場所）",
+        # othello_cmd の最後のsend_message内
+        f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番！（* = 置ける場所）",
+
+        # ColSelect callback内のedit_message
+        content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（* = 置ける場所）",,
         view=view
-    )
+            )
 
 
 @bot.tree.command(name="othello_cancel", description="進行中のオセロをキャンセルします")
