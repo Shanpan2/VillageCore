@@ -1193,7 +1193,7 @@ class OthelloGame:
 
     def render(self, valid_moves=None):
         # ヘッダー行：A〜H をシンプルに表示
-        header = "＿ＡＢＣＤＥＦＧＨ"
+        header = "　ＡＢＣＤＥＦＧＨ"
         vm_set = set(valid_moves) if valid_moves else set()
         lines = [header]
         row_emojis = ["１","２","３","４","５","６","７","８"]
