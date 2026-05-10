@@ -244,10 +244,10 @@ async def on_message(message: discord.Message):
                 async with message.channel.typing():
                     try:
                         response = await asyncio.to_thread(
-                        ai_client.models.generate_content,
-                        model="gemini-1.5-flash-latest",
-                        contents=content,
-                    )
+                            ai_client.models.generate_content,
+                            model="models/gemini-1.5-flash",
+                            contents=content,
+                        )
                         await message.reply(response.text)
                     except Exception as e:
                         await message.reply(f"❌ AIの応答に失敗しました: {e}")
