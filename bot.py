@@ -44,12 +44,13 @@ async def get_admin_role_name(guild_id: int) -> str:
     cfg_str = await db_get_config(f"admin_role_{guild_id}")
     return cfg_str if cfg_str else DEFAULT_ADMIN_ROLE
 
-def is_owner(interaction: discord.Interaction) -> bool:
-    return interaction.user.id == interaction.guild.owner_id
-
 async def is_admin(interaction: discord.Interaction) -> bool:
-    if is_owner(interaction):
+    # サーバーオーナーは常に管理者
+    if interaction.user.id == interaction.guild.owner_id:
         return True
+    # DBが初期化されていない場合のフォールバック
+    if db is None:
+        return False
     role_name = await get_admin_role_name(interaction.guild.id)
     return any(role.name == role_name for role in interaction.user.roles)
 
@@ -230,37 +231,40 @@ async def on_ready():
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
+        await bot.process_commands(message)
         return
 
     # Botメンションでアドバイス
-    if bot.user in message.mentions and openai_client:
-        # メンション部分を除去してテキスト取得
+    if bot.user.mentioned_in(message) and not message.mention_everyone:
         content = re.sub(r"<@!?\d+>", "", message.content).strip()
         if content:
-            async with message.channel.typing():
-                try:
-                    response = await openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "あなたはDiscordサーバー「村」の管理Botです。"
-                                    "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
-                                    "回答は300文字以内に収めてください。"
-                                )
-                            },
-                            {"role": "user", "content": content}
-                        ],
-                        max_tokens=400
-                    )
-                    reply = response.choices[0].message.content
-                    await message.reply(reply)
-                except Exception as e:
-                    await message.reply(f"❌ AIの応答に失敗しました: {e}")
-        return
+            if openai_client is None:
+                await message.reply("❌ OPENAI_API_KEYが設定されていません。RailwayのVariablesに追加してください。")
+            else:
+                async with message.channel.typing():
+                    try:
+                        response = await openai_client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "あなたはDiscordサーバー「村」の管理Botです。"
+                                        "出席管理・ゲーム・サーバー運営に関するアドバイスや質問に日本語で丁寧に答えてください。"
+                                        "回答は300文字以内に収めてください。"
+                                    )
+                                },
+                                {"role": "user", "content": content}
+                            ],
+                            max_tokens=400
+                        )
+                        reply = response.choices[0].message.content
+                        await message.reply(reply)
+                    except Exception as e:
+                        await message.reply(f"❌ AIの応答に失敗しました: {e}")
+            return
 
-    # xdy 形式のダイスロール（メッセージで反応）
+    # xdy 形式のダイスロール
     dice_match = re.search(r"\b(\d+)d(\d+)\b", message.content.lower())
     if dice_match:
         count = int(dice_match.group(1))
@@ -270,11 +274,11 @@ async def on_message(message: discord.Message):
             total   = sum(results)
             max_val = sides * count
             min_val = count
-            if total == max_val:        comment = "🌟 **クリティカル！！** 最高の出目！"
-            elif total == min_val:      comment = "💀 **ファンブル...** 最低の出目..."
+            if total == max_val:         comment = "🌟 **クリティカル！！** 最高の出目！"
+            elif total == min_val:       comment = "💀 **ファンブル...** 最低の出目..."
             elif total >= max_val * 0.8: comment = "✨ かなりいい出目！"
             elif total <= max_val * 0.2: comment = "😰 かなり低い出目..."
-            else:                       comment = "🎲 普通の出目。"
+            else:                        comment = "🎲 普通の出目。"
             dice_str = " + ".join(str(r) for r in results) if count > 1 else str(results[0])
             await message.reply(
                 f"🎲 `{count}d{sides}` を振りました！\n"
@@ -398,12 +402,13 @@ async def help_command(interaction: discord.Interaction):
 @bot.tree.command(name="config_admin_role", description="【サーバーオーナー専用】管理者ロール名を設定します")
 @discord.app_commands.describe(role="管理者として設定するロール")
 async def config_admin_role(interaction: discord.Interaction, role: discord.Role):
-    if not is_owner(interaction):
+    # サーバーオーナーチェック
+    if interaction.user.id != interaction.guild.owner_id:
         await interaction.response.send_message("❌ このコマンドはサーバーオーナーのみ使用できます。", ephemeral=True)
         return
     await db_set_config(f"admin_role_{interaction.guild.id}", role.name)
     await interaction.response.send_message(
-        f"✅ 管理者ロールを **{role.name}** に設定しました。\nこのロールを持つ人が管理者コマンドを使えます。",
+        f"✅ 管理者ロールを **{role.name}** に設定しました！",
         ephemeral=True
     )
 
