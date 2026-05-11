@@ -287,6 +287,7 @@ async def on_message(message: discord.Message):
                 embed = discord.Embed(color=0xFF0000)
 
                 if video_id and youtube_api_key:
+                    data = {}  # 事前に空で宣言
                     try:
                         api_url = (
                             f"https://www.googleapis.com/youtube/v3/videos"
@@ -296,32 +297,28 @@ async def on_message(message: discord.Message):
                         async with aiohttp.ClientSession() as session:
                             async with session.get(api_url) as resp:
                                 data = await resp.json()
-                        if data.get("items"):
-                            snippet = data["items"][0]["snippet"]
-                            title       = snippet.get("title", "タイトル不明")
-                            channel_name = snippet.get("channelTitle", "不明")
-                            description = snippet.get("description", "")
-                            # 概要欄から#タグを抽出
-                            tags = [w for w in description.split() if w.startswith("#")]
-                            tags_str = " ".join(tags[:10]) if tags else "なし"
-                            thumbnail = snippet.get("thumbnails", {}).get("high", {}).get("url", "")
-
-                            embed.title = f"🎬 {title}"
-                            embed.url   = url
-                            embed.add_field(name="👤 チャンネル", value=channel_name, inline=True)
-                            embed.add_field(name="🏷️ 概要欄のタグ", value=tags_str, inline=False)
-                            embed.set_footer(text=f"📤 {message.author.display_name} が {message.channel.name} で共有")
-                            if thumbnail:
-                                embed.set_image(url=thumbnail)
                     except Exception as e:
                         print(f"YouTube API エラー: {e}")
+
+                    if data.get("items"):
+                        snippet = data["items"][0]["snippet"]
+                        title        = snippet.get("title", "タイトル不明")
+                        channel_name = snippet.get("channelTitle", "不明")
+                        description  = snippet.get("description", "")
+                        tags         = [w for w in description.split() if w.startswith("#")]
+                        tags_str     = " ".join(tags[:10]) if tags else "なし"
+                        thumbnail    = snippet.get("thumbnails", {}).get("high", {}).get("url", "")
+                        embed.title  = f"🎬 {title}"
+                        embed.url    = url
+                        embed.add_field(name="👤 チャンネル", value=channel_name, inline=True)
+                        embed.add_field(name="🏷️ 概要欄のタグ", value=tags_str, inline=False)
+                        embed.set_footer(text=f"📤 {message.author.display_name} が {message.channel.name} で共有")
+                        if thumbnail:
+                            embed.set_image(url=thumbnail)
+                    else:
                         embed.title = "📺 YouTube動画"
                         embed.url   = url
                         embed.set_footer(text=f"📤 {message.author.display_name} が共有")
-                else:
-                    embed.title = "📺 YouTube動画"
-                    embed.url   = url
-                    embed.set_footer(text=f"📤 {message.author.display_name} が共有")
 
                 await target_channel.send(embed=embed)
                 
