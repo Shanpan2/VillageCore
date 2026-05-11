@@ -8,6 +8,7 @@ import random
 import re
 import asyncio
 import google.genai as genai
+import aiohttp
 
 TOKEN        = os.environ.get("DISCORD_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -267,6 +268,63 @@ async def on_message(message: discord.Message):
                 f"{comment}"
             )
 
+# #おちゃめ村タグ付きYouTubeリンクを自動転送
+    if ("youtube.com" in message.content or "youtu.be" in message.content) and "#おちゃめ村" in message.content:
+        target_channel = bot.get_channel(1405736791339696289)
+        if target_channel and message.channel.id != target_channel.id:
+            words = message.content.split()
+            urls = [w for w in words if "youtube.com" in w or "youtu.be" in w]
+            if urls:
+                url = urls[0]
+                # YouTube動画IDを抽出
+                video_id = None
+                if "youtube.com/watch?v=" in url:
+                    video_id = url.split("v=")[1].split("&")[0]
+                elif "youtu.be/" in url:
+                    video_id = url.split("youtu.be/")[1].split("?")[0]
+
+                youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
+                embed = discord.Embed(color=0xFF0000)
+
+                if video_id and youtube_api_key:
+                    try:
+                        api_url = (
+                            f"https://www.googleapis.com/youtube/v3/videos"
+                            f"?id={video_id}&key={youtube_api_key}"
+                            f"&part=snippet"
+                        )
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(api_url) as resp:
+                                data = await resp.json()
+                        if data.get("items"):
+                            snippet = data["items"][0]["snippet"]
+                            title       = snippet.get("title", "タイトル不明")
+                            channel_name = snippet.get("channelTitle", "不明")
+                            description = snippet.get("description", "")
+                            # 概要欄から#タグを抽出
+                            tags = [w for w in description.split() if w.startswith("#")]
+                            tags_str = " ".join(tags[:10]) if tags else "なし"
+                            thumbnail = snippet.get("thumbnails", {}).get("high", {}).get("url", "")
+
+                            embed.title = f"🎬 {title}"
+                            embed.url   = url
+                            embed.add_field(name="👤 チャンネル", value=channel_name, inline=True)
+                            embed.add_field(name="🏷️ 概要欄のタグ", value=tags_str, inline=False)
+                            embed.set_footer(text=f"📤 {message.author.display_name} が {message.channel.name} で共有")
+                            if thumbnail:
+                                embed.set_image(url=thumbnail)
+                    except Exception as e:
+                        print(f"YouTube API エラー: {e}")
+                        embed.title = "📺 YouTube動画"
+                        embed.url   = url
+                        embed.set_footer(text=f"📤 {message.author.display_name} が共有")
+                else:
+                    embed.title = "📺 YouTube動画"
+                    embed.url   = url
+                    embed.set_footer(text=f"📤 {message.author.display_name} が共有")
+
+                await target_channel.send(embed=embed)
+                
     await bot.process_commands(message)
 
 # ============================================================
