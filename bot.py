@@ -1014,9 +1014,23 @@ OMIKUJI_LIST = [
 ]
 OMIKUJI_WEIGHTS = [10, 20, 20, 25, 15, 7, 3]
 
-@bot.tree.command(name="omikuji", description="おみくじを引きます！今日の運勢は？")
+@bot.tree.command(name="omikuji", description="おみくじを引きます！今日の運勢は？（1日1回）")
 async def omikuji(interaction: discord.Interaction):
+    # 1日1回チェック
+    today = datetime.now().strftime("%Y-%m-%d")
+    key = f"omikuji_{interaction.user.id}_{today}"
+    already = await db_get_config(key)
+    if already:
+        result, emoji, _ = next((o for o in OMIKUJI_LIST if o[0] == already), ("？", "🎋", ""))
+        await interaction.response.send_message(
+            f"⚠️ 今日はもうおみくじを引いています！\n今日の結果: **{emoji} {already}**\nまた明日引いてね！",
+            ephemeral=True
+        )
+        return
+
     result, emoji, message = random.choices(OMIKUJI_LIST, weights=OMIKUJI_WEIGHTS, k=1)[0]
+    await db_set_config(key, result)
+
     color_map = {
         "大吉": 0xFFD700, "中吉": 0xFF69B4, "小吉": 0x98FB98,
         "吉": 0x87CEEB, "末吉": 0xDDA0DD, "凶": 0xFFA500, "大凶": 0xFF4500
