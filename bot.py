@@ -1374,26 +1374,6 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
     return view
 
 
-@bot.tree.command(name="othello", description="オセロで対戦します！")
-@discord.app_commands.describe(opponent="対戦相手")
-async def othello_cmd(interaction: discord.Interaction, opponent: discord.Member):
-    if opponent.bot or opponent.id == interaction.user.id:
-        await interaction.response.send_message("❌ その相手とは対戦できません。", ephemeral=True); return
-    if interaction.channel.id in othello_games:
-        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。`/othello_cancel` でキャンセルできます。", ephemeral=True); return
-
-    game = OthelloGame(interaction.user, opponent)
-    othello_games[interaction.channel.id] = game
-    valid_moves = game.get_valid_moves(1)
-    b, w = game.count()
-    view = make_othello_view(game, valid_moves, interaction.channel.id)
-    await interaction.response.send_message(
-    f"♟️ **オセロ開始！**\n⚫ {interaction.user.mention} vs ⚪ {opponent.mention}\n\n"
-    f"{game.render(valid_moves)}\n⚫{b} vs ⚪{w}\n⚫ {interaction.user.mention} の番！（* = 置ける場所）",
-    view=view
-    )
-
-
 @bot.tree.command(name="othello_cancel", description="進行中のオセロをキャンセルします")
 async def othello_cancel(interaction: discord.Interaction):
     game = othello_games.get(interaction.channel.id)
@@ -1691,6 +1671,178 @@ async def uno_cancel(interaction: discord.Interaction):
         await interaction.response.send_message("❌ 参加者か管理者のみキャンセルできます。", ephemeral=True); return
     del uno_games[interaction.channel.id]
     await interaction.response.send_message("❌ UNOをキャンセルしました。")
+
+# ============================================================
+# ♟️ オセロ募集機能（既存のothello_cmdを置き換え）
+# ============================================================
+@bot.tree.command(name="othello", description="オセロの対戦相手を募集します！")
+async def othello_cmd(interaction: discord.Interaction):
+    if interaction.channel.id in othello_games:
+        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True); return
+
+    class OthelloLobbyView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=600)  # 10分
+            self.opponent = None
+
+        @discord.ui.button(label="✋ 対戦する！", style=discord.ButtonStyle.success)
+        async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            if inter.user.id == interaction.user.id:
+                await inter.response.send_message("❌ 自分とは対戦できません！", ephemeral=True); return
+            if inter.user.bot:
+                await inter.response.send_message("❌ Botとは対戦できません！", ephemeral=True); return
+            self.opponent = inter.user
+            self.stop()
+
+            # オセロ開始
+            game = OthelloGame(interaction.user, inter.user)
+            othello_games[interaction.channel.id] = game
+            valid_moves = game.get_valid_moves(1)
+            b, w = game.count()
+            view = make_othello_view(game, valid_moves, interaction.channel.id)
+            await inter.response.edit_message(
+                content=(
+                    f"♟️ **オセロ開始！**\n"
+                    f"⚫ {interaction.user.mention} vs ⚪ {inter.user.mention}\n\n"
+                    f"{game.render(valid_moves)}\n"
+                    f"⚫{b} vs ⚪{w}\n"
+                    f"⚫ {interaction.user.mention} の番！（* = 置ける場所）"
+                ),
+                view=view
+            )
+
+        @discord.ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger)
+        async def cancel_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            if inter.user.id != interaction.user.id:
+                await inter.response.send_message("❌ 募集者のみキャンセルできます！", ephemeral=True); return
+            self.stop()
+            await inter.response.edit_message(content="❌ オセロの募集をキャンセルしました。", view=None)
+
+        async def on_timeout(self):
+            try:
+                await interaction.edit_original_response(
+                    content="⏰ 10分間対戦相手が見つからなかったため、募集を終了しました。",
+                    view=None
+                )
+            except Exception:
+                pass
+
+    await interaction.response.send_message(
+        f"♟️ **オセロ対戦募集！**\n"
+        f"{interaction.user.mention} が対戦相手を募集しています！\n"
+        f"「✋ 対戦する！」を押して参加してください。\n"
+        f"⏰ 10分間待機します。",
+        view=OthelloLobbyView()
+    )
+
+
+# ============================================================
+# 🎫 チケットシステム
+# ============================================================
+@bot.tree.command(name="ticket_setup", description="【管理者】チケット発行ボタンを設置します")
+@discord.app_commands.describe(
+    title="ボタンメッセージのタイトル",
+    description="ボタンメッセージの説明文"
+)
+async def ticket_setup(
+    interaction: discord.Interaction,
+    title: str = "📮 ご意見・改善案はこちら",
+    description: str = "村への意見・改善案がある方は下のボタンを押してチケットを発行してください。\n内容は管理者のみに共有されます。"
+):
+    if not await check_admin(interaction): return
+
+    class TicketButtonView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)  # 永続
+
+        @discord.ui.button(label="📩 チケットを発行する", style=discord.ButtonStyle.primary, custom_id="ticket_create")
+        async def create_ticket(self, inter: discord.Interaction, button: discord.ui.Button):
+            # 既にチケットがあるか確認
+            existing = discord.utils.get(
+                inter.guild.channels,
+                name=f"ticket-{inter.user.name.lower().replace(' ', '-')}"
+            )
+            if existing:
+                await inter.response.send_message(
+                    f"❌ 既にチケットがあります: {existing.mention}",
+                    ephemeral=True
+                ); return
+
+            # 管理者ロール取得
+            admin_role_name = await get_admin_role_name(inter.guild.id)
+            admin_role = discord.utils.get(inter.guild.roles, name=admin_role_name)
+
+            # チケット用チャンネルの権限設定
+            overwrites = {
+                inter.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                inter.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                inter.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            }
+            if admin_role:
+                overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
+            # チケットカテゴリを探す（なければ作る）
+            category = discord.utils.get(inter.guild.categories, name="📮 チケット")
+            if category is None:
+                category = await inter.guild.create_category("📮 チケット")
+
+            # チャンネル作成
+            channel = await inter.guild.create_text_channel(
+                name=f"ticket-{inter.user.name.lower().replace(' ', '-')}",
+                category=category,
+                overwrites=overwrites,
+                topic=f"{inter.user.display_name} のチケット"
+            )
+
+            # チケット内容入力モーダル
+            class TicketModal(discord.ui.Modal, title="ご意見・改善案の入力"):
+                content_input = discord.ui.TextInput(
+                    label="内容",
+                    placeholder="村への意見・改善案などを自由にご記入ください",
+                    style=discord.TextStyle.long,
+                    max_length=1000
+                )
+
+                async def on_submit(self, modal_inter: discord.Interaction):
+                    admin_mention = admin_role.mention if admin_role else "管理者"
+                    embed = discord.Embed(
+                        title="📮 新しいチケット",
+                        description=self.content_input.value,
+                        color=0x534AB7
+                    )
+                    embed.set_author(name=inter.user.display_name, icon_url=inter.user.display_avatar.url)
+                    embed.set_footer(text=f"チケットID: {channel.name}")
+
+                    class CloseView(discord.ui.View):
+                        def __init__(self):
+                            super().__init__(timeout=None)
+
+                        @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="ticket_close")
+                        async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
+                            if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
+                                await close_inter.response.send_message("❌ チケット作成者か管理者のみ閉じられます。", ephemeral=True); return
+                            await close_inter.response.send_message("🗑️ チケットを閉じます...")
+                            await asyncio.sleep(3)
+                            await channel.delete(reason=f"チケットクローズ by {close_inter.user}")
+
+                    await channel.send(
+                        content=f"{inter.user.mention} {admin_mention}",
+                        embed=embed,
+                        view=CloseView()
+                    )
+                    await modal_inter.response.send_message(
+                        f"✅ チケットを発行しました！ {channel.mention} をご確認ください。",
+                        ephemeral=True
+                    )
+
+            await inter.response.send_modal(TicketModal())
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=0x534AB7
+    )
+    await interaction.response.send_message(embed=embed, view=TicketButtonView())
         
 # ============================================================
 # 起動
