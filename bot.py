@@ -1753,20 +1753,27 @@ async def ticket_setup(
 
     class TicketButtonView(discord.ui.View):
         def __init__(self):
-            super().__init__(timeout=None)  # 永続
+            super().__init__(timeout=None)
 
         @discord.ui.button(label="📩 チケットを発行する", style=discord.ButtonStyle.primary, custom_id="ticket_create")
         async def create_ticket(self, inter: discord.Interaction, button: discord.ui.Button):
             # 既にチケットがあるか確認
-            existing = discord.utils.get(
-                inter.guild.channels,
-                name=f"ticket-{inter.user.name.lower().replace(' ', '-')}"
-            )
+            existing = None
+            for ch in inter.guild.channels:
+                if "ticket-" in ch.name and inter.user.name.lower().replace(' ', '-') in ch.name:
+                    existing = ch
+                    break
             if existing:
                 await inter.response.send_message(
                     f"❌ 既にチケットがあります: {existing.mention}",
                     ephemeral=True
                 ); return
+
+            # チケット番号を取得・更新
+            ticket_num_str = await db_get_config("ticket_counter")
+            ticket_num = int(ticket_num_str) + 1 if ticket_num_str else 1
+            await db_set_config("ticket_counter", str(ticket_num))
+            ticket_id = f"{ticket_num:02d}"  # 01, 02, 03...
 
             # 管理者ロール取得
             admin_role_name = await get_admin_role_name(inter.guild.id)
@@ -1788,10 +1795,10 @@ async def ticket_setup(
 
             # チャンネル作成
             channel = await inter.guild.create_text_channel(
-                name=f"ticket-{inter.user.name.lower().replace(' ', '-')}",
+                name=f"ticket-{ticket_id}-{inter.user.name.lower().replace(' ', '-')}",
                 category=category,
                 overwrites=overwrites,
-                topic=f"{inter.user.display_name} のチケット"
+                topic=f"チケット#{ticket_id} | {inter.user.display_name}"
             )
 
             # チケット内容入力モーダル
@@ -1806,21 +1813,27 @@ async def ticket_setup(
                 async def on_submit(self, modal_inter: discord.Interaction):
                     admin_mention = admin_role.mention if admin_role else "管理者"
                     embed = discord.Embed(
-                        title="📮 新しいチケット",
+                        title=f"📮 チケット #{ticket_id}",
                         description=self.content_input.value,
                         color=0x534AB7
                     )
-                    embed.set_author(name=inter.user.display_name, icon_url=inter.user.display_avatar.url)
-                    embed.set_footer(text=f"チケットID: {channel.name}")
+                    embed.set_author(
+                        name=inter.user.display_name,
+                        icon_url=inter.user.display_avatar.url
+                    )
+                    embed.set_footer(text=f"チケットID: {ticket_id} | {inter.user.name}")
 
                     class CloseView(discord.ui.View):
                         def __init__(self):
                             super().__init__(timeout=None)
 
-                        @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="ticket_close")
+                        @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.danger, custom_id=f"ticket_close_{ticket_id}")
                         async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
                             if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
-                                await close_inter.response.send_message("❌ チケット作成者か管理者のみ閉じられます。", ephemeral=True); return
+                                await close_inter.response.send_message(
+                                    "❌ チケット作成者か管理者のみ閉じられます。",
+                                    ephemeral=True
+                                ); return
                             await close_inter.response.send_message("🗑️ チケットを閉じます...")
                             await asyncio.sleep(3)
                             await channel.delete(reason=f"チケットクローズ by {close_inter.user}")
@@ -1831,7 +1844,7 @@ async def ticket_setup(
                         view=CloseView()
                     )
                     await modal_inter.response.send_message(
-                        f"✅ チケットを発行しました！ {channel.mention} をご確認ください。",
+                        f"✅ チケット #{ticket_id} を発行しました！\n{channel.mention} をご確認ください。",
                         ephemeral=True
                     )
 
@@ -1842,6 +1855,7 @@ async def ticket_setup(
         description=description,
         color=0x534AB7
     )
+    embed.set_footer(text="チケットの内容は管理者のみに共有されます。")
     await interaction.response.send_message(embed=embed, view=TicketButtonView())
         
 # ============================================================
