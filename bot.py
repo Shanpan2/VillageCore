@@ -1724,68 +1724,6 @@ async def uno_cancel(interaction: discord.Interaction):
     del uno_games[interaction.channel.id]
     await interaction.response.send_message("❌ UNOをキャンセルしました。")
 
-# ============================================================
-# ♟️ オセロ募集機能（既存のothello_cmdを置き換え）
-# ============================================================
-@bot.tree.command(name="othello", description="オセロの対戦相手を募集します！")
-async def othello_cmd(interaction: discord.Interaction):
-    if interaction.channel.id in othello_games:
-        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True); return
-
-    class OthelloLobbyView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=600)  # 10分
-            self.opponent = None
-
-        @discord.ui.button(label="✋ 対戦する！", style=discord.ButtonStyle.success)
-        async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
-            if inter.user.id == interaction.user.id:
-                await inter.response.send_message("❌ 自分とは対戦できません！", ephemeral=True); return
-            if inter.user.bot:
-                await inter.response.send_message("❌ Botとは対戦できません！", ephemeral=True); return
-            self.opponent = inter.user
-            self.stop()
-
-            # オセロ開始
-            game = OthelloGame(interaction.user, inter.user)
-            othello_games[interaction.channel.id] = game
-            valid_moves = game.get_valid_moves(1)
-            b, w = game.count()
-            view = make_othello_view(game, valid_moves, interaction.channel.id)
-            await inter.response.edit_message(
-                content=(
-                    f"♟️ **オセロ開始！**\n"
-                    f"⚫ {interaction.user.mention} vs ⚪ {inter.user.mention}\n\n"
-                    f"{game.render(valid_moves)}\n"
-                    f"⚫{b} vs ⚪{w}\n"
-                    f"⚫ {interaction.user.mention} の番！（* = 置ける場所）"
-                ),
-                view=view
-            )
-
-        @discord.ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger)
-        async def cancel_btn(self, inter: discord.Interaction, button: discord.ui.Button):
-            if inter.user.id != interaction.user.id:
-                await inter.response.send_message("❌ 募集者のみキャンセルできます！", ephemeral=True); return
-            self.stop()
-            await inter.response.edit_message(content="❌ オセロの募集をキャンセルしました。", view=None)
-
-        async def on_timeout(self):
-            try:
-                await interaction.edit_original_response(
-                    content="⏰ 10分間対戦相手が見つからなかったため、募集を終了しました。",
-                    view=None
-                )
-            except Exception:
-                pass
-
-    await interaction.response.send_message(
-        f"♟️ **オセロ対戦募集！**\n"
-        f"{interaction.user.mention} が対戦相手を募集しています！\n"
-        f"「✋ 対戦する！」を押して参加してください。\n"
-        f"⏰ 10分間待機します。",
-        view=OthelloLobbyView()
-    )
 
 
 # ============================================================
@@ -1920,6 +1858,79 @@ async def ticket_setup(
     )
     embed.set_footer(text="チケットの内容は管理者のみに共有されます。")
     await interaction.response.send_message(embed=embed, view=TicketButtonView())
+    
+    # ============================================================
+# 🎭 ロールパネル
+# ============================================================
+@bot.tree.command(name="role_panel", description="【管理者】ロール付与パネルを作成します")
+@discord.app_commands.describe(
+    title="パネルのタイトル",
+    description="パネルの説明文（省略可）"
+)
+async def role_panel(interaction: discord.Interaction, title: str, description: str = ""):
+    if not await check_admin(interaction): return
+
+    # ロール選択（最大20個）
+    options = [
+        discord.SelectOption(
+            label=role.name,
+            value=str(role.id),
+            description=f"@{role.name}"
+        )
+        for role in interaction.guild.roles
+        if not role.managed and role.name != "@everyone" and role < interaction.guild.me.top_role
+    ]
+
+    if not options:
+        await interaction.response.send_message("❌ 付与できるロールがありません。", ephemeral=True); return
+
+    options = options[:20]
+
+    class RoleSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(
+                placeholder="ロールを選択してください（複数可）",
+                options=options,
+                min_values=1,
+                max_values=len(options),
+                custom_id=f"role_panel_{interaction.id}"
+            )
+
+        async def callback(self, inter: discord.Interaction):
+            added = []
+            removed = []
+            for role_id in self.values:
+                role = inter.guild.get_role(int(role_id))
+                if role is None: continue
+                if role in inter.user.roles:
+                    await inter.user.remove_roles(role, reason="ロールパネルで削除")
+                    removed.append(role.name)
+                else:
+                    await inter.user.add_roles(role, reason="ロールパネルで付与")
+                    added.append(role.name)
+
+            msg = ""
+            if added:
+                msg += f"✅ 付与: {', '.join(f'**{r}**' for r in added)}\n"
+            if removed:
+                msg += f"🗑️ 削除: {', '.join(f'**{r}**' for r in removed)}"
+            if not msg:
+                msg = "変更はありませんでした。"
+
+            await inter.response.send_message(msg, ephemeral=True)
+
+    class RolePanelView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(RoleSelect())
+
+    embed = discord.Embed(
+        title=f"🎭 {title}",
+        description=description if description else "下のメニューからロールを選んでください。\n既に持っているロールを選ぶと削除されます。",
+        color=0x534AB7
+    )
+    embed.set_footer(text="複数選択可 | 選択済みのロールを選ぶと削除されます")
+    await interaction.response.send_message(embed=embed, view=RolePanelView())
         
 # ============================================================
 # 起動
