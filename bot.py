@@ -1194,13 +1194,9 @@ async def purge(interaction: discord.Interaction, count: int):
 
 
 # ============================================================
-# ♟️ オセロ（修正版）
+# ♟️ オセロ
 # ============================================================
-OTHELLO_EMPTY = "⬜"
-OTHELLO_BLACK = "⚫"
-OTHELLO_WHITE = "⚪"
-OTHELLO_HINT  = "🟩"
-COL_LABELS    = "ABCDEFGH"
+othello_games: dict = {}
 
 class OthelloGame:
     def __init__(self, player_black: discord.Member, player_white: discord.Member):
@@ -1209,7 +1205,8 @@ class OthelloGame:
         self.board = [[0]*8 for _ in range(8)]
         self.board[3][3] = 2; self.board[4][4] = 2
         self.board[3][4] = 1; self.board[4][3] = 1
-        self.current = 1  # 1=黒, 2=白
+        self.current = 1
+        self.last_move = None  # 直前の手
 
     @property
     def current_player(self):
@@ -1241,6 +1238,7 @@ class OthelloGame:
     def place(self, row, col, color):
         opp = 3 - color
         self.board[row][col] = color
+        self.last_move = (row, col)
         for dr, dc in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
             r, c = row+dr, col+dc
             to_flip = []
@@ -1263,37 +1261,33 @@ class OthelloGame:
     def render(self, valid_moves=None):
         vm_set = set(valid_moves) if valid_moves else set()
         lines = ["```"]
-        lines.append("┌───┬─A─┬─B─┬─C─┬─D─┬─E─┬─F─┬─G─┬─H─┐")
+        lines.append("  A B C D E F G H")
         for r in range(8):
-            row_str = f"│ {r+1} │"
+            row_str = f"{r+1} "
             for c in range(8):
-                if self.board[r][c] == 1:   row_str += " ● │"
-                elif self.board[r][c] == 2: row_str += " ○ │"
-                elif (r, c) in vm_set:      row_str += " * │"
-                else:                        row_str += "   │"
+                if self.last_move and (r, c) == self.last_move:
+                    # 直前に置いた場所を強調
+                    row_str += "[#]" if self.board[r][c] == 1 else "[O]"
+                elif self.board[r][c] == 1:   row_str += " # "
+                elif self.board[r][c] == 2:   row_str += " O "
+                elif (r, c) in vm_set:        row_str += " * "
+                else:                          row_str += " . "
             lines.append(row_str)
-            if r < 7:
-                lines.append("├───┼───┼───┼───┼───┼───┼───┼───┼───┤")
-        lines.append("└───┴───┴───┴───┴───┴───┴───┴───┴───┘")
         lines.append("```")
-        lines.append("● = 黒  ○ = 白  \\* = 置ける場所")
+        lines.append("# = 黒  O = 白  \\* = 置ける場所  [#]/[O] = 直前の手")
         return "\n".join(lines)
-
-
-othello_games: dict = {}  # channel_id -> OthelloGame
 
 
 def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=300)
 
-    # 座標選択（行を選ぶSelect）
-    row_options = []
     valid_rows = sorted(set(r for r, c in valid_moves))
+    row_options = []
     for r in valid_rows:
         row_options.append(discord.SelectOption(
             label=f"{r+1}行目",
             value=str(r),
-            description=f"置ける列: {', '.join(COL_LABELS[c] for _, c in valid_moves if _ == r)}"
+            description=f"置ける列: {', '.join('ABCDEFGH'[c] for _, c in valid_moves if _ == r)}"
         ))
 
     class RowSelect(discord.ui.Select):
@@ -1305,7 +1299,7 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
                 await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
             selected_row = int(self.values[0])
             col_options = [
-                discord.SelectOption(label=f"{COL_LABELS[c]}列", value=f"{selected_row},{c}")
+                discord.SelectOption(label=f"{'ABCDEFGH'[c]}列", value=f"{selected_row},{c}")
                 for r, c in valid_moves if r == selected_row
             ]
             new_view = discord.ui.View(timeout=300)
@@ -1334,14 +1328,14 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
                 game.current = 3 - game.current
                 skip_moves = game.get_valid_moves(game.current)
                 if not skip_moves:
-                    # ゲーム終了
                     b, w = game.count()
                     if b > w:   result = f"🎉 {game.player_black.mention} の勝ち！（⚫{b} vs ⚪{w}）"
                     elif w > b: result = f"🎉 {game.player_white.mention} の勝ち！（⚫{b} vs ⚪{w}）"
                     else:       result = f"🤝 引き分け！（⚫{b} vs ⚪{w}）"
                     del othello_games[interaction.channel.id]
                     await interaction.response.edit_message(
-                        content=f"{game.render()}\n\n**ゲーム終了！**\n{result}", view=None
+                        content=f"{game.render()}\n\n**ゲーム終了！**\n{result}",
+                        view=None
                     )
                     return
                 next_moves = skip_moves
@@ -1351,7 +1345,7 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
             b, w = game.count()
             new_view = make_othello_view(game, next_moves, interaction.channel.id)
             await interaction.response.edit_message(
-                content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（🟩 = 置ける場所）",
+                content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（* = 置ける場所）",
                 view=new_view
             )
 
@@ -1360,8 +1354,9 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
             super().__init__(label="🏳️ 降参する", style=discord.ButtonStyle.danger, row=1)
 
         async def callback(self, interaction: discord.Interaction):
+            # 参加者のみ降参可能
             if interaction.user.id not in [game.player_black.id, game.player_white.id]:
-                await interaction.response.send_message("❌ このゲームの参加者ではありません。", ephemeral=True); return
+                await interaction.response.send_message("❌ このゲームの参加者のみ降参できます。", ephemeral=True); return
             winner = game.player_white if interaction.user.id == game.player_black.id else game.player_black
             del othello_games[interaction.channel.id]
             await interaction.response.edit_message(
@@ -1374,15 +1369,72 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
     return view
 
 
-@bot.tree.command(name="othello_cancel", description="進行中のオセロをキャンセルします")
+@bot.tree.command(name="othello", description="オセロの対戦相手を募集します！")
+async def othello_cmd(interaction: discord.Interaction):
+    if interaction.channel.id in othello_games:
+        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True); return
+
+    class OthelloLobbyView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=600)
+
+        @discord.ui.button(label="✋ 対戦する！", style=discord.ButtonStyle.success)
+        async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            if inter.user.id == interaction.user.id:
+                await inter.response.send_message("❌ 自分とは対戦できません！", ephemeral=True); return
+            if inter.user.bot:
+                await inter.response.send_message("❌ Botとは対戦できません！", ephemeral=True); return
+            game = OthelloGame(interaction.user, inter.user)
+            othello_games[interaction.channel.id] = game
+            valid_moves = game.get_valid_moves(1)
+            b, w = game.count()
+            view = make_othello_view(game, valid_moves, interaction.channel.id)
+            await inter.response.edit_message(
+                content=(
+                    f"♟️ **オセロ開始！**\n"
+                    f"⚫ {interaction.user.mention} vs ⚪ {inter.user.mention}\n\n"
+                    f"{game.render(valid_moves)}\n"
+                    f"⚫{b} vs ⚪{w}\n"
+                    f"⚫ {interaction.user.mention} の番！（* = 置ける場所）"
+                ),
+                view=view
+            )
+
+        @discord.ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger)
+        async def cancel_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            # 募集者のみキャンセル可能
+            if inter.user.id != interaction.user.id:
+                await inter.response.send_message("❌ 募集者のみキャンセルできます！", ephemeral=True); return
+            self.stop()
+            await inter.response.edit_message(content="❌ オセロの募集をキャンセルしました。", view=None)
+
+        async def on_timeout(self):
+            try:
+                await interaction.edit_original_response(
+                    content="⏰ 10分間対戦相手が見つからなかったため、募集を終了しました。",
+                    view=None
+                )
+            except Exception:
+                pass
+
+    await interaction.response.send_message(
+        f"♟️ **オセロ対戦募集！**\n"
+        f"{interaction.user.mention} が対戦相手を募集しています！\n"
+        f"「✋ 対戦する！」を押して参加してください。\n"
+        f"⏰ 10分間待機します。",
+        view=OthelloLobbyView()
+    )
+
+
+@bot.tree.command(name="othello_cancel", description="自分が参加しているオセロをキャンセルします")
 async def othello_cancel(interaction: discord.Interaction):
     game = othello_games.get(interaction.channel.id)
     if not game:
         await interaction.response.send_message("このチャンネルでオセロは進行していません。", ephemeral=True); return
-    if interaction.user.id not in [game.player_black.id, game.player_white.id] and not await is_admin(interaction):
-        await interaction.response.send_message("❌ 参加者か管理者のみキャンセルできます。", ephemeral=True); return
+    if interaction.user.id not in [game.player_black.id, game.player_white.id]:
+        await interaction.response.send_message("❌ 参加者のみキャンセルできます。", ephemeral=True); return
     del othello_games[interaction.channel.id]
-    await interaction.response.send_message(f"🏳️ オセロをキャンセルしました。")
+    await interaction.response.send_message(f"🏳️ {interaction.user.display_name} がオセロをキャンセルしました。")
 
 
 # ============================================================
@@ -1837,6 +1889,17 @@ async def ticket_setup(
                             await close_inter.response.send_message("🗑️ チケットを閉じます...")
                             await asyncio.sleep(3)
                             await channel.delete(reason=f"チケットクローズ by {close_inter.user}")
+
+                        @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger, custom_id=f"ticket_delete_{ticket_id}")
+                        async def delete_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
+                            if not await is_admin(close_inter):
+                                await close_inter.response.send_message(
+                                    "❌ 管理者のみ使用できます。",
+                                    ephemeral=True
+                                ); return
+                            await close_inter.response.send_message("🗑️ チャンネルを削除します...")
+                            await asyncio.sleep(3)
+                            await channel.delete(reason=f"管理者によるチャンネル削除: {close_inter.user}")
 
                     await channel.send(
                         content=f"{inter.user.mention} {admin_mention}",
