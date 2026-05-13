@@ -1813,193 +1813,117 @@ async def uno_cancel(interaction: discord.Interaction):
 # ============================================================
 # 🎫 チケットシステム
 # ============================================================
-@bot.tree.command(name="ticket_setup", description="【管理者】チケット発行ボタンを設置します")
-@discord.app_commands.describe(
-    title="ボタンメッセージのタイトル",
-    description="ボタンメッセージの説明文"
-)
-async def ticket_setup(
-    interaction: discord.Interaction,
-    title: str = "📮 ご意見・改善案はこちら",
-    description: str = "村への意見・改善案がある方は下のボタンを押してチケットを発行してください。\n内容は管理者のみに共有されます。"
-):
-    if not await check_admin(interaction):
-        return
+@discord.ui.button(label="📩 チケットを発行する", style=discord.ButtonStyle.primary, custom_id="ticket_create")
+async def create_ticket(self, inter: discord.Interaction, button: discord.ui.Button):
 
-    class TicketButtonView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=None)
+    # ❌ defer も send_message も絶対に使わない
+    # ここでレスポンスを返すのは send_modal のみ
 
-        @discord.ui.button(label="📩 チケットを発行する", style=discord.ButtonStyle.primary, custom_id="ticket_create")
-        async def create_ticket(self, inter: discord.Interaction, button: discord.ui.Button):
+    # チケット番号
+    ticket_num_str = await db_get_config("ticket_counter")
+    ticket_num = int(ticket_num_str) + 1 if ticket_num_str else 1
+    await db_set_config("ticket_counter", str(ticket_num))
+    ticket_id = f"{ticket_num:02d}"
 
-            # 既にチケットがあるか確認
-            existing = None
-            for ch in inter.guild.channels:
-                if "ticket-" in ch.name and inter.user.name.lower().replace(' ', '-') in ch.name:
-                    existing = ch
-                    break
-            if existing:
-                await inter.followup.send(
-                    f"❌ 既にチケットがあります: {existing.mention}",
-                    ephemeral=True
-                )
-                return
+    # 管理者ロール
+    admin_role_name = await get_admin_role_name(inter.guild.id)
+    admin_role = discord.utils.get(inter.guild.roles, name=admin_role_name)
 
-            # チケット番号を取得・更新
-            ticket_num_str = await db_get_config("ticket_counter")
-            ticket_num = int(ticket_num_str) + 1 if ticket_num_str else 1
-            await db_set_config("ticket_counter", str(ticket_num))
-            ticket_id = f"{ticket_num:02d}"
-
-            # 管理者ロール取得
-            admin_role_name = await get_admin_role_name(inter.guild.id)
-            admin_role = discord.utils.get(inter.guild.roles, name=admin_role_name)
-
-            # チケット用チャンネルの権限設定
-            overwrites = {
+    # カテゴリ
+    category = discord.utils.get(inter.guild.categories, name="📮 チケット")
+    if category is None:
+        category = await inter.guild.create_category(
+            "📮 チケット",
+            overwrites={
                 inter.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                inter.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-                inter.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+                inter.guild.me: discord.PermissionOverwrite(view_channel=True),
             }
-            if admin_role:
-                overwrites[admin_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        )
 
-            # チケットカテゴリを探す（なければ作る）
-            category = discord.utils.get(inter.guild.categories, name="📮 チケット")
-            if category is None:
-                try:
-                    category = await inter.guild.create_category(
-                        "📮 チケット",
-                        overwrites={
-                            inter.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                            inter.guild.me: discord.PermissionOverwrite(view_channel=True),
-                        }
+    # チャンネル作成
+    channel = await inter.guild.create_text_channel(
+        name=f"ticket-{ticket_id}-{inter.user.name.lower().replace(' ', '-')}",
+        category=category,
+        overwrites={
+            inter.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            inter.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            inter.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            admin_role: discord.PermissionOverwrite(view_channel=True, send_messages=True) if admin_role else None
+        },
+        topic=f"チケット#{ticket_id} | {inter.user.display_name}"
+    )
+
+    # モーダル定義
+    class TicketInputModal(discord.ui.Modal, title="ご意見・改善案の入力"):
+        content_input = discord.ui.TextInput(
+            label="内容",
+            placeholder="村への意見・改善案などを自由にご記入ください",
+            style=discord.TextStyle.long,
+            max_length=1000
+        )
+
+        async def on_submit(self, modal_inter: discord.Interaction):
+            embed = discord.Embed(
+                title=f"📮 チケット #{ticket_id}",
+                description=self.content_input.value,
+                color=0x534AB7
+            )
+            embed.set_author(
+                name=inter.user.display_name,
+                icon_url=inter.user.display_avatar.url
+            )
+
+            # 閉じる/削除ボタン
+            class CloseView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=None)
+
+                @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.success)
+                async def close_btn(self, close_inter: discord.Interaction, btn):
+                    if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
+                        await close_inter.response.send_message("❌ 権限がありません。", ephemeral=True)
+                        return
+
+                    # コメント禁止（管理者以外）
+                    new_overwrites = channel.overwrites.copy()
+                    new_overwrites[inter.user] = discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=False
                     )
-                except discord.Forbidden:
-                    await inter.followup.send("❌ カテゴリを作成する権限がありません。", ephemeral=True)
-                    return
-
-            # チャンネル作成
-            try:
-                channel = await inter.guild.create_text_channel(
-                    name=f"ticket-{ticket_id}-{inter.user.name.lower().replace(' ', '-')}",
-                    category=category,
-                    overwrites=overwrites,
-                    topic=f"チケット#{ticket_id} | {inter.user.display_name}"
-                )
-            except discord.Forbidden:
-                await inter.followup.send("❌ チャンネルを作成する権限がありません。Botに「チャンネルの管理」権限を付与してください。", ephemeral=True)
-                return
-
-            # 「閉じる」「削除」ボタン付きビュー
-            def make_close_view():
-                class CloseView(discord.ui.View):
-                    def __init__(self):
-                        super().__init__(timeout=None)
-
-                    @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.success, custom_id=f"ticket_close_{ticket_id}")
-                    async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                        # 作成者 or 管理者のみ
-                        if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
-                            await close_inter.response.send_message(
-                                "❌ チケット作成者か管理者のみ閉じられます。",
-                                ephemeral=True
-                            )
-                            return
-
-                        # コメント禁止（管理者以外）にする
-                        new_overwrites = channel.overwrites.copy()
-
-                        # 作成者は閲覧のみ
-                        new_overwrites[inter.user] = discord.PermissionOverwrite(
+                    if admin_role:
+                        new_overwrites[admin_role] = discord.PermissionOverwrite(
                             view_channel=True,
-                            send_messages=False,
-                            read_message_history=True
+                            send_messages=True
                         )
-
-                        # デフォルトロールは見えないまま
-                        default_ow = new_overwrites.get(inter.guild.default_role, discord.PermissionOverwrite())
-                        default_ow.view_channel = False
-                        default_ow.send_messages = False
-                        new_overwrites[inter.guild.default_role] = default_ow
-
-                        # 管理者ロールは書き込み可のまま
-                        if admin_role:
-                            admin_ow = new_overwrites.get(admin_role, discord.PermissionOverwrite())
-                            admin_ow.view_channel = True
-                            admin_ow.send_messages = True
-                            admin_ow.read_message_history = True
-                            new_overwrites[admin_role] = admin_ow
-
-                        # Bot は書き込み可
-                        me_ow = new_overwrites.get(inter.guild.me, discord.PermissionOverwrite())
-                        me_ow.view_channel = True
-                        me_ow.send_messages = True
-                        me_ow.read_message_history = True
-                        new_overwrites[inter.guild.me] = me_ow
-
-                        await channel.edit(overwrites=new_overwrites, reason=f"チケット#{ticket_id} をクローズ")
-                        await close_inter.response.send_message("🗂️ このチケットはクローズされました。（管理者のみ書き込み可能）", ephemeral=True)
-
-                    @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger, custom_id=f"ticket_delete_{ticket_id}")
-                    async def delete_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                        # 管理者のみ
-                        if not await is_admin(close_inter):
-                            await close_inter.response.send_message(
-                                "❌ 管理者のみ使用できます。",
-                                ephemeral=True
-                            )
-                            return
-                        await close_inter.response.send_message("🗑️ チャンネルを削除します...", ephemeral=True)
-                        await asyncio.sleep(3)
-                        try:
-                            await channel.delete(reason=f"管理者によるチャンネル削除: {close_inter.user}")
-                        except Exception:
-                            pass
-
-                return CloseView()
-
-            # チケット内容入力モーダル
-            class TicketInputModal(discord.ui.Modal, title="ご意見・改善案の入力"):
-                content_input = discord.ui.TextInput(
-                    label="内容",
-                    placeholder="村への意見・改善案などを自由にご記入ください",
-                    style=discord.TextStyle.long,
-                    max_length=1000
-                )
-
-                async def on_submit(self, modal_inter: discord.Interaction):
-                    admin_mention = admin_role.mention if admin_role else "管理者"
-                    embed = discord.Embed(
-                        title=f"📮 チケット #{ticket_id}",
-                        description=self.content_input.value,
-                        color=0x534AB7
-                    )
-                    embed.set_author(
-                        name=inter.user.display_name,
-                        icon_url=inter.user.display_avatar.url
-                    )
-                    embed.set_footer(text=f"チケットID: {ticket_id} | {inter.user.name}")
-
-                    await channel.send(
-                        content=f"{inter.user.mention} {admin_mention}",
-                        embed=embed,
-                        view=make_close_view()
-                    )
-                    await modal_inter.response.send_message(
-                        f"✅ チケット #{ticket_id} を発行しました！\n{channel.mention} をご確認ください。",
-                        ephemeral=True
+                    new_overwrites[inter.guild.default_role] = discord.PermissionOverwrite(
+                        view_channel=False
                     )
 
-            await inter.followup.send("✅ チケットチャンネルを作成しました！入力フォームを開きます。", ephemeral=True)
-            await inter.user.send(f"📮 チケット #{ticket_id} が作成されました！\n{channel.mention} で内容を確認・追記できます。")
-            await inter.user.send("✏️ これから送るモーダルに、意見・改善案を入力してください。")
-            await inter.user.send("（もしモーダルが表示されない場合は、Discord クライアントを確認してください）")
+                    await channel.edit(overwrites=new_overwrites)
+                    await close_inter.response.send_message("🗂️ チケットをクローズしました。", ephemeral=True)
 
-            # モーダルを送信
-            await inter.followup.send("✏️ モーダルを開きます...", ephemeral=True)
-            await inter.response.send_modal(TicketInputModal())
+                @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger)
+                async def delete_btn(self, close_inter: discord.Interaction, btn):
+                    if not await is_admin(close_inter):
+                        await close_inter.response.send_message("❌ 管理者のみ使用できます。", ephemeral=True)
+                        return
+                    await close_inter.response.send_message("🗑️ 削除します...", ephemeral=True)
+                    await channel.delete()
+
+            await channel.send(
+                content=f"{inter.user.mention} {admin_role.mention if admin_role else ''}",
+                embed=embed,
+                view=CloseView()
+            )
+
+            await modal_inter.response.send_message(
+                f"✅ チケット #{ticket_id} を作成しました！\n{channel.mention}",
+                ephemeral=True
+            )
+
+    # ❗ここが最重要：最初のレスポンスとしてモーダルを送る
+    await inter.response.send_modal(TicketInputModal())
+
 
 
     embed = discord.Embed(
