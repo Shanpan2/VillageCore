@@ -1,24 +1,27 @@
+import discord
 from discord.ext import commands
-from bot_instance import bot  # あなたの bot インスタンス
+import asyncio
 
-# ③ cogs の読み込み ← ここに入れる
-bot.load_extension("cogs.clean")
-bot.load_extension("cogs.reminder")
-bot.load_extension("cogs.vote")
-bot.load_extension("cogs.janken")
-bot.load_extension("cogs.ai")  # AI応答を作るなら
-bot.load_extension("cogs.music")
-bot.load_extension("cogs.welcome")
+from bot_instance import bot  # bot インスタンス
 
+# ====== Cogs の読み込み ======
+async def load_cogs():
+    await bot.load_extension("cogs.clean")
+    await bot.load_extension("cogs.reminder")
+    await bot.load_extension("cogs.vote")
+    await bot.load_extension("cogs.janken")
+    await bot.load_extension("cogs.ai")
+    await bot.load_extension("cogs.music")
+    await bot.load_extension("cogs.welcome")
 
 # ====== Features ======
-from features.ticket import setup_ticket_system
-from features.role_panel import setup_role_panel
-from features.attendance import setup_attendance
-from features.othello import setup_othello
-from features.dice import setup_dice
-from features.omikuji import setup_omikuji
-from features.meigen import setup_meigen
+from Features.ticket import setup_ticket_system
+from Features.role_panel import setup_role_panel
+from Features.attendance import setup_attendance
+from Features.othello import setup_othello
+from Features.dice import setup_dice
+from Features.omikuji import setup_omikuji
+from Features.meigen import setup_meigen
 
 # ====== Views ======
 from views.ticket_views import TicketButtonView
@@ -39,8 +42,7 @@ def setup_features():
 
 setup_features()
 
-
-# ====== Persistent Views ======
+# ====== Bot Ready ======
 @bot.event
 async def on_ready():
     bot.add_view(TicketButtonView(bot))
@@ -53,5 +55,12 @@ async def on_ready():
 
     print("Bot is ready")
 
-bot.run(TOKEN)
+# ====== メイン処理 ======
+async def main():
+    async with bot:
+        await load_cogs()
+        await bot.start("YOUR_TOKEN_HERE")
+
+asyncio.run(main())
+
 
