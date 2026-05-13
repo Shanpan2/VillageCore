@@ -1194,10 +1194,72 @@ async def purge(interaction: discord.Interaction, count: int):
 
 
 # ============================================================
-# ♟️ オセロ
+# ♟️ オセロ（画像版）
 # ============================================================
 othello_games: dict = {}
 
+from PIL import Image, ImageDraw
+import io
+
+def render_othello_image(game, valid_moves=None) -> discord.File:
+    CELL = 60
+    MARGIN = 40
+    SIZE = CELL * 8 + MARGIN * 2
+
+    img = Image.new("RGB", (SIZE, SIZE), (34, 139, 34))
+    draw = ImageDraw.Draw(img)
+
+    # グリッド線
+    for i in range(9):
+        x = MARGIN + i * CELL
+        y = MARGIN + i * CELL
+        draw.line([(x, MARGIN), (x, MARGIN + CELL*8)], fill=(0, 100, 0), width=2)
+        draw.line([(MARGIN, y), (MARGIN + CELL*8, y)], fill=(0, 100, 0), width=2)
+
+    # 列ラベル
+    col_labels = "ABCDEFGH"
+    for i, label in enumerate(col_labels):
+        x = MARGIN + i * CELL + CELL // 2 - 8
+        draw.text((x, 8), label, fill="white")
+
+    # 行ラベル
+    for i in range(8):
+        y = MARGIN + i * CELL + CELL // 2 - 10
+        draw.text((10, y), str(i + 1), fill="white")
+
+    vm_set = set(valid_moves) if valid_moves else set()
+
+    for r in range(8):
+        for c in range(8):
+            cx = MARGIN + c * CELL + CELL // 2
+            cy = MARGIN + r * CELL + CELL // 2
+            radius = CELL // 2 - 5
+
+            if game.board[r][c] == 1:
+                draw.ellipse([cx-radius, cy-radius, cx+radius, cy+radius],
+                             fill=(30, 30, 30), outline=(100,100,100), width=2)
+                if game.last_move == (r, c):
+                    draw.ellipse([cx-8, cy-8, cx+8, cy+8], fill=(100, 100, 255))
+
+            elif game.board[r][c] == 2:
+                draw.ellipse([cx-radius, cy-radius, cx+radius, cy+radius],
+                             fill=(240, 240, 240), outline=(150,150,150), width=2)
+                if game.last_move == (r, c):
+                    draw.ellipse([cx-8, cy-8, cx+8, cy+8], fill=(255, 100, 100))
+
+            elif (r, c) in vm_set:
+                draw.ellipse([cx-15, cy-15, cx+15, cy+15],
+                             fill=(144, 238, 144), outline=(0,180,0), width=2)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return discord.File(buf, filename="othello.png")
+
+
+# ============================================================
+# Othello Game Class
+# ============================================================
 class OthelloGame:
     def __init__(self, player_black: discord.Member, player_white: discord.Member):
         self.player_black = player_black
@@ -1206,7 +1268,7 @@ class OthelloGame:
         self.board[3][3] = 2; self.board[4][4] = 2
         self.board[3][4] = 1; self.board[4][3] = 1
         self.current = 1
-        self.last_move = None  # 直前の手
+        self.last_move = None
 
     @property
     def current_player(self):
@@ -1258,26 +1320,10 @@ class OthelloGame:
         w = sum(row.count(2) for row in self.board)
         return b, w
 
-    def render(self, valid_moves=None):
-        vm_set = set(valid_moves) if valid_moves else set()
-        lines = ["```"]
-        lines.append("  A B C D E F G H")
-        for r in range(8):
-            row_str = f"{r+1} "
-            for c in range(8):
-                if self.last_move and (r, c) == self.last_move:
-                    # 直前に置いた場所を強調
-                    row_str += "[#]" if self.board[r][c] == 1 else "[O]"
-                elif self.board[r][c] == 1:   row_str += " # "
-                elif self.board[r][c] == 2:   row_str += " O "
-                elif (r, c) in vm_set:        row_str += " * "
-                else:                          row_str += " . "
-            lines.append(row_str)
-        lines.append("```")
-        lines.append("# = 黒  O = 白  \\* = 置ける場所  [#]/[O] = 直前の手")
-        return "\n".join(lines)
 
-
+# ============================================================
+# UI View
+# ============================================================
 def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=300)
 
@@ -1296,17 +1342,23 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != game.current_player.id:
-                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True)
+                return
+
             selected_row = int(self.values[0])
             col_options = [
                 discord.SelectOption(label=f"{'ABCDEFGH'[c]}列", value=f"{selected_row},{c}")
                 for r, c in valid_moves if r == selected_row
             ]
+
             new_view = discord.ui.View(timeout=300)
             new_view.add_item(ColSelect(col_options))
-            new_view.add_item(SurrenderButton())
+            b, w = game.count()
+            new_view = make_othello_view(game, next_moves, interaction.channel.id)
+            file = render_othello_image(game, next_moves)
             await interaction.response.edit_message(
-                content=game.render(valid_moves) + f"\n\n{game.current_emoji} {game.current_player.mention} の番\n② 列を選択してください：",
+                content=f"⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！",
+                attachments=[file],
                 view=new_view
             )
 
@@ -1316,7 +1368,9 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
 
         async def callback(self, interaction: discord.Interaction):
             if interaction.user.id != game.current_player.id:
-                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True); return
+                await interaction.response.send_message("❌ あなたの番ではありません！", ephemeral=True)
+                return
+
             r, c = map(int, self.values[0].split(","))
             color = game.current
             game.place(r, c, color)
@@ -1324,28 +1378,42 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
 
             next_moves = game.get_valid_moves(game.current)
             skip_msg = ""
+
             if not next_moves:
                 game.current = 3 - game.current
                 skip_moves = game.get_valid_moves(game.current)
+
                 if not skip_moves:
                     b, w = game.count()
-                    if b > w:   result = f"🎉 {game.player_black.mention} の勝ち！（⚫{b} vs ⚪{w}）"
-                    elif w > b: result = f"🎉 {game.player_white.mention} の勝ち！（⚫{b} vs ⚪{w}）"
-                    else:       result = f"🤝 引き分け！（⚫{b} vs ⚪{w}）"
+                    if b > w:
+                        result = f"🎉 {game.player_black.mention} の勝ち！（⚫{b} vs ⚪{w}）"
+                    elif w > b:
+                        result = f"🎉 {game.player_white.mention} の勝ち！（⚫{b} vs ⚪{w}）"
+                    else:
+                        result = f"🤝 引き分け！（⚫{b} vs ⚪{w}）"
+
+                    del othello_games[interaction.channel.id]
+
+                    file = render_othello_image(game)
                     del othello_games[interaction.channel.id]
                     await interaction.response.edit_message(
-                        content=f"{game.render()}\n\n**ゲーム終了！**\n{result}",
+                        content=f"**ゲーム終了！**\n{result}",
+                        attachments=[file],
                         view=None
                     )
                     return
+
                 next_moves = skip_moves
                 skipped_emoji = "⚫" if game.current == 2 else "⚪"
                 skip_msg = f"\n⏭️ {skipped_emoji} は置ける場所がないためスキップ！"
 
             b, w = game.count()
             new_view = make_othello_view(game, next_moves, interaction.channel.id)
+            file = render_othello_image(game, next_moves)
+
             await interaction.response.edit_message(
-                content=f"{game.render(next_moves)}{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！（* = 置ける場所）",
+                content=f"{skip_msg}\n⚫{b} vs ⚪{w}\n{game.current_emoji} {game.current_player.mention} の番！",
+                attachments=[file],
                 view=new_view
             )
 
@@ -1354,11 +1422,13 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
             super().__init__(label="🏳️ 降参する", style=discord.ButtonStyle.danger, row=1)
 
         async def callback(self, interaction: discord.Interaction):
-            # 参加者のみ降参可能
             if interaction.user.id not in [game.player_black.id, game.player_white.id]:
-                await interaction.response.send_message("❌ このゲームの参加者のみ降参できます。", ephemeral=True); return
+                await interaction.response.send_message("❌ このゲームの参加者のみ降参できます。", ephemeral=True)
+                return
+
             winner = game.player_white if interaction.user.id == game.player_black.id else game.player_black
             del othello_games[interaction.channel.id]
+
             await interaction.response.edit_message(
                 content=f"🏳️ **{interaction.user.display_name}** が降参しました！\n🎉 {winner.mention} の勝ち！",
                 view=None
@@ -1369,10 +1439,14 @@ def make_othello_view(game: OthelloGame, valid_moves: list, channel_id: int) -> 
     return view
 
 
+# ============================================================
+# Slash Commands
+# ============================================================
 @bot.tree.command(name="othello", description="オセロの対戦相手を募集します！")
 async def othello_cmd(interaction: discord.Interaction):
     if interaction.channel.id in othello_games:
-        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True); return
+        await interaction.response.send_message("❌ このチャンネルでは既にオセロが進行中です。", ephemeral=True)
+        return
 
     class OthelloLobbyView(discord.ui.View):
         def __init__(self):
@@ -1381,30 +1455,36 @@ async def othello_cmd(interaction: discord.Interaction):
         @discord.ui.button(label="✋ 対戦する！", style=discord.ButtonStyle.success)
         async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
             if inter.user.id == interaction.user.id:
-                await inter.response.send_message("❌ 自分とは対戦できません！", ephemeral=True); return
+                await inter.response.send_message("❌ 自分とは対戦できません！", ephemeral=True)
+                return
             if inter.user.bot:
-                await inter.response.send_message("❌ Botとは対戦できません！", ephemeral=True); return
+                await inter.response.send_message("❌ Botとは対戦できません！", ephemeral=True)
+                return
+
             game = OthelloGame(interaction.user, inter.user)
             othello_games[interaction.channel.id] = game
+
             valid_moves = game.get_valid_moves(1)
             b, w = game.count()
             view = make_othello_view(game, valid_moves, interaction.channel.id)
+            file = render_othello_image(game, valid_moves)
             await inter.response.edit_message(
                 content=(
                     f"♟️ **オセロ開始！**\n"
-                    f"⚫ {interaction.user.mention} vs ⚪ {inter.user.mention}\n\n"
-                    f"{game.render(valid_moves)}\n"
+                    f"⚫ {interaction.user.mention} vs ⚪ {inter.user.mention}\n"
                     f"⚫{b} vs ⚪{w}\n"
-                    f"⚫ {interaction.user.mention} の番！（* = 置ける場所）"
+                    f"⚫ {interaction.user.mention} の番！"
                 ),
+                attachments=[file],
                 view=view
             )
 
         @discord.ui.button(label="❌ キャンセル", style=discord.ButtonStyle.danger)
         async def cancel_btn(self, inter: discord.Interaction, button: discord.ui.Button):
-            # 募集者のみキャンセル可能
             if inter.user.id != interaction.user.id:
-                await inter.response.send_message("❌ 募集者のみキャンセルできます！", ephemeral=True); return
+                await inter.response.send_message("❌ 募集者のみキャンセルできます！", ephemeral=True)
+                return
+
             self.stop()
             await inter.response.edit_message(content="❌ オセロの募集をキャンセルしました。", view=None)
 
@@ -1430,11 +1510,15 @@ async def othello_cmd(interaction: discord.Interaction):
 async def othello_cancel(interaction: discord.Interaction):
     game = othello_games.get(interaction.channel.id)
     if not game:
-        await interaction.response.send_message("このチャンネルでオセロは進行していません。", ephemeral=True); return
+        await interaction.response.send_message("このチャンネルでオセロは進行していません。", ephemeral=True)
+        return
     if interaction.user.id not in [game.player_black.id, game.player_white.id]:
-        await interaction.response.send_message("❌ 参加者のみキャンセルできます。", ephemeral=True); return
+        await interaction.response.send_message("❌ 参加者のみキャンセルできます。", ephemeral=True)
+        return
+
     del othello_games[interaction.channel.id]
     await interaction.response.send_message(f"🏳️ {interaction.user.display_name} がオセロをキャンセルしました。")
+
 
 
 # ============================================================
@@ -1739,7 +1823,8 @@ async def ticket_setup(
     title: str = "📮 ご意見・改善案はこちら",
     description: str = "村への意見・改善案がある方は下のボタンを押してチケットを発行してください。\n内容は管理者のみに共有されます。"
 ):
-    if not await check_admin(interaction): return
+    if not await check_admin(interaction):
+        return
 
     class TicketButtonView(discord.ui.View):
         def __init__(self):
@@ -1759,7 +1844,8 @@ async def ticket_setup(
                 await inter.followup.send(
                     f"❌ 既にチケットがあります: {existing.mention}",
                     ephemeral=True
-                ); return
+                )
+                return
 
             # チケット番号を取得・更新
             ticket_num_str = await db_get_config("ticket_counter")
@@ -1792,7 +1878,8 @@ async def ticket_setup(
                         }
                     )
                 except discord.Forbidden:
-                    await inter.followup.send("❌ カテゴリを作成する権限がありません。", ephemeral=True); return
+                    await inter.followup.send("❌ カテゴリを作成する権限がありません。", ephemeral=True)
+                    return
 
             # チャンネル作成
             try:
@@ -1803,10 +1890,79 @@ async def ticket_setup(
                     topic=f"チケット#{ticket_id} | {inter.user.display_name}"
                 )
             except discord.Forbidden:
-                await inter.followup.send("❌ チャンネルを作成する権限がありません。Botに「チャンネルの管理」権限を付与してください。", ephemeral=True); return
+                await inter.followup.send("❌ チャンネルを作成する権限がありません。Botに「チャンネルの管理」権限を付与してください。", ephemeral=True)
+                return
+
+            # 「閉じる」「削除」ボタン付きビュー
+            def make_close_view():
+                class CloseView(discord.ui.View):
+                    def __init__(self):
+                        super().__init__(timeout=None)
+
+                    @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.success, custom_id=f"ticket_close_{ticket_id}")
+                    async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
+                        # 作成者 or 管理者のみ
+                        if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
+                            await close_inter.response.send_message(
+                                "❌ チケット作成者か管理者のみ閉じられます。",
+                                ephemeral=True
+                            )
+                            return
+
+                        # コメント禁止（管理者以外）にする
+                        new_overwrites = channel.overwrites.copy()
+
+                        # 作成者は閲覧のみ
+                        new_overwrites[inter.user] = discord.PermissionOverwrite(
+                            view_channel=True,
+                            send_messages=False,
+                            read_message_history=True
+                        )
+
+                        # デフォルトロールは見えないまま
+                        default_ow = new_overwrites.get(inter.guild.default_role, discord.PermissionOverwrite())
+                        default_ow.view_channel = False
+                        default_ow.send_messages = False
+                        new_overwrites[inter.guild.default_role] = default_ow
+
+                        # 管理者ロールは書き込み可のまま
+                        if admin_role:
+                            admin_ow = new_overwrites.get(admin_role, discord.PermissionOverwrite())
+                            admin_ow.view_channel = True
+                            admin_ow.send_messages = True
+                            admin_ow.read_message_history = True
+                            new_overwrites[admin_role] = admin_ow
+
+                        # Bot は書き込み可
+                        me_ow = new_overwrites.get(inter.guild.me, discord.PermissionOverwrite())
+                        me_ow.view_channel = True
+                        me_ow.send_messages = True
+                        me_ow.read_message_history = True
+                        new_overwrites[inter.guild.me] = me_ow
+
+                        await channel.edit(overwrites=new_overwrites, reason=f"チケット#{ticket_id} をクローズ")
+                        await close_inter.response.send_message("🗂️ このチケットはクローズされました。（管理者のみ書き込み可能）", ephemeral=True)
+
+                    @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger, custom_id=f"ticket_delete_{ticket_id}")
+                    async def delete_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
+                        # 管理者のみ
+                        if not await is_admin(close_inter):
+                            await close_inter.response.send_message(
+                                "❌ 管理者のみ使用できます。",
+                                ephemeral=True
+                            )
+                            return
+                        await close_inter.response.send_message("🗑️ チャンネルを削除します...", ephemeral=True)
+                        await asyncio.sleep(3)
+                        try:
+                            await channel.delete(reason=f"管理者によるチャンネル削除: {close_inter.user}")
+                        except Exception:
+                            pass
+
+                return CloseView()
 
             # チケット内容入力モーダル
-            class TicketModal(discord.ui.Modal, title="ご意見・改善案の入力"):
+            class TicketInputModal(discord.ui.Modal, title="ご意見・改善案の入力"):
                 content_input = discord.ui.TextInput(
                     label="内容",
                     placeholder="村への意見・改善案などを自由にご記入ください",
@@ -1827,118 +1983,24 @@ async def ticket_setup(
                     )
                     embed.set_footer(text=f"チケットID: {ticket_id} | {inter.user.name}")
 
-                    class CloseView(discord.ui.View):
-                        def __init__(self):
-                            super().__init__(timeout=None)
-
-                        @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.danger, custom_id=f"ticket_close_{ticket_id}")
-                        async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                            if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
-                                await close_inter.response.send_message(
-                                    "❌ チケット作成者か管理者のみ閉じられます。",
-                                    ephemeral=True
-                                ); return
-                            await close_inter.response.send_message("🗑️ チケットを閉じます...")
-                            await asyncio.sleep(3)
-                            try:
-                                await channel.delete(reason=f"チケットクローズ by {close_inter.user}")
-                            except Exception:
-                                pass
-
-                        @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger, custom_id=f"ticket_delete_{ticket_id}")
-                        async def delete_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                            if not await is_admin(close_inter):
-                                await close_inter.response.send_message(
-                                    "❌ 管理者のみ使用できます。",
-                                    ephemeral=True
-                                ); return
-                            await close_inter.response.send_message("🗑️ チャンネルを削除します...")
-                            await asyncio.sleep(3)
-                            try:
-                                await channel.delete(reason=f"管理者によるチャンネル削除: {close_inter.user}")
-                            except Exception:
-                                pass
-
                     await channel.send(
                         content=f"{inter.user.mention} {admin_mention}",
                         embed=embed,
-                        view=CloseView()
+                        view=make_close_view()
                     )
                     await modal_inter.response.send_message(
                         f"✅ チケット #{ticket_id} を発行しました！\n{channel.mention} をご確認ください。",
                         ephemeral=True
                     )
 
-            await inter.followup.send("✅ モーダルを開きます...", ephemeral=True)
-            # モーダルはdeferの後に送れないのでチャンネルに案内
-            await channel.send(
-                f"{inter.user.mention} チケットチャンネルを作成しました！\n以下に意見・改善案を入力してください。"
-            )
-            # チャンネルに入力フォームを送信
-            class InputView(discord.ui.View):
-                def __init__(self):
-                    super().__init__(timeout=600)
+            await inter.followup.send("✅ チケットチャンネルを作成しました！入力フォームを開きます。", ephemeral=True)
+            await inter.user.send(f"📮 チケット #{ticket_id} が作成されました！\n{channel.mention} で内容を確認・追記できます。")
+            await inter.user.send("✏️ これから送るモーダルに、意見・改善案を入力してください。")
+            await inter.user.send("（もしモーダルが表示されない場合は、Discord クライアントを確認してください）")
 
-                @discord.ui.button(label="✏️ 意見を入力する", style=discord.ButtonStyle.primary)
-                async def input_btn(self, btn_inter: discord.Interaction, button: discord.ui.Button):
-                    if btn_inter.user.id != inter.user.id:
-                        await btn_inter.response.send_message("❌ チケット作成者のみ入力できます。", ephemeral=True); return
-
-                    class TicketInputModal(discord.ui.Modal, title="ご意見・改善案の入力"):
-                        content_input = discord.ui.TextInput(
-                            label="内容",
-                            placeholder="村への意見・改善案などを自由にご記入ください",
-                            style=discord.TextStyle.long,
-                            max_length=1000
-                        )
-
-                        async def on_submit(self, modal_inter: discord.Interaction):
-                            admin_mention = admin_role.mention if admin_role else "管理者"
-                            embed = discord.Embed(
-                                title=f"📮 チケット #{ticket_id}",
-                                description=self.content_input.value,
-                                color=0x534AB7
-                            )
-                            embed.set_author(
-                                name=inter.user.display_name,
-                                icon_url=inter.user.display_avatar.url
-                            )
-                            embed.set_footer(text=f"チケットID: {ticket_id} | {inter.user.name}")
-
-                            class CloseView(discord.ui.View):
-                                def __init__(self):
-                                    super().__init__(timeout=None)
-
-                                @discord.ui.button(label="✅ チケットを閉じる", style=discord.ButtonStyle.success, custom_id=f"ticket_close_{ticket_id}")
-                                async def close_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                                    if not await is_admin(close_inter) and close_inter.user.id != inter.user.id:
-                                        await close_inter.response.send_message("❌ チケット作成者か管理者のみ閉じられます。", ephemeral=True); return
-                                    await close_inter.response.send_message("🗑️ チケットを閉じます...")
-                                    await asyncio.sleep(3)
-                                    try: await channel.delete(reason=f"チケットクローズ by {close_inter.user}")
-                                    except Exception: pass
-
-                                @discord.ui.button(label="🗑️ チャンネルを削除する", style=discord.ButtonStyle.danger, custom_id=f"ticket_delete_{ticket_id}")
-                                async def delete_btn(self, close_inter: discord.Interaction, button: discord.ui.Button):
-                                    if not await is_admin(close_inter):
-                                        await close_inter.response.send_message("❌ 管理者のみ使用できます。", ephemeral=True); return
-                                    await close_inter.response.send_message("🗑️ チャンネルを削除します...")
-                                    await asyncio.sleep(3)
-                                    try: await channel.delete(reason=f"管理者によるチャンネル削除: {close_inter.user}")
-                                    except Exception: pass
-
-                            await modal_inter.response.send_message("✅ 送信しました！", ephemeral=True)
-                            await channel.send(
-                                content=f"{admin_mention}",
-                                embed=embed,
-                                view=CloseView()
-                            )
-                            button.disabled = True
-                            await btn_inter.message.edit(view=self)
-
-                    await btn_inter.response.send_modal(TicketInputModal())
-
-            await channel.send(view=InputView())
+            # モーダルを送信
+            await inter.followup.send("✏️ モーダルを開きます...", ephemeral=True)
+            await inter.response.send_modal(TicketInputModal())
 
     embed = discord.Embed(
         title=title,
