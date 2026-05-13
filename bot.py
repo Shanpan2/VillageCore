@@ -16,7 +16,6 @@ async def load_cogs():
 
 # ====== Features ======
 from Features.ticket import setup_ticket_system
-from Features.role_panel import setup_role_panel
 from Features.attendance import setup_attendance
 from Features.othello import setup_othello
 from Features.dice import setup_dice
@@ -38,7 +37,6 @@ def setup_features():
     setup_othello(bot)
     setup_attendance(bot)
     setup_ticket_system(bot)
-    setup_role_panel(bot)
 
 setup_features()
 
