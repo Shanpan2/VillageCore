@@ -1832,7 +1832,6 @@ async def ticket_setup(
 
         @discord.ui.button(label="📩 チケットを発行する", style=discord.ButtonStyle.primary, custom_id="ticket_create")
         async def create_ticket(self, inter: discord.Interaction, button: discord.ui.Button):
-            await inter.response.defer(ephemeral=True)
 
             # 既にチケットがあるか確認
             existing = None
@@ -2001,6 +2000,7 @@ async def ticket_setup(
             # モーダルを送信
             await inter.followup.send("✏️ モーダルを開きます...", ephemeral=True)
             await inter.response.send_modal(TicketInputModal())
+
 
     embed = discord.Embed(
         title=title,
