@@ -1,9 +1,7 @@
 # views/attendance_views.py
 
 import discord
-
-# メモリに保存（必要なら後でDBに変更可能）
-attendance_data = {}
+from database.config_db import db_set
 
 
 # ============================================================
@@ -27,17 +25,11 @@ class AttendanceView(discord.ui.View):
         await save_attendance(inter, "欠席")
 
 
-# ============================================================
-# 🧠 出席データ保存処理（core 依存なし）
-# ============================================================
-
 async def save_attendance(inter: discord.Interaction, status: str):
-
-    # メモリに保存
-    attendance_data[inter.user.id] = status
+    key = f"attendance_{inter.user.id}"
+    await db_set(key, status)
 
     await inter.response.send_message(
         f"📝 {inter.user.mention} の出席状況を **{status}** に更新しました。",
-        ephemeral=True
+        ephemeral=True,
     )
-

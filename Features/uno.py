@@ -421,5 +421,38 @@ def refill_deck(deck: list, discard: list) -> tuple[list, list]:
     return new_deck, [top]
 
 
+async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_id: int):
+    """山札から1枚引く"""
+    state = uno_games.get(game_id)
+    if not state:
+        await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
+        return
+
+    players = state["players"]
+    hands = state["hands"]
+    deck = state["deck"]
+    turn_index = state["turn_index"]
+    current_player_id = players[turn_index]
+
+    if interaction.user.id != current_player_id:
+        await interaction.response.send_message(
+            "❌ あなたのターンではありません。", ephemeral=True
+        )
+        return
+
+    if len(deck) == 0:
+        deck, state["discard"] = refill_deck(deck, state["discard"])
+
+    if deck:
+        drawn = deck.pop()
+        hands[current_player_id].append(drawn)
+        state["deck"] = deck
+
+    await interaction.response.edit_message(
+        content=f"🃏 <@{current_player_id}> が山札から1枚引きました。",
+        view=UnoHandView(game_id, current_player_id, hands[current_player_id]),
+    )
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Uno(bot))
