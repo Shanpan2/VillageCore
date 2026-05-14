@@ -105,6 +105,8 @@ class Music(commands.Cog):
     # ==========================
     # Slash Command: join
     # ==========================
+    from discord import app_commands
+
     @app_commands.command(name="join", description="ボイスチャンネルに参加します")
     async def join(self, interaction: discord.Interaction):
         if interaction.user.voice is None:
@@ -114,6 +116,7 @@ class Music(commands.Cog):
         channel = interaction.user.voice.channel
         await channel.connect()
         await interaction.response.send_message(f"🔊 {channel.name} に参加しました。")
+
 
     # ==========================
     # Slash Command: play
