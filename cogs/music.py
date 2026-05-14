@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 import asyncio
-import youtube_dl
+import yt_dlp as youtube_dl
+
 
 # youtube-dl の警告を無効化
 youtube_dl.utils.bug_reports_message = lambda: ""
