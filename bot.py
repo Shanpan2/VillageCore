@@ -24,14 +24,13 @@ from views.uno_views import UnoHandView, WildColorSelectView, UnoDeclareView
 
 @bot.event
 async def on_ready():
+    # 永続Viewだけ登録
     bot.add_view(TicketButtonView(bot))
     bot.add_view(RolePanelView(0))
     bot.add_view(AttendanceView())
-    bot.add_view(OthelloView("dummy"))
-    bot.add_view(UnoHandView("dummy", 0, []))
-    bot.add_view(WildColorSelectView("dummy", 0, "wild"))
-    bot.add_view(UnoDeclareView("dummy", 0))
+
     print("Bot is ready")
+
 
 async def main():
     await db_init()
