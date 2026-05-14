@@ -2,13 +2,6 @@
 
 import discord
 
-from Features.uno import (
-    handle_play_card,
-    handle_wild_color_select,
-    handle_uno_declare,
-    handle_challenge
-)
-
 
 # ============================================================
 # 🎴 手札ボタン
@@ -36,6 +29,7 @@ class UnoCardButton(discord.ui.Button):
         self.card = card
 
     async def callback(self, interaction: discord.Interaction):
+        from Features.uno import handle_play_card
         await handle_play_card(
             interaction,
             self.game_id,
@@ -79,6 +73,7 @@ class WildColorButton(discord.ui.Button):
         self.color = color
 
     async def callback(self, interaction: discord.Interaction):
+        from Features.uno import handle_wild_color_select
         await handle_wild_color_select(
             interaction,
             self.game_id,
@@ -103,6 +98,7 @@ class UnoDeclareButton(discord.ui.Button):
         self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):
+        from Features.uno import handle_uno_declare
         await handle_uno_declare(interaction, self.game_id, self.user_id)
 
 
@@ -143,6 +139,7 @@ class ChallengeYesButton(discord.ui.Button):
             await interaction.response.send_message("❌ あなたはチャレンジできません。", ephemeral=True)
             return
 
+        from Features.uno import handle_challenge
         await handle_challenge(
             interaction,
             self.game_id,
@@ -167,8 +164,8 @@ class ChallengeNoButton(discord.ui.Button):
             await interaction.response.send_message("❌ あなたは選択できません。", ephemeral=True)
             return
 
-        # チャレンジしない → 無条件で4枚ドロー
         from Features.uno import uno_games, refill_deck
+        from Features.uno import UnoHandView  # ← これも遅延 import
 
         state = uno_games[self.game_id]
         deck = state["deck"]
@@ -187,7 +184,6 @@ class ChallengeNoButton(discord.ui.Button):
             if deck:
                 hands[next_player].append(deck.pop())
 
-        # ターン進行
         turn_index = (turn_index + direction) % len(players)
         turn_index = (turn_index + direction) % len(players)
 
@@ -199,3 +195,4 @@ class ChallengeNoButton(discord.ui.Button):
             content=f"🃏 チャレンジしませんでした。\n<@{next_player}> が 4 枚引きます。\n次のターン：<@{next_player_id}>",
             view=UnoHandView(self.game_id, next_player_id, hands[next_player_id])
         )
+
