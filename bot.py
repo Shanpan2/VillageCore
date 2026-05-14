@@ -6,47 +6,81 @@ import asyncio
 from bot_instance import bot
 from database.config_db import db_init
 
-TOKEN = os.getenv("DISCORD_TOKEN")  # ← ここで環境変数から読む
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = 1405716361933754408
 
+
+# ==========================
+# Cog ロード
+# ==========================
 async def load_cogs():
-    await bot.load_extension("cogs.clean")
-    await bot.load_extension("cogs.reminder")
-    await bot.load_extension("cogs.vote")
-    await bot.load_extension("cogs.janken")
-    await bot.load_extension("cogs.music")
-    await bot.load_extension("cogs.welcome")
+    cogs = [
+        # cogs/
+        "cogs.clean",
+        "cogs.reminder",
+        "cogs.vote",
+        "cogs.janken",
+        "cogs.welcome",
+        # Features/
+        "Features.attendance",
+        "Features.dice",
+        "Features.meigen",
+        "Features.omikuji",
+        "Features.othello",
+        "Features.role_panel",
+        "Features.ticket",
+        "Features.uno",
+    ]
+    for cog in cogs:
+        try:
+            await bot.load_extension(cog)
+            print(f"  ✅ loaded: {cog}")
+        except Exception as e:
+            # ファイルが存在しない・構文エラーなどはスキップして続行
+            print(f"  ⚠️  skipped: {cog} → {e}")
 
-from views.ticket_views import TicketButtonView
-from views.role_panel_views import RolePanelView
-from views.attendance_views import AttendanceView
-from views.othello_views import OthelloView
-from views.uno_views import UnoHandView, WildColorSelectView, UnoDeclareView
 
-@bot.event
-async def on_ready():
+# ==========================
+# 永続 View の登録
+# ==========================
+def register_persistent_views():
+    from views.ticket_views import TicketButtonView
+    from views.role_panel_views import RolePanelView
+    from views.attendance_views import AttendanceView
+
     bot.add_view(TicketButtonView(bot))
     bot.add_view(RolePanelView(0))
     bot.add_view(AttendanceView())
 
-    # ★ ギルド同期（即時反映）
-    GUILD_ID = 1405716361933754408
+
+# ==========================
+# on_ready
+# ==========================
+@bot.event
+async def on_ready():
+    register_persistent_views()
+
     guild = discord.Object(id=GUILD_ID)
+
+    # ギルドコマンドを同期（即時反映）
+    bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
 
-    print(f"Synced {len(synced)} commands to guild")
-    print("Bot is ready")
+    print(f"✅ Bot ready: {bot.user} ({bot.user.id})")
+    print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}")
 
 
+# ==========================
+# エントリポイント
+# ==========================
 async def main():
-    await db_init()
-    await load_cogs()
-
     if TOKEN is None:
         print("❌ DISCORD_TOKEN が設定されていません")
         return
 
+    await db_init()
+    await load_cogs()
     await bot.start(TOKEN)
 
+
 asyncio.run(main())
-
-
