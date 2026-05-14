@@ -2,6 +2,17 @@
 
 import discord
 
+from Features.uno import (
+    handle_play_card,
+    handle_wild_color_select,
+    handle_uno_declare,
+    handle_challenge
+)
+
+
+# ============================================================
+# 🎴 手札ボタン
+# ============================================================
 
 class UnoHandView(discord.ui.View):
     def __init__(self, game_id: str, user_id: int, hand: list[str]):
@@ -25,63 +36,16 @@ class UnoCardButton(discord.ui.Button):
         self.card = card
 
     async def callback(self, interaction: discord.Interaction):
-        from Features.uno import handle_play_card
-        await handle_play_card(interaction, self.game_id, self.user_id, self.card)
-
-
-
-# ============================================================
-# 🎨 色選択（ワイルド用）
-# ============================================================
-
-class UnoColorSelectView(discord.ui.View):
-    def __init__(self, game_id: str):
-        super().__init__(timeout=None)
-        self.game_id = game_id
-
-    @discord.ui.button(label="🔴 赤", style=discord.ButtonStyle.danger)
-    async def red(self, inter, btn):
-        from Features.uno import handle_color_select
-        await handle_color_select(inter, self.game_id, "red")
-
-    @discord.ui.button(label="🟡 黄", style=discord.ButtonStyle.secondary)
-    async def yellow(self, inter, btn):
-        from Features.uno import handle_color_select
-        await handle_color_select(inter, self.game_id, "yellow")
-
-    @discord.ui.button(label="🟢 緑", style=discord.ButtonStyle.success)
-    async def green(self, inter, btn):
-        from Features.uno import handle_color_select
-        await handle_color_select(inter, self.game_id, "green")
-
-    @discord.ui.button(label="🔵 青", style=discord.ButtonStyle.primary)
-    async def blue(self, inter, btn):
-        from Features.uno import handle_color_select
-        await handle_color_select(inter, self.game_id, "blue")
+        await handle_play_card(
+            interaction,
+            self.game_id,
+            self.user_id,
+            self.card
+        )
 
 
 # ============================================================
-# 🃏 アクション（ドロー / パス）
-# ============================================================
-
-class UnoActionView(discord.ui.View):
-    def __init__(self, game_id: str):
-        super().__init__(timeout=None)
-        self.game_id = game_id
-
-    @discord.ui.button(label="🃏 ドロー", style=discord.ButtonStyle.secondary)
-    async def draw(self, inter, btn):
-        from Features.uno import handle_draw
-        await handle_draw(inter, self.game_id)
-
-    @discord.ui.button(label="⏭️ パス", style=discord.ButtonStyle.secondary)
-    async def skip(self, inter, btn):
-        from Features.uno import handle_skip
-        await handle_skip(inter, self.game_id)
-
-
-# ============================================================
-# 🎨 ワイルド色選択（新方式）
+# 🎨 ワイルド色選択
 # ============================================================
 
 class WildColorSelectView(discord.ui.View):
@@ -115,7 +79,6 @@ class WildColorButton(discord.ui.Button):
         self.color = color
 
     async def callback(self, interaction: discord.Interaction):
-        from Features.uno import handle_wild_color_select
         await handle_wild_color_select(
             interaction,
             self.game_id,
@@ -140,7 +103,6 @@ class UnoDeclareButton(discord.ui.Button):
         self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):
-        from Features.uno import handle_uno_declare
         await handle_uno_declare(interaction, self.game_id, self.user_id)
 
 
@@ -150,3 +112,90 @@ class UnoDeclareView(discord.ui.View):
         self.add_item(UnoDeclareButton(game_id, user_id))
 
 
+# ============================================================
+# 🃏 チャレンジ（ワイルドドロー4）
+# ============================================================
+
+class ChallengeView(discord.ui.View):
+    def __init__(self, game_id: str, attacker_id: int, defender_id: int):
+        super().__init__(timeout=None)
+        self.game_id = game_id
+        self.attacker_id = attacker_id
+        self.defender_id = defender_id
+
+        self.add_item(ChallengeYesButton(game_id, attacker_id, defender_id))
+        self.add_item(ChallengeNoButton(game_id, attacker_id, defender_id))
+
+
+class ChallengeYesButton(discord.ui.Button):
+    def __init__(self, game_id, attacker_id, defender_id):
+        super().__init__(
+            label="チャレンジする",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"uno_challenge_yes_{game_id}"
+        )
+        self.game_id = game_id
+        self.attacker_id = attacker_id
+        self.defender_id = defender_id
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.defender_id:
+            await interaction.response.send_message("❌ あなたはチャレンジできません。", ephemeral=True)
+            return
+
+        await handle_challenge(
+            interaction,
+            self.game_id,
+            self.attacker_id,
+            self.defender_id
+        )
+
+
+class ChallengeNoButton(discord.ui.Button):
+    def __init__(self, game_id, attacker_id, defender_id):
+        super().__init__(
+            label="チャレンジしない",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"uno_challenge_no_{game_id}"
+        )
+        self.game_id = game_id
+        self.attacker_id = attacker_id
+        self.defender_id = defender_id
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.defender_id:
+            await interaction.response.send_message("❌ あなたは選択できません。", ephemeral=True)
+            return
+
+        # チャレンジしない → 無条件で4枚ドロー
+        from Features.uno import uno_games, refill_deck
+
+        state = uno_games[self.game_id]
+        deck = state["deck"]
+        hands = state["hands"]
+        players = state["players"]
+        turn_index = state["turn_index"]
+        direction = state["direction"]
+
+        next_index = (turn_index + direction) % len(players)
+        next_player = players[next_index]
+
+        if len(deck) < 4:
+            deck, _ = refill_deck(deck, state["discard"])
+
+        for _ in range(4):
+            if deck:
+                hands[next_player].append(deck.pop())
+
+        # ターン進行
+        turn_index = (turn_index + direction) % len(players)
+        turn_index = (turn_index + direction) % len(players)
+
+        state["turn_index"] = turn_index
+
+        next_player_id = players[turn_index]
+
+        await interaction.response.edit_message(
+            content=f"🃏 チャレンジしませんでした。\n<@{next_player}> が 4 枚引きます。\n次のターン：<@{next_player_id}>",
+            view=UnoHandView(self.game_id, next_player_id, hands[next_player_id])
+        )
