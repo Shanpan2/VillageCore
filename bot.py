@@ -28,11 +28,14 @@ async def on_ready():
     bot.add_view(RolePanelView(0))
     bot.add_view(AttendanceView())
 
-    # Slash Command を Discord に同期
-    synced = await bot.tree.sync()
-    print(f"Synced {len(synced)} commands")
+    # ★ ギルドIDを指定して即時同期
+    GUILD_ID = 1405716361933754408  # ← あなたのサーバーIDに置き換える
+    guild = discord.Object(id=GUILD_ID)
+    synced = await bot.tree.sync(guild=guild)
 
+    print(f"Synced {len(synced)} commands to guild")
     print("Bot is ready")
+
 
 
 async def main():
