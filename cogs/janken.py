@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import random
 
 # ==========================
@@ -14,7 +15,6 @@ class JankenButton(discord.ui.Button):
         user_hand = self.label
         bot_hand = random.choice(["✊", "✌️", "✋"])
 
-        # 勝敗判定
         result = self.parent_view.judge(user_hand, bot_hand)
 
         embed = discord.Embed(
@@ -27,7 +27,6 @@ class JankenButton(discord.ui.Button):
             color=0x00ffcc
         )
 
-        # ボタン無効化
         for child in self.parent_view.children:
             child.disabled = True
 
@@ -58,24 +57,25 @@ class JankenView(discord.ui.View):
 
 
 # ==========================
-# Cog 本体
+# Cog 本体（Slash Command）
 # ==========================
 class Janken(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="janken")
-    async def janken(self, ctx):
+    @app_commands.command(name="janken", description="じゃんけんで遊びます")
+    async def janken(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="🎮 じゃんけん",
             description="ボタンを押して手を選んでください！",
             color=0x00ffcc
         )
 
-        await ctx.send(embed=embed, view=JankenView())
+        await interaction.response.send_message(embed=embed, view=JankenView())
 
 
 async def setup(bot):
     await bot.add_cog(Janken(bot))
+
 
 
