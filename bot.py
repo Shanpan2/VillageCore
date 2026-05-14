@@ -24,10 +24,13 @@ from views.uno_views import UnoHandView, WildColorSelectView, UnoDeclareView
 
 @bot.event
 async def on_ready():
-    # 永続Viewだけ登録
     bot.add_view(TicketButtonView(bot))
     bot.add_view(RolePanelView(0))
     bot.add_view(AttendanceView())
+
+    # Slash Command を Discord に同期
+    synced = await bot.tree.sync()
+    print(f"Synced {len(synced)} commands")
 
     print("Bot is ready")
 
