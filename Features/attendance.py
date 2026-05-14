@@ -1,35 +1,34 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
+from discord import app_commands
 
 from views.attendance_views import AttendanceView
 from utils.checks import check_admin
 from database.config_db import db_get_all_config
 
 
-def setup_attendance(bot: commands.Bot):
+class Attendance(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
 
-    @bot.tree.command(name="attend_setup", description="【管理者】出席パネルを設置します")
-    async def attend_setup(interaction: discord.Interaction):
-
+    @app_commands.command(name="attend_setup", description="【管理者】出席パネルを設置します")
+    async def attend_setup(self, interaction: discord.Interaction):
         if not await check_admin(interaction):
             return
 
         embed = discord.Embed(
             title="📝 出席管理",
             description="ボタンを押して出席状況を登録してください。",
-            color=0x2ecc71
+            color=0x2ECC71,
         )
-
         await interaction.response.send_message(
             embed=embed,
             view=AttendanceView(),
-            ephemeral=True  # 管理者向けなので非公開推奨
+            ephemeral=True,
         )
 
-    @bot.tree.command(name="attend_list", description="【管理者】出席状況を一覧表示します")
-    async def attend_list(interaction: discord.Interaction):
-
+    @app_commands.command(name="attend_list", description="【管理者】出席状況を一覧表示します")
+    async def attend_list(self, interaction: discord.Interaction):
         if not await check_admin(interaction):
             return
 
@@ -43,17 +42,18 @@ def setup_attendance(bot: commands.Bot):
                     lines.append(f"<@{user_id}>：{value}")
 
         if not lines:
-            await interaction.response.send_message("📭 出席データはまだありません。", ephemeral=True)
+            await interaction.response.send_message(
+                "📭 出席データはまだありません。", ephemeral=True
+            )
             return
-
-        text = "\n".join(lines)
 
         embed = discord.Embed(
             title="📝 出席一覧",
-            description=text,
-            color=0x3498db
+            description="\n".join(lines),
+            color=0x3498DB,
         )
-
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Attendance(bot))

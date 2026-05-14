@@ -1,74 +1,60 @@
-# features/meigen.py
-
 import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 import random
+import re
 import os
 
 
-def setup_meigen(bot: commands.Bot):
+class Meigen(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
 
-    @bot.event
-    async def on_message(message: discord.Message):
-
-        # bot自身には反応しない
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
 
-        # botメンション + 迷言 の形式を検出
-        if bot.user.mention not in message.content:
+        if self.bot.user.mention not in message.content:
             return
 
         if "迷言" not in message.content:
             return
 
-        # 迷言テキスト抽出
-        # 例: "@Bot 迷言「ホットケーキって冷めたら〜」"
-        import re
         match = re.search(r"迷言[「『](.*?)[」』]", message.content)
         if not match:
             await message.reply("迷言の形式は 迷言「テキスト」 だよ。")
             return
 
         text = match.group(1)
-
-        # 画像生成
-        path = generate_meigen_image(text)
+        path = self._generate_image(text)
 
         file = discord.File(path, filename="meigen.png")
         await message.reply(file=file)
 
+    @staticmethod
+    def _generate_image(text: str) -> str:
+        bg_dir = "assets/meigen"
+        bg_list = [f for f in os.listdir(bg_dir) if f.endswith(".png")]
+        bg_path = os.path.join(bg_dir, random.choice(bg_list))
 
-# ============================================================
-# 🖼️ 名言画像生成
-# ============================================================
+        img = Image.open(bg_path).convert("RGBA")
+        draw = ImageDraw.Draw(img)
 
-def generate_meigen_image(text: str):
+        font = ImageFont.truetype("assets/meigen/font.ttf", 48)
+        x, y = 50, 50
+        outline = 3
 
-    # 背景画像をランダム選択
-    bg_dir = "assets/meigen"
-    bg_list = [f for f in os.listdir(bg_dir) if f.endswith(".png")]
-    bg_path = os.path.join(bg_dir, random.choice(bg_list))
+        for dx in [-outline, outline]:
+            for dy in [-outline, outline]:
+                draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0))
 
-    img = Image.open(bg_path).convert("RGBA")
-    draw = ImageDraw.Draw(img)
+        draw.text((x, y), text, font=font, fill=(255, 255, 255))
 
-    # フォント
-    font = ImageFont.truetype("assets/meigen/font.ttf", 48)
+        out_path = "meigen_temp.png"
+        img.save(out_path)
+        return out_path
 
-    # テキスト描画位置
-    x, y = 50, 50
 
-    # テキスト描画（白文字 + 黒縁取り）
-    outline = 3
-    for dx in [-outline, outline]:
-        for dy in [-outline, outline]:
-            draw.text((x+dx, y+dy), text, font=font, fill=(0,0,0))
-
-    draw.text((x, y), text, font=font, fill=(255,255,255))
-
-    # 保存
-    out_path = "meigen_temp.png"
-    img.save(out_path)
-    return out_path
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Meigen(bot))
