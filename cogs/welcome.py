@@ -9,28 +9,40 @@ class Welcome(commands.Cog):
         self.bot = bot
 
     async def create_welcome_card(self, member):
-        # 背景画像（あなたの好きな画像に変更可能）
-        background = Image.open("assets/welcome_bg.png").convert("RGBA")
+        # 背景画像
+        try:
+            background = Image.open("assets/welcome_bg.png").convert("RGBA")
+        except:
+            background = Image.new("RGBA", (800, 400), (30, 30, 30, 255))
+
+        # アイコンURL（未設定ユーザー対応）
+        avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
 
         # アイコン取得
         async with aiohttp.ClientSession() as session:
-            async with session.get(member.avatar.url) as resp:
+            async with session.get(avatar_url) as resp:
                 avatar_bytes = await resp.read()
 
-        avatar = Image.open(io.BytesIO(avatar_bytes)).resize((200, 200)).convert("RGBA")
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
 
-        # 丸く切り抜き
-        mask = Image.new("L", avatar.size, 0)
+        # 高品質丸切り抜き（2倍で作って縮小）
+        size = 200
+        big = avatar.resize((size*2, size*2))
+        mask = Image.new("L", (size*2, size*2), 0)
         draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, 200, 200), fill=255)
-        avatar.putalpha(mask)
+        draw.ellipse((0, 0, size*2, size*2), fill=255)
+        big.putalpha(mask)
+        avatar = big.resize((size, size), Image.LANCZOS)
 
         # 合成
         background.paste(avatar, (50, 50), avatar)
 
         # テキスト
         draw = ImageDraw.Draw(background)
-        font = ImageFont.truetype("assets/rounded.ttf", 60)
+        try:
+            font = ImageFont.truetype("assets/rounded.ttf", 60)
+        except:
+            font = ImageFont.load_default()
 
         draw.text((300, 80), "Welcome!", fill="white", font=font)
         draw.text((300, 160), f"{member.name}", fill="white", font=font)
@@ -43,9 +55,8 @@ class Welcome(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        channel = member.guild.system_channel
-        if channel is None:
-            return
+        # system_channel が無い場合の fallback
+        channel = member.guild.system_channel or member.guild.text_channels[0]
 
         card = await self.create_welcome_card(member)
 
@@ -56,5 +67,3 @@ class Welcome(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Welcome(bot))
-
-

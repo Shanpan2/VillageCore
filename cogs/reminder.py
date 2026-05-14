@@ -1,20 +1,21 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import asyncio
 from datetime import datetime, timedelta
+
 
 class Reminder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="remind")
-    async def remind(self, ctx, time_str: str, *, message: str):
-        """
-        リマインダー:
-        /remind 18:30 宿題しろ
-        /remind 2026-05-14 18:30 会議
-        /remind 10m 水飲め
-        """
+    # -------------------------
+    # /remind
+    # -------------------------
+    @app_commands.command(name="remind", description="指定した時間にリマインドします")
+    @app_commands.describe(time_str="10m / 18:30 / 2026-05-14_18:30 など", message="リマインド内容")
+    async def remind(self, interaction: discord.Interaction, time_str: str, message: str):
+        await interaction.response.defer(ephemeral=False)
 
         # -------------------------
         # ① 相対時間（10m, 2h, 30s）
@@ -22,13 +23,13 @@ class Reminder(commands.Cog):
         if any(x in time_str for x in ["s", "m", "h"]):
             seconds = self.parse_relative(time_str)
             if seconds <= 0:
-                await ctx.send("❌ 時間指定が正しくありません。")
+                await interaction.followup.send("❌ 時間指定が正しくありません。")
                 return
 
-            await ctx.send(f"⏰ {time_str} 後にリマインドします。")
+            await interaction.followup.send(f"⏰ {time_str} 後にリマインドします。")
             await asyncio.sleep(seconds)
 
-            await ctx.send(f"🔔 リマインダー: {ctx.author.mention} {message}")
+            await interaction.channel.send(f"🔔 リマインダー: {interaction.user.mention} {message}")
             return
 
         # -------------------------
@@ -39,24 +40,22 @@ class Reminder(commands.Cog):
             hour, minute = map(int, time_str.split(":"))
             target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-            # すでに過ぎていたら明日
             if target < now:
                 target += timedelta(days=1)
 
             seconds = (target - now).total_seconds()
 
-            await ctx.send(f"⏰ {target.strftime('%Y-%m-%d %H:%M')} にリマインドします。")
+            await interaction.followup.send(f"⏰ {target.strftime('%Y-%m-%d %H:%M')} にリマインドします。")
             await asyncio.sleep(seconds)
 
-            await ctx.send(f"🔔 リマインダー: {ctx.author.mention} {message}")
+            await interaction.channel.send(f"🔔 リマインダー: {interaction.user.mention} {message}")
             return
 
         # -------------------------
-        # ③ 日付＋時間（2026-05-14 18:30）
+        # ③ 日付＋時間（2026-05-14_18:30）
         # -------------------------
         try:
             target = datetime.strptime(time_str, "%Y-%m-%d")
-            # 時間がない場合は 00:00
             target = target.replace(hour=0, minute=0, second=0)
         except:
             try:
@@ -65,20 +64,20 @@ class Reminder(commands.Cog):
                 try:
                     target = datetime.strptime(time_str, "%Y-%m-%d-%H:%M")
                 except:
-                    await ctx.send("❌ 時間形式が正しくありません。")
+                    await interaction.followup.send("❌ 時間形式が正しくありません。")
                     return
 
         now = datetime.now()
         seconds = (target - now).total_seconds()
 
         if seconds <= 0:
-            await ctx.send("❌ 過去の時間は指定できません。")
+            await interaction.followup.send("❌ 過去の時間は指定できません。")
             return
 
-        await ctx.send(f"⏰ {target.strftime('%Y-%m-%d %H:%M')} にリマインドします。")
+        await interaction.followup.send(f"⏰ {target.strftime('%Y-%m-%d %H:%M')} にリマインドします。")
         await asyncio.sleep(seconds)
 
-        await ctx.send(f"🔔 リマインダー: {ctx.author.mention} {message}")
+        await interaction.channel.send(f"🔔 リマインダー: {interaction.user.mention} {message}")
 
     # -------------------------
     # 相対時間の解析（10m → 600秒）
@@ -102,5 +101,3 @@ class Reminder(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Reminder(bot))
-
-
