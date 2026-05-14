@@ -1,109 +1,25 @@
 import discord
 from discord.ext import commands
-import asyncio
-from datetime import datetime, timedelta
-
-# ==========================
-# 投票ボタン
-# ==========================
-class VoteButton(discord.ui.Button):
-    def __init__(self, label, role_name, parent_view):
-        super().__init__(label=label, style=discord.ButtonStyle.primary)
-        self.role_name = role_name
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        member = interaction.user
-
-        # ロールが存在しなければ作成
-        role = discord.utils.get(guild.roles, name=self.role_name)
-        if role is None:
-            role = await guild.create_role(name=self.role_name)
-
-        # ロール付与（複数選択OK）
-        if role not in member.roles:
-            await member.add_roles(role)
-            await interaction.response.send_message(
-                f"👍 **{self.role_name}** に投票しました！",
-                ephemeral=True
-            )
-        else:
-            # もう一度押したらロール削除（トグル式）
-            await member.remove_roles(role)
-            await interaction.response.send_message(
-                f"↩️ **{self.role_name}** の投票を取り消しました。",
-                ephemeral=True
-            )
-
-        # リアルタイム更新
-        await self.parent_view.update_votes()
-
-
-# ==========================
-# 投票ビュー
-# ==========================
-class VoteView(discord.ui.View):
-    def __init__(self, options, message, cog):
-        super().__init__(timeout=None)
-        self.options = options
-        self.message = message
-        self.cog = cog
-
-        for opt in options:
-            self.add_item(VoteButton(opt, opt, self))
-
-    async def update_votes(self):
-        """リアルタイムで票数を更新"""
-        guild = self.message.guild
-
-        counts = []
-        for opt in self.options:
-            role = discord.utils.get(guild.roles, name=opt)
-            if role:
-                counts.append(f"{opt}: **{len(role.members)}票**")
-            else:
-                counts.append(f"{opt}: **0票**")
-
-        embed = self.message.embeds[0]
-        embed.description = "\n".join(counts)
-
-        await self.message.edit(embed=embed, view=self)
-
-
-# ==========================
-# Cog 本体
-import discord
-from discord.ext import commands
+from discord import app_commands
 from discord.ui import View, Button
 import asyncio
 
 PREFIX = "投票-"  # ロール名につける prefix
 
 
-class VoteView(View):
-    def __init__(self, options, message, cog):
-        super().__init__(timeout=None)
-        self.options = options
-        self.message = message
-        self.cog = cog
-        self.votes = {opt: set() for opt in options}  # {選択肢: {user_id}}
-
-        for opt in options:
-            self.add_item(VoteButton(opt, self))
-
-
+# ==========================
+# 投票ボタン
+# ==========================
 class VoteButton(Button):
-    def __init__(self, label, view):
+    def __init__(self, label: str, vote_view: "VoteView"):
         super().__init__(label=label, style=discord.ButtonStyle.primary)
-        self.vote_view = view
+        self.vote_view = vote_view
 
     async def callback(self, interaction: discord.Interaction):
         user = interaction.user
         guild = interaction.guild
         option = self.label
 
-        # ロール名
         role_name = f"{PREFIX}{option}"
         role = discord.utils.get(guild.roles, name=role_name)
 
@@ -111,11 +27,15 @@ class VoteButton(Button):
         if role is None:
             role = await guild.create_role(name=role_name)
 
-        # ロール付与（複数票 OK）
-        await user.add_roles(role)
-
-        # 投票記録
-        self.vote_view.votes[option].add(user.id)
+        # トグル式：すでに投票済みなら取り消し
+        if user.id in self.vote_view.votes[option]:
+            self.vote_view.votes[option].discard(user.id)
+            await user.remove_roles(role)
+            msg_text = f"↩️ **{option}** の投票を取り消しました。"
+        else:
+            self.vote_view.votes[option].add(user.id)
+            await user.add_roles(role)
+            msg_text = f"🗳️ **{option}** に投票しました！"
 
         # Embed 更新
         embed = self.vote_view.message.embeds[0]
@@ -125,126 +45,178 @@ class VoteButton(Button):
         )
         await self.vote_view.message.edit(embed=embed)
 
-        await interaction.response.send_message(
-            f"🗳️ **{option}** に投票しました！", ephemeral=True
-        )
+        await interaction.response.send_message(msg_text, ephemeral=True)
 
 
+# ==========================
+# 投票ビュー
+# ==========================
+class VoteView(View):
+    def __init__(self, options: list[str], message: discord.Message, cog: "Vote"):
+        super().__init__(timeout=None)
+        self.options = options
+        self.message = message
+        self.cog = cog
+        self.votes: dict[str, set] = {opt: set() for opt in options}
+
+        for opt in options:
+            self.add_item(VoteButton(opt, self))
+
+
+# ==========================
+# Cog 本体
+# ==========================
 class Vote(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.active_votes = {}  # message_id: {"options": [...], "channel": channel_id, "view": view}
+        # message_id: {"options": [...], "channel_id": int, "view": VoteView}
+        self.active_votes: dict[int, dict] = {}
 
-    @commands.command(name="vote")
-    async def vote(self, ctx, question: str, *args):
-        if len(args) < 2:
-            await ctx.send("❌ 選択肢は2つ以上必要です。")
+    # -------------------------------------------------------
+    # /vote  question options... [duration]
+    # -------------------------------------------------------
+    @app_commands.command(name="vote", description="投票を開始します")
+    @app_commands.describe(
+        question="投票のタイトル・質問",
+        options="選択肢をスペース区切りで入力（例: りんご バナナ みかん）",
+        duration="自動終了までの時間（例: 30s / 5m / 1h）省略で無制限",
+    )
+    async def vote(
+        self,
+        interaction: discord.Interaction,
+        question: str,
+        options: str,
+        duration: str = None,
+    ):
+        opts = options.split()
+        if len(opts) < 2:
+            await interaction.response.send_message(
+                "❌ 選択肢は2つ以上スペース区切りで入力してください。", ephemeral=True
+            )
             return
 
-        # 時間制限
-        time_str = args[-1]
-        options = list(args)
-        duration = None
-
-        if any(x in time_str for x in ["s", "m", "h"]):
-            duration = self.parse_relative(time_str)
-            options = options[:-1]
+        # 時間解析
+        seconds = self._parse_duration(duration) if duration else None
 
         embed = discord.Embed(
             title=f"📊 投票：{question}",
-            description="\n".join(f"{opt}: **0票**" for opt in options),
-            color=0x00ffcc
+            description="\n".join(f"{opt}: **0票**" for opt in opts),
+            color=0x00FFCC,
         )
+        if seconds:
+            embed.set_footer(text=f"⏰ {duration} 後に自動終了")
 
-        msg = await ctx.send(embed=embed)
-        view = VoteView(options, msg, self)
+        # まず応答してからメッセージを取得
+        await interaction.response.send_message(embed=embed)
+        msg = await interaction.original_response()
+
+        view = VoteView(opts, msg, self)
         await msg.edit(view=view)
 
         self.active_votes[msg.id] = {
-            "options": options,
-            "channel": ctx.channel.id,
-            "view": view
+            "options": opts,
+            "channel_id": interaction.channel.id,
+            "view": view,
         }
 
-        if duration:
-            await ctx.send(f"⏰ 投票は **{time_str}** 後に自動終了します。")
-            asyncio.create_task(self.auto_end_vote(ctx.guild, msg.id, duration))
+        if seconds:
+            asyncio.create_task(
+                self._auto_end(interaction.guild, msg.id, seconds)
+            )
 
-    async def auto_end_vote(self, guild, message_id, duration):
-        await asyncio.sleep(duration)
-        if message_id in self.active_votes:
-            channel_id = self.active_votes[message_id]["channel"]
-            channel = guild.get_channel(channel_id)
-            await self.end_vote(channel, message_id)
-
-    @commands.command(name="vote_end")
-    @commands.has_permissions(manage_roles=True)
-    async def vote_end(self, ctx, message_id: int):
-        await self.end_vote(ctx.channel, message_id)
-
-    async def end_vote(self, channel, message_id):
-        if message_id not in self.active_votes:
-            await channel.send("❌ その投票は見つかりません。")
+    # -------------------------------------------------------
+    # /vote_end  message_id
+    # -------------------------------------------------------
+    @app_commands.command(name="vote_end", description="投票を手動で終了します")
+    @app_commands.describe(message_id="終了させたい投票メッセージのID")
+    @app_commands.default_permissions(manage_roles=True)
+    async def vote_end(self, interaction: discord.Interaction, message_id: str):
+        try:
+            mid = int(message_id)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ メッセージIDは数値で入力してください。", ephemeral=True
+            )
             return
 
-        data = self.active_votes[message_id]
-        options = data["options"]
-        view = data["view"]
+        await interaction.response.defer(ephemeral=True)
+        result = await self._end_vote(interaction.guild, interaction.channel, mid)
+        await interaction.followup.send(result, ephemeral=True)
 
-        del self.active_votes[message_id]
+    # -------------------------------------------------------
+    # 内部処理
+    # -------------------------------------------------------
+    async def _auto_end(self, guild: discord.Guild, message_id: int, seconds: int):
+        await asyncio.sleep(seconds)
+        if message_id in self.active_votes:
+            channel_id = self.active_votes[message_id]["channel_id"]
+            channel = guild.get_channel(channel_id)
+            await self._end_vote(guild, channel, message_id)
 
-        # 結果集計
-        results = {
-            opt: len(view.votes[opt])
-            for opt in options
-        }
+    async def _end_vote(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        message_id: int,
+    ) -> str:
+        if message_id not in self.active_votes:
+            return "❌ その投票は見つかりません（すでに終了済みかもしれません）。"
+
+        data = self.active_votes.pop(message_id)
+        options: list[str] = data["options"]
+        view: VoteView = data["view"]
+
+        results = {opt: len(view.votes[opt]) for opt in options}
 
         # ロール削除
         deleted = []
         for opt in options:
-            role_name = f"{PREFIX}{opt}"
-            role = discord.utils.get(channel.guild.roles, name=role_name)
+            role = discord.utils.get(guild.roles, name=f"{PREFIX}{opt}")
             if role:
                 await role.delete()
-                deleted.append(role_name)
+                deleted.append(role.name)
 
-        # メッセージを終了表示に変更
+        # 元メッセージを終了表示に変更
         try:
             msg = await channel.fetch_message(message_id)
             embed = msg.embeds[0]
-            embed.title = "📕 投票（終了）"
-            embed.color = 0xff5555
+            embed.title = embed.title.replace("📊", "📕") + "（終了）"
+            embed.color = 0xFF5555
             await msg.edit(embed=embed, view=None)
-        except:
+        except Exception:
             pass
 
-        # 結果メッセージ送信
-        result_text = "\n".join(
-            f"**{opt}** → {results[opt]}票"
-            for opt in options
+        # 結果メッセージ
+        result_lines = "\n".join(
+            f"**{opt}** → {results[opt]}票" for opt in options
         )
-
-        await channel.send(
-            f"📕 **投票結果**\n{result_text}\n\n🗑️ 削除されたロール: {', '.join(deleted)}"
+        deleted_text = (
+            f"\n🗑️ 削除されたロール: {', '.join(deleted)}" if deleted else ""
         )
+        await channel.send(f"📕 **投票結果**\n{result_lines}{deleted_text}")
 
-    def parse_relative(self, t: str):
+        return "✅ 投票を終了しました。"
+
+    @staticmethod
+    def _parse_duration(t: str) -> int | None:
+        """'30s' '5m' '1h' などを秒数に変換。解析失敗時は None を返す"""
         sec = 0
         num = ""
+        found = False
         for c in t:
             if c.isdigit():
                 num += c
-            else:
-                if c == "s": sec += int(num)
-                if c == "m": sec += int(num) * 60
-                if c == "h": sec += int(num) * 3600
+            elif c in ("s", "m", "h") and num:
+                found = True
+                if c == "s":
+                    sec += int(num)
+                elif c == "m":
+                    sec += int(num) * 60
+                elif c == "h":
+                    sec += int(num) * 3600
                 num = ""
-        return sec
+        return sec if found else None
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(Vote(bot))
-
-
-
-
