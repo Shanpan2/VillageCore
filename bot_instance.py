@@ -3,6 +3,14 @@ from discord.ext import commands
 
 intents = discord.Intents.all()
 
-# prefix は "/" にしてはいけない
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MyBot(commands.Bot):
+    def __init__(self):
+        super().__init__(
+            command_prefix="/",
+            intents=intents,
+            application_id=1501521359963033741  # ← ここにあなたのアプリID
+        )
+
+bot = MyBot()
+
 
