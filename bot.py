@@ -28,13 +28,14 @@ async def on_ready():
     bot.add_view(RolePanelView(0))
     bot.add_view(AttendanceView())
 
-    # ★ ギルドIDを指定して即時同期
-    GUILD_ID = 1405716361933754408  # ← あなたのサーバーIDに置き換える
+    # ★ ギルド同期（即時反映）
+    GUILD_ID = 1405716361933754408  # ← あなたのサーバーID
     guild = discord.Object(id=GUILD_ID)
     synced = await bot.tree.sync(guild=guild)
 
     print(f"Synced {len(synced)} commands to guild")
     print("Bot is ready")
+
 
 
 
