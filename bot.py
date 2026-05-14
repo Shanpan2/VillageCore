@@ -37,9 +37,6 @@ async def on_ready():
     print("Bot is ready")
 
 
-
-
-
 async def main():
     await db_init()
     await load_cogs()
