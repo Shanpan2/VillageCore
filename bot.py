@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio
 
 from bot_instance import bot
+from database.config_db import db_init
 
 # ====== Cogs の読み込み ======
 async def load_cogs():
@@ -22,6 +23,7 @@ from views.attendance_views import AttendanceView
 from views.othello_views import OthelloView
 from views.uno_views import UnoHandView, WildColorSelectView, UnoDeclareView
 
+
 @bot.event
 async def on_ready():
     bot.add_view(TicketButtonView(bot))
@@ -34,9 +36,13 @@ async def on_ready():
 
     print("Bot is ready")
 
+
+# ====== 正しい main 関数 ======
 async def main():
-    async with bot:
-        await load_cogs()
-        await bot.start("YOUR_TOKEN_HERE")
+    await db_init()          # DB 初期化
+    await load_cogs()        # Cogs 読み込み
+    await bot.start("YOUR_TOKEN_HERE")  # Bot 起動
+
 
 asyncio.run(main())
+
