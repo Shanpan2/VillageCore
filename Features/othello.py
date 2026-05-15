@@ -102,6 +102,11 @@ def generate_othello_image(board):
 
     board_img = Image.new("RGBA", (board_size, board_size), board_color)
     draw = ImageDraw.Draw(board_img)
+    try:
+        from PIL import ImageFont
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
 
     # グリッド線
     for i in range(9):
@@ -139,6 +144,23 @@ def generate_othello_image(board):
                 outline=outline_color,
                 width=4,
             )
+
+    # ラベルを描画（A-H と 1-8）
+    for x in range(8):
+        label = chr(65 + x)
+        lx = x * cell_size + cell_size // 2
+        # 上に描画
+        draw.text((lx - 6, 2), label, fill=(255, 255, 255), font=font)
+        # 下にも描画
+        draw.text((lx - 6, board_size - 14), label, fill=(255, 255, 255), font=font)
+
+    for y in range(8):
+        label = str(y + 1)
+        ly = y * cell_size + cell_size // 2
+        # 左に描画
+        draw.text((2, ly - 6), label, fill=(255, 255, 255), font=font)
+        # 右にも描画
+        draw.text((board_size - 12, ly - 6), label, fill=(255, 255, 255), font=font)
 
     buffer = io.BytesIO()
     board_img.save(buffer, format="PNG")
@@ -222,18 +244,25 @@ async def handle_othello_move(interaction, game_id, x, y):
                     winner = "白"
                 else:
                     winner = "引き分け"
-                await interaction.response.edit_message(
-                    embed=discord.Embed(
-                        title="🎮 オセロ 終了",
-                        description=(
-                            f"ゲーム終了！\n"
-                            f"黒 {black_count} - 白 {white_count} で {winner} の勝利です。"
+                try:
+                    await interaction.message.edit(
+                        embed=discord.Embed(
+                            title="🎮 オセロ 終了",
+                            description=(
+                                f"ゲーム終了！\n"
+                                f"黒 {black_count} - 白 {white_count} で {winner} の勝利です。"
+                            ),
+                            color=0x2ECC71,
                         ),
-                        color=0x2ECC71,
-                    ),
-                    attachments=[file],
-                    view=None,
-                )
+                        attachments=[file],
+                        view=None,
+                    )
+                except Exception:
+                    # 編集できなければフォローアップで送る
+                    await interaction.followup.send(
+                        f"ゲーム終了！ 黒 {black_count} - 白 {white_count} で {winner} の勝利です。",
+                        ephemeral=False,
+                    )
                 return
         else:
             status_text = "置ける場所を選択してください。"
@@ -255,11 +284,15 @@ async def handle_othello_move(interaction, game_id, x, y):
             color=0x2ECC71,
         )
 
-        await interaction.response.edit_message(
-            embed=embed,
-            attachments=[file],
-            view=OthelloView(game_id, valid_moves),
-        )
+        try:
+            await interaction.message.edit(
+                embed=embed,
+                attachments=[file],
+                view=OthelloView(game_id, valid_moves),
+            )
+        except Exception:
+            # 編集に失敗したらフォローアップで代替表示
+            await interaction.followup.send(embed=embed, attachments=[file], ephemeral=False)
     except Exception as e:
         print(f"[Othello] move error: {type(e).__name__}: {e}")
         traceback.print_exc()
