@@ -9,10 +9,10 @@ class OthelloView(discord.ui.View):
         self.selected_move: tuple[int, int] | None = None
         self.add_item(OthelloMoveSelect(game_id, valid_moves))
         self.add_item(OthelloConfirmButton(game_id))
-        # 降参ボタンは常に表示
-        self.add_item(SurrenderButton(game_id))
         if show_join:
             self.add_item(JoinButton(game_id))
+        else:
+            self.add_item(SurrenderButton(game_id))
 
 
 class OthelloMoveSelect(discord.ui.Select):
