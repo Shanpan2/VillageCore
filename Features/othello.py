@@ -11,7 +11,7 @@ class Othello(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        # ★ Slash コマンドを tree に登録（これが無いと実行されない）
+        # ★ Slash コマンドを tree に登録
         self.bot.tree.add_command(self.othello)
 
     @app_commands.command(name="othello", description="オセロゲームを開始します")
