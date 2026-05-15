@@ -112,7 +112,14 @@ class Meigen(commands.Cog):
                     return ImageFont.truetype(str(font_path), size)
                 except Exception:
                     pass
+            # try common system fonts by name
             for name in ("meiryo.ttc", "MSGothic.ttc", "msgothic.ttc", "YuGothicUI.ttf", "arial.ttf"):
+                try:
+                    return ImageFont.truetype(name, size)
+                except Exception:
+                    continue
+            # try widely available ttf bundled with many environments
+            for name in ("DejaVuSans.ttf", "DejaVuSans.otf", "LiberationSans-Regular.ttf"):
                 try:
                     return ImageFont.truetype(name, size)
                 except Exception:
