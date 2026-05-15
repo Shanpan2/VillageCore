@@ -1,3 +1,4 @@
+import io
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -78,15 +79,16 @@ def generate_othello_image(board):
                 # ★ empty は mask を使わない（透明でなくても動く）
                 board_img.paste(empty, (px, py))
 
-    path = "othello_temp.png"
-    board_img.save(path)
-    return path
+    buffer = io.BytesIO()
+    board_img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
 
 
 async def handle_othello_move(interaction, game_id, x, y):
     game = othello_games.get(game_id)
     if not game:
-        await interaction.response.send_message("❌ ゲームデータが見つかりません。", ephemeral=True)
+        await interaction.followup.send("❌ ゲームデータが見つかりません。", ephemeral=True)
         return
 
     board = game["board"]
@@ -94,12 +96,12 @@ async def handle_othello_move(interaction, game_id, x, y):
 
     # すでに置かれている
     if board[y][x] != 0:
-        await interaction.response.send_message("❌ そこには置けません。", ephemeral=True)
+        await interaction.followup.send("❌ そこには置けません。", ephemeral=True)
         return
 
     flipped = get_flipped(board, x, y, turn)
     if not flipped:
-        await interaction.response.send_message("❌ そこには置けません。", ephemeral=True)
+        await interaction.followup.send("❌ そこには置けません。", ephemeral=True)
         return
 
     # 石を置く
