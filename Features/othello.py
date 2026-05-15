@@ -83,6 +83,44 @@ def generate_othello_image(board):
     return path
 
 
+async def handle_othello_move(interaction, game_id, x, y):
+    game = othello_games.get(game_id)
+    if not game:
+        await interaction.response.send_message("❌ ゲームデータが見つかりません。", ephemeral=True)
+        return
+
+    board = game["board"]
+    turn = game["turn"]
+
+    # すでに置かれている
+    if board[y][x] != 0:
+        await interaction.response.send_message("❌ そこには置けません。", ephemeral=True)
+        return
+
+    flipped = get_flipped(board, x, y, turn)
+    if not flipped:
+        await interaction.response.send_message("❌ そこには置けません。", ephemeral=True)
+        return
+
+    # 石を置く
+    board[y][x] = turn
+    for fx, fy in flipped:
+        board[fy][fx] = turn
+
+    # ターン交代
+    game["turn"] = 2 if turn == 1 else 1
+
+    # 画像生成
+    img = generate_othello_image(board)
+    file = discord.File(img, filename="othello.png")
+
+    embed = discord.Embed(
+        title="🎮 オセロ",
+        description=f"{'黒' if game['turn'] == 1 else '白'}番です。",
+        color=0x2ECC71,
+    )
+
+    await interaction.response.edit_message(embed=embed, attachments=[file], view=OthelloView(game_id))
 
 
 async def setup(bot):

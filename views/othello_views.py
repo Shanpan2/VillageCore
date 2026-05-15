@@ -28,7 +28,7 @@ class OthelloColSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_col = int(self.values[0])
-        await interaction.response.defer()
+        await interaction.response.defer()  # OK（1回目の応答）
 
 
 class OthelloRowSelect(discord.ui.Select):
@@ -47,7 +47,7 @@ class OthelloRowSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_row = int(self.values[0])
-        await interaction.response.defer()
+        await interaction.response.defer()  # OK（1回目の応答）
 
 
 class OthelloConfirmButton(discord.ui.Button):
@@ -63,13 +63,18 @@ class OthelloConfirmButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view = self.view
 
+        # ❌ response.send_message は使えない（すでに defer 済み）
         if view.selected_col is None or view.selected_row is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 列と行を両方選んでから確定してください。",
                 ephemeral=True
             )
             return
 
+        # 遅延応答を開始（まだ followup.send していないので safe）
+        await interaction.response.defer()
+
+        # ゲーム処理
         from Features.othello import handle_othello_move
 
         await handle_othello_move(
@@ -79,5 +84,6 @@ class OthelloConfirmButton(discord.ui.Button):
             view.selected_row
         )
 
+        # 選択リセット
         view.selected_col = None
         view.selected_row = None
