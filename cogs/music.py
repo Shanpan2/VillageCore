@@ -1,0 +1,253 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+import yt_dlp
+import asyncio
+import random
+
+YDL_OPTIONS = {
+    "format": "bestaudio",
+    "noplaylist": True,
+    "quiet": True,
+}
+
+FFMPEG_OPTIONS = {
+    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "options": "-vn",
+}
+
+
+class MusicPlayer:
+    def __init__(self, bot, guild):
+        self.bot = bot
+        self.guild = guild
+        self.queue = []
+        self.current = None
+        self.current_info = None
+        self.loop_mode = "off"  # off / single / all
+        self.playing = False
+
+    async def play_next(self, channel=None):
+        voice = self.guild.voice_client
+        if voice is None:
+            self.playing = False
+            return
+
+        if not self.queue:
+            self.playing = False
+            self.current = None
+            self.current_info = None
+            return
+
+        if self.loop_mode == "single" and self.current:
+            url = self.current
+        else:
+            url = self.queue.pop(0)
+            if self.loop_mode == "all":
+                self.queue.append(url)
+
+        self.current = url
+        self.playing = True
+
+        loop = self.bot.loop
+
+        try:
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                info = ydl.extract_info(url, download=False)
+                audio_url = info["url"]
+            self.current_info = info
+        except Exception as e:
+            if channel:
+                await channel.send(f"❌ 再生エラー: {e}")
+            await self.play_next(channel)
+            return
+
+        source = await discord.FFmpegOpusAudio.from_probe(audio_url, **FFMPEG_OPTIONS)
+
+        def after_play(err):
+            asyncio.run_coroutine_threadsafe(self.play_next(channel), loop)
+
+        voice.play(source, after=after_play)
+
+        if channel:
+            embed = discord.Embed(
+                title="🎶 Now Playing",
+                description=f"[{info['title']}]({info['webpage_url']})",
+                color=0x00FFCC,
+            )
+            embed.set_thumbnail(url=info.get("thumbnail"))
+            await channel.send(embed=embed)
+
+    async def add_to_queue(self, interaction: discord.Interaction, query: str):
+        if not query.startswith("http"):
+            query = f"ytsearch:{query}"
+
+        try:
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                info = ydl.extract_info(query, download=False)
+                url = info["entries"][0]["webpage_url"] if "entries" in info else info["webpage_url"]
+                title = info["entries"][0]["title"] if "entries" in info else info["title"]
+        except Exception as e:
+            await interaction.followup.send(f"❌ 取得エラー: {e}")
+            return
+
+        self.queue.append(url)
+
+        if not self.playing:
+            await self.play_next(interaction.channel)
+        else:
+            await interaction.followup.send(f"🎵 キューに追加しました: **{title}**")
+
+
+class Music(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.players: dict[int, MusicPlayer] = {}
+
+    def get_player(self, guild: discord.Guild) -> MusicPlayer:
+        if guild.id not in self.players:
+            self.players[guild.id] = MusicPlayer(self.bot, guild)
+        return self.players[guild.id]
+
+    @app_commands.command(name="join", description="ボイスチャンネルに参加します")
+    async def join(self, interaction: discord.Interaction):
+        if interaction.user.voice is None:
+            await interaction.response.send_message(
+                "❌ ボイスチャンネルに参加してから実行してください。", ephemeral=True
+            )
+            return
+        channel = interaction.user.voice.channel
+        if interaction.guild.voice_client:
+            await interaction.guild.voice_client.move_to(channel)
+        else:
+            await channel.connect()
+        await interaction.response.send_message(f"🔊 {channel.name} に参加しました。")
+
+    @app_commands.command(name="leave", description="ボイスチャンネルから退出します")
+    async def leave(self, interaction: discord.Interaction):
+        voice = interaction.guild.voice_client
+        if voice:
+            player = self.get_player(interaction.guild)
+            player.queue.clear()
+            player.playing = False
+            await voice.disconnect()
+            await interaction.response.send_message("👋 退出しました。")
+        else:
+            await interaction.response.send_message("❌ 接続していません。", ephemeral=True)
+
+    @app_commands.command(name="play", description="音楽を再生します")
+    @app_commands.describe(query="曲名またはURL")
+    async def play(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer()
+
+        if interaction.guild.voice_client is None:
+            if interaction.user.voice is None:
+                await interaction.followup.send("❌ ボイスチャンネルに参加してください。")
+                return
+            await interaction.user.voice.channel.connect()
+
+        player = self.get_player(interaction.guild)
+        await player.add_to_queue(interaction, query)
+
+    @app_commands.command(name="skip", description="次の曲へスキップします")
+    async def skip(self, interaction: discord.Interaction):
+        voice = interaction.guild.voice_client
+        if voice and voice.is_playing():
+            voice.stop()
+            await interaction.response.send_message("⏭️ スキップしました。")
+        else:
+            await interaction.response.send_message("❌ 再生中の曲がありません。", ephemeral=True)
+
+    @app_commands.command(name="stop", description="再生を停止してキューをクリアします")
+    async def stop(self, interaction: discord.Interaction):
+        voice = interaction.guild.voice_client
+        player = self.get_player(interaction.guild)
+        player.queue.clear()
+        player.playing = False
+        if voice:
+            voice.stop()
+            await interaction.response.send_message("⏹️ 停止しました。")
+        else:
+            await interaction.response.send_message("❌ 再生していません。", ephemeral=True)
+
+    @app_commands.command(name="pause", description="一時停止します")
+    async def pause(self, interaction: discord.Interaction):
+        voice = interaction.guild.voice_client
+        if voice and voice.is_playing():
+            voice.pause()
+            await interaction.response.send_message("⏸️ 一時停止しました。")
+        else:
+            await interaction.response.send_message("❌ 再生中ではありません。", ephemeral=True)
+
+    @app_commands.command(name="resume", description="再開します")
+    async def resume(self, interaction: discord.Interaction):
+        voice = interaction.guild.voice_client
+        if voice and voice.is_paused():
+            voice.resume()
+            await interaction.response.send_message("▶️ 再開しました。")
+        else:
+            await interaction.response.send_message("❌ 一時停止されていません。", ephemeral=True)
+
+    @app_commands.command(name="queue", description="キューを表示します")
+    async def queue(self, interaction: discord.Interaction):
+        player = self.get_player(interaction.guild)
+        if not player.queue:
+            await interaction.response.send_message("📭 キューは空です。")
+            return
+        lines = [f"{i+1}. {url}" for i, url in enumerate(player.queue)]
+        embed = discord.Embed(
+            title="📜 キュー一覧",
+            description="\n".join(lines),
+            color=0x00FFCC,
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="nowplaying", description="現在再生中の曲を表示します")
+    async def nowplaying(self, interaction: discord.Interaction):
+        player = self.get_player(interaction.guild)
+        if not player.current_info:
+            await interaction.response.send_message("❌ 再生中の曲はありません。", ephemeral=True)
+            return
+        info = player.current_info
+        embed = discord.Embed(
+            title="🎶 Now Playing",
+            description=f"[{info['title']}]({info['webpage_url']})",
+            color=0x00FFCC,
+        )
+        embed.set_thumbnail(url=info.get("thumbnail"))
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="loop", description="ループモードを設定します（off / single / all）")
+    @app_commands.describe(mode="off / single / all")
+    async def loop(self, interaction: discord.Interaction, mode: str):
+        if mode not in ("off", "single", "all"):
+            await interaction.response.send_message(
+                "❌ `off` / `single` / `all` のいずれかを指定してください。", ephemeral=True
+            )
+            return
+        player = self.get_player(interaction.guild)
+        player.loop_mode = mode
+        await interaction.response.send_message(f"🔁 ループモード: **{mode}**")
+
+    @app_commands.command(name="shuffle", description="キューをシャッフルします")
+    async def shuffle(self, interaction: discord.Interaction):
+        player = self.get_player(interaction.guild)
+        if len(player.queue) < 2:
+            await interaction.response.send_message("❌ シャッフルできる曲が足りません。", ephemeral=True)
+            return
+        random.shuffle(player.queue)
+        await interaction.response.send_message("🔀 シャッフルしました。")
+
+    @app_commands.command(name="remove", description="キューから指定番号の曲を削除します")
+    @app_commands.describe(index="削除する曲番号")
+    async def remove(self, interaction: discord.Interaction, index: int):
+        player = self.get_player(interaction.guild)
+        if index < 1 or index > len(player.queue):
+            await interaction.response.send_message("❌ 正しい番号を指定してください。", ephemeral=True)
+            return
+        removed = player.queue.pop(index - 1)
+        await interaction.response.send_message(f"🗑️ 削除しました: {removed}")
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Music(bot))

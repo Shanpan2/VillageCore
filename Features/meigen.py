@@ -15,7 +15,8 @@ class Meigen(commands.Cog):
         if message.author.bot:
             return
 
-        if self.bot.user.mention not in message.content:
+        # メンション判定（mentions リストで確実に判定）
+        if self.bot.user not in message.mentions:
             return
 
         if "迷言" not in message.content:
@@ -27,17 +28,22 @@ class Meigen(commands.Cog):
             return
 
         text = match.group(1)
-        path = self._generate_image(text)
 
-        file = discord.File(path, filename="meigen.png")
-        await message.reply(file=file)
+        try:
+            path = self._generate_image(text)
+            file = discord.File(path, filename="meigen.png")
+            await message.reply(file=file)
+        except Exception as e:
+            await message.reply(f"❌ 画像生成に失敗しました: {e}")
 
     @staticmethod
     def _generate_image(text: str) -> str:
         bg_dir = "assets/meigen"
         bg_list = [f for f in os.listdir(bg_dir) if f.endswith(".png")]
-        bg_path = os.path.join(bg_dir, random.choice(bg_list))
+        if not bg_list:
+            raise FileNotFoundError("assets/meigen に背景画像がありません")
 
+        bg_path = os.path.join(bg_dir, random.choice(bg_list))
         img = Image.open(bg_path).convert("RGBA")
         draw = ImageDraw.Draw(img)
 
