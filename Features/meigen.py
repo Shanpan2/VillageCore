@@ -6,6 +6,8 @@ import random
 import re
 import textwrap
 from pathlib import Path
+import aiohttp
+from PIL import ImageFilter
 import io
 
 
@@ -17,7 +19,8 @@ class Meigen(commands.Cog):
     async def meigen(self, interaction: discord.Interaction, text: str):
         await interaction.response.defer()
         try:
-            buffer = self._generate_image(text)
+            avatar_url = interaction.user.display_avatar.url if interaction.user else None
+            buffer = await Meigen._generate_image(text, avatar_url=avatar_url)
             buffer.seek(0)
             await interaction.followup.send(file=discord.File(buffer, filename="meigen.png"))
         except Exception as e:
@@ -73,7 +76,8 @@ class Meigen(commands.Cog):
                 return
 
         try:
-            buffer = self._generate_image(text)
+            avatar_url = message.author.display_avatar.url if message.author else None
+            buffer = await Meigen._generate_image(text, avatar_url=avatar_url)
             buffer.seek(0)
             file = discord.File(buffer, filename="meigen.png")
             await message.reply(file=file)
@@ -81,7 +85,7 @@ class Meigen(commands.Cog):
             await message.reply(f"❌ 画像生成に失敗しました: {e}")
 
     @staticmethod
-    def _generate_image(text: str) -> io.BytesIO:
+    async def _generate_image(text: str, avatar_url: str | None = None) -> io.BytesIO:
         base_path = Path(__file__).resolve().parent.parent
         assets_path = base_path / "assets" / "meigen"
 
@@ -101,6 +105,37 @@ class Meigen(commands.Cog):
             img = Image.open(bg_path).convert("RGBA")
         else:
             img = Meigen._generate_fallback_background()
+
+        # if avatar url provided, try to fetch and use as right-side background
+        avatar_img = None
+        if avatar_url:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(avatar_url) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            avatar_img = Image.open(io.BytesIO(data)).convert("RGBA")
+            except Exception:
+                avatar_img = None
+
+        if avatar_img:
+            # ensure canvas size large enough
+            target_w, target_h = max(img.width, 900), max(img.height, 400)
+            if img.width < target_w or img.height < target_h:
+                img = img.resize((target_w, target_h), Image.LANCZOS)
+            # place avatar on right half, fill height
+            avatar_h = img.height
+            avatar_w = avatar_h  # make square for filling
+            avatar_resized = avatar_img.resize((avatar_w, avatar_h), Image.LANCZOS)
+            # paste avatar on right side
+            img.paste(avatar_resized, (img.width - avatar_w, 0), avatar_resized)
+            # darken avatar side for contrast
+            overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            draw_overlay = ImageDraw.Draw(overlay)
+            draw_overlay.rectangle([img.width - avatar_w, 0, img.width, img.height], fill=(0, 0, 0, 120))
+            img = Image.alpha_composite(img, overlay)
+            # slight blur on avatar to make text pop
+            img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
 
         draw = ImageDraw.Draw(img)
 
