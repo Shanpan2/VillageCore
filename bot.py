@@ -50,11 +50,9 @@ async def load_cogs():
 def register_persistent_views():
     from views.ticket_views import TicketButtonView
     from views.role_panel_views import RolePanelView
-    from views.attendance_views import AttendanceView
-
+    # ★ AttendanceView は attendance.py に統合したため削除
     bot.add_view(TicketButtonView(bot))
     bot.add_view(RolePanelView(0))
-    bot.add_view(AttendanceView())
 
 
 # ==========================
@@ -94,14 +92,23 @@ async def start_health_server():
 # エントリポイント
 # ==========================
 async def main():
+    print("🚀 Starting bot process")
+
     if TOKEN is None:
         print("❌ DISCORD_TOKEN が設定されていません")
         return
 
     await db_init()
     await load_cogs()
+
+    print(f"🌐 Starting health server on port {PORT}")
     asyncio.create_task(start_health_server())
-    await bot.start(TOKEN)
+
+    try:
+        await bot.start(TOKEN)
+    except Exception as e:
+        print(f"❌ Bot failed to start: {type(e).__name__}: {e}")
+        raise
 
 
 asyncio.run(main())
