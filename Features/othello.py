@@ -63,7 +63,7 @@ def generate_othello_image(board):
 
     black = Image.open("assets/othello/black.png").convert("RGBA").resize((cell_size, cell_size))
     white = Image.open("assets/othello/white.png").convert("RGBA").resize((cell_size, cell_size))
-    empty = Image.open("assets/othello/empty.png").convert((cell_size, cell_size))
+    empty = Image.open("assets/othello/empty.png").convert("RGBA").resize((cell_size, cell_size))
 
     for y in range(8):
         for x in range(8):
@@ -75,11 +75,13 @@ def generate_othello_image(board):
             elif board[y][x] == 2:
                 board_img.paste(white, (px, py), white)
             else:
-                board_img.paste(empty, (px, py), empty)
+                # ★ empty は mask を使わない（透明でなくても動く）
+                board_img.paste(empty, (px, py))
 
     path = "othello_temp.png"
     board_img.save(path)
     return path
+
 
 
 
