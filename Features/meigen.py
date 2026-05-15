@@ -4,6 +4,7 @@ from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 import random
 import re
+import textwrap
 from pathlib import Path
 import io
 
