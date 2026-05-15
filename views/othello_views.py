@@ -2,23 +2,16 @@
 
 import discord
 
-
-# Discord のボタンは1メッセージ最大25個（5行×5列）のため
-# 8×8=64マスのボタンは実装不可。
-# → 列(A〜H)と行(1〜8)をセレクトメニューで選ぶ2段階方式に変更。
-
-
 class OthelloView(discord.ui.View):
     def __init__(self, game_id: str):
         super().__init__(timeout=None)
         self.game_id = game_id
+        self.selected_col = None
+        self.selected_row = None
+
         self.add_item(OthelloColSelect(game_id))
         self.add_item(OthelloRowSelect(game_id))
         self.add_item(OthelloConfirmButton(game_id))
-
-    # 選択中の列・行を一時保持（View インスタンス内）
-    selected_col: int | None = None
-    selected_row: int | None = None
 
 
 class OthelloColSelect(discord.ui.Select):
@@ -70,19 +63,24 @@ class OthelloConfirmButton(discord.ui.Button):
         self.game_id = game_id
 
     async def callback(self, interaction: discord.Interaction):
-        view: OthelloView = self.view
+        view = self.view
 
         if view.selected_col is None or view.selected_row is None:
             await interaction.response.send_message(
-                "❌ 列と行を両方選んでから確定してください。", ephemeral=True
+                "❌ 列と行を両方選んでから確定してください。",
+                ephemeral=True
             )
             return
 
+        # ★ 遅延 import（循環参照を防ぐ）
         from Features.othello import handle_othello_move
+
         await handle_othello_move(
-            interaction, self.game_id, view.selected_col, view.selected_row
+            interaction,
+            self.game_id,
+            view.selected_col,
+            view.selected_row
         )
 
-        # 選択状態をリセット
         view.selected_col = None
         view.selected_row = None

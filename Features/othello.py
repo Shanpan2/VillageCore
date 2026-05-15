@@ -1,21 +1,17 @@
+# Features/othello.py
+
 import discord
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image
 from views.othello_views import OthelloView
 
-
-# メモリに保存（DB 不要）
 othello_games = {}
 
-
 class Othello(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot):
         self.bot = bot
 
-    # -------------------------------------------------------
-    # /othello
-    # -------------------------------------------------------
     @app_commands.command(name="othello", description="オセロゲームを開始します")
     async def othello(self, interaction: discord.Interaction):
         game_id = str(interaction.id)
@@ -41,10 +37,7 @@ class Othello(commands.Cog):
         )
 
 
-# ============================================================
-# ボタンが押されたときの処理（views から呼び出す）
-# ============================================================
-async def handle_othello_move(inter: discord.Interaction, game_id: str, x: int, y: int):
+async def handle_othello_move(inter, game_id, x, y):
     game = othello_games.get(game_id)
     if not game:
         await inter.response.send_message("❌ このゲームは存在しません。", ephemeral=True)
@@ -77,14 +70,14 @@ async def handle_othello_move(inter: discord.Interaction, game_id: str, x: int, 
         description=f"{'黒' if turn == 1 else '白'}番です。",
         color=0x2ECC71,
     )
+
     await inter.response.edit_message(
-        embed=embed, attachments=[file], view=OthelloView(game_id)
+        embed=embed,
+        attachments=[file],
+        view=OthelloView(game_id)
     )
 
 
-# ============================================================
-# 反転処理
-# ============================================================
 def get_flipped(board, x, y, turn):
     enemy = 2 if turn == 1 else 1
     flipped = []
@@ -107,9 +100,6 @@ def get_flipped(board, x, y, turn):
     return flipped
 
 
-# ============================================================
-# 盤面画像生成
-# ============================================================
 def generate_othello_image(board):
     cell_size = 60
     img = Image.new("RGB", (cell_size * 8, cell_size * 8), (0, 128, 0))
@@ -129,5 +119,5 @@ def generate_othello_image(board):
     return path
 
 
-async def setup(bot: commands.Bot):
+async def setup(bot):
     await bot.add_cog(Othello(bot))
