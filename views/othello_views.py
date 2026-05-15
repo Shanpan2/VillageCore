@@ -1,4 +1,5 @@
 import discord
+import traceback
 
 class OthelloView(discord.ui.View):
     def __init__(self, game_id: str):
@@ -28,7 +29,7 @@ class OthelloColSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_col = int(self.values[0])
-        await interaction.response.defer()  # OK（1回目の応答）
+        await interaction.response.defer(ephemeral=True)
 
 
 class OthelloRowSelect(discord.ui.Select):
@@ -47,7 +48,7 @@ class OthelloRowSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.selected_row = int(self.values[0])
-        await interaction.response.defer()  # OK（1回目の応答）
+        await interaction.response.defer(ephemeral=True)
 
 
 class OthelloConfirmButton(discord.ui.Button):
@@ -62,24 +63,34 @@ class OthelloConfirmButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         view = self.view
+        try:
+            if view.selected_col is None or view.selected_row is None:
+                await interaction.response.send_message(
+                    "❌ 列と行を両方選んでから確定してください。",
+                    ephemeral=True
+                )
+                return
 
-        if view.selected_col is None or view.selected_row is None:
-            await interaction.response.send_message(
-                "❌ 列と行を両方選んでから確定してください。",
-                ephemeral=True
+            await interaction.response.defer()
+
+            from Features.othello import handle_othello_move
+
+            await handle_othello_move(
+                interaction,
+                self.game_id,
+                view.selected_col,
+                view.selected_row
             )
-            return
 
-        await interaction.response.defer()
-
-        from Features.othello import handle_othello_move
-
-        await handle_othello_move(
-            interaction,
-            self.game_id,
-            view.selected_col,
-            view.selected_row
-        )
-
-        view.selected_col = None
-        view.selected_row = None
+            view.selected_col = None
+            view.selected_row = None
+        except Exception as e:
+            print(f"[OthelloView] button error: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "❌ オセロ操作中にエラーが発生しました。",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
