@@ -3,19 +3,23 @@ import traceback
 
 
 class OthelloView(discord.ui.View):
-    def __init__(self, game_id: str, valid_moves: list[tuple[int, int]]):
+    def __init__(self, game_id: str, valid_moves: list[tuple[int, int]], show_join: bool = True):
         super().__init__(timeout=None)
         self.game_id = game_id
         self.selected_move: tuple[int, int] | None = None
         self.add_item(OthelloMoveSelect(game_id, valid_moves))
         self.add_item(OthelloConfirmButton(game_id))
-        self.add_item(JoinButton(game_id))
+        # 降参ボタンは常に表示
+        self.add_item(SurrenderButton(game_id))
+        if show_join:
+            self.add_item(JoinButton(game_id))
 
 
 class OthelloMoveSelect(discord.ui.Select):
     def __init__(self, game_id: str, valid_moves: list[tuple[int, int]]):
+        # Use label-style values (e.g. "D3") to avoid coordinate mixups
         options = [
-            discord.SelectOption(label=f"{chr(65+x)}{y+1}", value=f"{x},{y}")
+            discord.SelectOption(label=f"{chr(65+x)}{y+1}", value=f"{chr(65+x)}{y+1}")
             for x, y in valid_moves
         ]
         if not options:
@@ -46,9 +50,22 @@ class OthelloMoveSelect(discord.ui.Select):
             pass
 
         if self.values and self.values[0] != "none":
-            x, y = map(int, self.values[0].split(","))
-            self.view.selected_move = (x, y)
-        await interaction.response.defer(ephemeral=True)
+            val = self.values[0]
+            # Convert label like 'D3' back to coordinates
+            try:
+                x = ord(val[0].upper()) - 65
+                y = int(val[1:]) - 1
+                self.view.selected_move = (x, y)
+            except Exception:
+                self.view.selected_move = None
+        # Acknowledge selection with a short ephemeral message
+        try:
+            await interaction.response.send_message(f"選択しました: {self.values[0]}", ephemeral=True)
+        except Exception:
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except Exception:
+                pass
 
 
 class OthelloConfirmButton(discord.ui.Button):
@@ -147,11 +164,69 @@ class JoinButton(discord.ui.Button):
 
             # 編集は interaction.message を使って行う
             await interaction.response.send_message("✅ 後手として参加しました。", ephemeral=True)
-            await interaction.message.edit(embed=embed, attachments=[file], view=OthelloView(self.game_id, valid_moves))
+            await interaction.message.edit(embed=embed, attachments=[file], view=OthelloView(self.game_id, valid_moves, show_join=False))
         except Exception as e:
             print(f"[OthelloView.Join] error: {type(e).__name__}: {e}")
             traceback.print_exc()
             try:
                 await interaction.followup.send("❌ 参加処理中にエラーが発生しました。", ephemeral=True)
+            except Exception:
+                pass
+
+
+class SurrenderButton(discord.ui.Button):
+    def __init__(self, game_id: str):
+        super().__init__(
+            label="降参する 🛑",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"othello_surrender_{game_id}",
+            row=2,
+        )
+        self.game_id = game_id
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            from Features.othello import othello_games
+
+            game = othello_games.get(self.game_id)
+            if not game:
+                await interaction.response.send_message("❌ ゲームが見つかりません。", ephemeral=True)
+                return
+
+            user_id = interaction.user.id
+            if user_id != game.get("black_id") and user_id != game.get("white_id"):
+                await interaction.response.send_message("❌ ゲーム参加者のみ降参できます。", ephemeral=True)
+                return
+
+            # 決着: 押した人が降参 -> 相手の勝利
+            if user_id == game.get("black_id"):
+                winner = "白"
+            else:
+                winner = "黒"
+
+            # ゲームデータを削除
+            try:
+                othello_games.pop(self.game_id, None)
+            except Exception:
+                pass
+
+            # 表示更新
+            await interaction.response.send_message(f"✅ 降参しました。{winner} の勝利です。", ephemeral=True)
+            try:
+                await interaction.message.edit(
+                    embed=discord.Embed(
+                        title="🎮 オセロ 終了",
+                        description=f"降参により {winner} の勝利です。",
+                        color=0x2ECC71,
+                    ),
+                    view=None,
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[OthelloView.Surrender] error: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("❌ 降参処理中にエラーが発生しました。", ephemeral=True)
             except Exception:
                 pass

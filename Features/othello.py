@@ -48,7 +48,7 @@ class Othello(commands.Cog):
             await interaction.response.send_message(
                 embed=embed,
                 file=file,
-                view=OthelloView(game_id, valid_moves),
+                view=OthelloView(game_id, valid_moves, show_join=True),
             )
         except Exception as e:
             print(f"[Othello] command error: {type(e).__name__}: {e}")
@@ -283,12 +283,11 @@ async def handle_othello_move(interaction, game_id, x, y):
             ),
             color=0x2ECC71,
         )
-
         try:
             await interaction.message.edit(
                 embed=embed,
                 attachments=[file],
-                view=OthelloView(game_id, valid_moves),
+                view=OthelloView(game_id, valid_moves, show_join=(game.get("white_id") is None)),
             )
         except Exception:
             # 編集に失敗したらフォローアップで代替表示
