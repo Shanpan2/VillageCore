@@ -86,10 +86,11 @@ class AttendStatusSelect(discord.ui.Select):
         super().__init__(placeholder=f"{name} の出席状況を選択", options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         status = self.values[0]
         entry = self.attend_data["members"].get(self.uid)
         if entry is None:
-            await interaction.response.send_message("❌ メンバーが見つかりません。", ephemeral=True)
+            await interaction.followup.send("❌ メンバーが見つかりません。", ephemeral=True)
             return
         change = calc_point_change(entry["pt"], status)
         new_pt = apply_point(entry["pt"], status)
@@ -97,7 +98,7 @@ class AttendStatusSelect(discord.ui.Select):
         entry["records"][self.date] = status
         await save_attend(self.attend_data)
         sign = f"+{change}" if change >= 0 else str(change)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ **{entry['name']}** | {status} → {sign}pt → **{new_pt}pt**",
             ephemeral=True,
         )
@@ -158,8 +159,9 @@ class BulkAttendView(discord.ui.View):
 
         save_btn = discord.ui.Button(label="✅ 保存する", style=discord.ButtonStyle.success, row=4)
         async def save_cb(inter: discord.Interaction):
+            await inter.response.defer(ephemeral=True)
             if not self.selections:
-                await inter.response.send_message("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
+                await inter.followup.send("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
                 return
             results = []
             for uid, status in self.selections.items():
@@ -173,7 +175,7 @@ class BulkAttendView(discord.ui.View):
                 sign = f"+{change}" if change >= 0 else str(change)
                 results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
             await save_attend(self.attend_data)
-            await inter.response.send_message(
+            await inter.followup.send(
                 f"✅ **{record_date}** の記録が完了しました！\n\n" + "\n".join(results),
                 ephemeral=True,
             )
@@ -245,6 +247,7 @@ class Attendance(commands.Cog):
                     max_values=len(options),
                 )
             async def callback(self2, interaction2: discord.Interaction):
+                await interaction2.response.defer(ephemeral=True)
                 added = []
                 for uid in self2.values:
                     m = interaction2.guild.get_member(int(uid))
@@ -253,7 +256,7 @@ class Attendance(commands.Cog):
                     data["members"][uid] = {"name": m.display_name, "pt": initial_pt, "records": {}}
                     added.append(m.display_name)
                 await save_attend(data)
-                await interaction2.response.send_message(
+                await interaction2.followup.send(
                     f"✅ **{len(added)}人** を追加しました！\n" + "、".join(added), ephemeral=True
                 )
 
