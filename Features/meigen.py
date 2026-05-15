@@ -105,49 +105,83 @@ class Meigen(commands.Cog):
         draw = ImageDraw.Draw(img)
 
         font_path = assets_path / "font.ttf"
-        if font_path.exists():
-            try:
-                font = ImageFont.truetype(str(font_path), 48)
-            except Exception:
-                font = ImageFont.load_default()
-        else:
-            font = ImageFont.load_default()
 
-        # Choose font size to fit the image width
+        def get_truetype(size: int):
+            if font_path.exists():
+                try:
+                    return ImageFont.truetype(str(font_path), size)
+                except Exception:
+                    pass
+            for name in ("meiryo.ttc", "MSGothic.ttc", "msgothic.ttc", "YuGothicUI.ttf", "arial.ttf"):
+                try:
+                    return ImageFont.truetype(name, size)
+                except Exception:
+                    continue
+            return ImageFont.load_default()
+
+        # Choose font size to fit the image width and compute wrapping based on measured char width
         max_width = img.width - 120
-        # try decreasing font sizes until the longest wrapped line fits
-        size = 64
+        size = 72
+        font = get_truetype(size)
         while size >= 18:
+            font = get_truetype(size)
+            sample_char = "あ"
             try:
-                test_font = ImageFont.truetype(str(font_path), size) if font_path.exists() else ImageFont.load_default()
+                char_bbox = draw.textbbox((0, 0), sample_char, font=font)
+                char_w = max(4, char_bbox[2] - char_bbox[0])
             except Exception:
-                test_font = ImageFont.load_default()
-            # wrap by characters approximate; then measure
-            lines = textwrap.wrap(text, width=40)
+                char_w = 12
+            approx_chars = max(8, max_width // char_w)
+            lines = textwrap.wrap(text, width=approx_chars)
             too_big = False
             for line in lines:
-                bbox = draw.textbbox((0, 0), line, font=test_font)
+                bbox = draw.textbbox((0, 0), line, font=font)
                 if bbox[2] - bbox[0] > max_width:
                     too_big = True
                     break
             if not too_big:
-                font = test_font
                 break
             size -= 4
 
+        # final wrapping with chosen font
+        try:
+            char_bbox = draw.textbbox((0, 0), "あ", font=font)
+            char_w = max(4, char_bbox[2] - char_bbox[0])
+        except Exception:
+            char_w = 12
+        approx_chars = max(8, max_width // char_w)
+        lines = textwrap.wrap(text, width=approx_chars)
+
         # center vertically
-        lines = textwrap.wrap(text, width=40)
         line_heights = [draw.textbbox((0, 0), l, font=font)[3] - draw.textbbox((0, 0), l, font=font)[1] for l in lines]
         total_h = sum(line_heights) + (len(lines)-1) * 12
         y = (img.height - total_h) // 2
+
+        # draw semi-transparent box behind text for contrast
+        if total_h > 0:
+            max_w = 0
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font)
+                w = bbox[2] - bbox[0]
+                if w > max_w:
+                    max_w = w
+            pad_x, pad_y = 24, 18
+            box_x0 = (img.width - max_w) // 2 - pad_x
+            box_y0 = y - 6
+            box_x1 = (img.width + max_w) // 2 + pad_x
+            box_y1 = y + total_h + 6
+            box_x0 = max(8, box_x0)
+            box_y0 = max(8, box_y0)
+            box_x1 = min(img.width - 8, box_x1)
+            box_y1 = min(img.height - 8, box_y1)
+            draw.rectangle([box_x0, box_y0, box_x1, box_y1], fill=(0, 0, 0, 160))
+
         for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
             w = bbox[2] - bbox[0]
             x = (img.width - w) // 2
-            # outline
-            for dx in (-2, -1, 1, 2):
-                for dy in (-2, -1, 1, 2):
-                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
+            for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+                draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
             draw.text((x, y), line, font=font, fill=(255, 255, 255))
             y += lh + 12
 
