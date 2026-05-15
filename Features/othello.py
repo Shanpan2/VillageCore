@@ -10,10 +10,6 @@ class Othello(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def cog_load(self):
-        # ★ Slash コマンドを tree に登録
-        self.bot.tree.add_command(self.othello)
-
     @app_commands.command(name="othello", description="オセロゲームを開始します")
     @app_commands.guilds(discord.Object(id=1405716361933754408))
     async def othello(self, interaction: discord.Interaction):
