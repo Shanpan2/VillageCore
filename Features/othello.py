@@ -3,7 +3,7 @@ import traceback
 import discord
 from discord.ext import commands
 from discord import app_commands
-from PIL import Image
+from PIL import Image, ImageDraw
 from views.othello_views import OthelloView
 
 othello_games = {}
@@ -71,26 +71,51 @@ def get_flipped(board, x, y, turn):
 
 
 def generate_othello_image(board):
-    board_img = Image.open("assets/othello/board.png").convert("RGBA")
+    board_size = 640
+    cell_size = board_size // 8
+    line_color = (20, 40, 20)
+    board_color = (46, 110, 69)
+    border_color = (15, 30, 15)
 
-    cell_size = board_img.width // 8
+    board_img = Image.new("RGBA", (board_size, board_size), board_color)
+    draw = Image.Draw.Draw(board_img)
 
-    black = Image.open("assets/othello/black.png").convert("RGBA").resize((cell_size, cell_size))
-    white = Image.open("assets/othello/white.png").convert("RGBA").resize((cell_size, cell_size))
-    empty = Image.open("assets/othello/empty.png").convert("RGBA").resize((cell_size, cell_size))
+    # グリッド線
+    for i in range(9):
+        pos = i * cell_size
+        draw.line([(pos, 0), (pos, board_size)], fill=line_color, width=3)
+        draw.line([(0, pos), (board_size, pos)], fill=line_color, width=3)
 
+    # 盤面の隅を少し強調
+    inset = cell_size // 6
+    for x in range(2, 6, 2):
+        for y in range(2, 6, 2):
+            cx = x * cell_size + cell_size // 2
+            cy = y * cell_size + cell_size // 2
+            r = cell_size // 12
+            draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(200, 200, 120))
+
+    # 石を描画
     for y in range(8):
         for x in range(8):
+            cell = board[y][x]
+            if cell == 0:
+                continue
+
             px = x * cell_size
             py = y * cell_size
+            radius = int(cell_size * 0.38)
+            center_x = px + cell_size // 2
+            center_y = py + cell_size // 2
+            disc_color = (0, 0, 0) if cell == 1 else (255, 255, 255)
+            outline_color = (240, 240, 240) if cell == 1 else (40, 40, 40)
 
-            if board[y][x] == 1:
-                board_img.paste(black, (px, py), black)
-            elif board[y][x] == 2:
-                board_img.paste(white, (px, py), white)
-            else:
-                # ★ empty は mask を使わない（透明でなくても動く）
-                board_img.paste(empty, (px, py))
+            draw.ellipse(
+                [center_x-radius, center_y-radius, center_x+radius, center_y+radius],
+                fill=disc_color,
+                outline=outline_color,
+                width=4,
+            )
 
     buffer = io.BytesIO()
     board_img.save(buffer, format="PNG")
