@@ -2,12 +2,14 @@ import os
 import discord
 from discord.ext import commands
 import asyncio
+from aiohttp import web
 
 from bot_instance import bot
 from database.config_db import db_init
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = 1405716361933754408
+PORT = int(os.getenv("PORT", "8000"))
 
 
 # ==========================
@@ -72,6 +74,22 @@ async def on_ready():
     print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}")
 
 
+async def handle_ping(request):
+    return web.Response(text="OK")
+
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+
+    print(f"🌐 Health server running on port {PORT}")
+
+
 # ==========================
 # エントリポイント
 # ==========================
@@ -82,6 +100,7 @@ async def main():
 
     await db_init()
     await load_cogs()
+    asyncio.create_task(start_health_server())
     await bot.start(TOKEN)
 
 
