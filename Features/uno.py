@@ -95,6 +95,9 @@ class Uno(commands.Cog):
             )
             return
 
+        # ★ DM送信・画像生成で時間がかかるため先にdefer
+        await interaction.response.defer()
+
         deck = generate_deck()
         random.shuffle(deck)
 
@@ -120,7 +123,7 @@ class Uno(commands.Cog):
                 await member.send(file=file)
 
         first_player = state["players"][0]
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>",
             view=UnoHandView(game_id, first_player, hands[first_player]),
         )

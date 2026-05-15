@@ -135,12 +135,13 @@ class Music(commands.Cog):
                 "❌ ボイスチャンネルに参加してから実行してください。", ephemeral=True
             )
             return
-        channel = interaction.user.voice.channel
+        await interaction.response.defer()
+        vc_channel = interaction.user.voice.channel
         if interaction.guild.voice_client:
-            await interaction.guild.voice_client.move_to(channel)
+            await interaction.guild.voice_client.move_to(vc_channel)
         else:
-            await channel.connect()
-        await interaction.response.send_message(f"🔊 {channel.name} に参加しました。")
+            await vc_channel.connect()
+        await interaction.followup.send(f"🔊 {vc_channel.name} に参加しました。")
 
     # -------------------------
     # /leave
