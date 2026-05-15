@@ -24,7 +24,7 @@ class MusicPlayer:
         self.queue = []
         self.current = None
         self.current_info = None
-        self.loop_mode = "off"  # off / single / all
+        self.loop_mode = "off"
         self.playing = False
 
     async def play_next(self, channel=None):
@@ -78,25 +78,29 @@ class MusicPlayer:
             embed.set_thumbnail(url=info.get("thumbnail"))
             await channel.send(embed=embed)
 
-    async def add_to_queue(self, interaction: discord.Interaction, query: str):
+    async def add_to_queue(self, channel, query: str):
         if not query.startswith("http"):
             query = f"ytsearch:{query}"
 
         try:
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 info = ydl.extract_info(query, download=False)
-                url = info["entries"][0]["webpage_url"] if "entries" in info else info["webpage_url"]
-                title = info["entries"][0]["title"] if "entries" in info else info["title"]
+                if "entries" in info:
+                    entry = info["entries"][0]
+                else:
+                    entry = info
+                url = entry["webpage_url"]
+                title = entry["title"]
         except Exception as e:
-            await interaction.followup.send(f"❌ 取得エラー: {e}")
+            await channel.send(f"❌ 取得エラー: {e}")
             return
 
         self.queue.append(url)
 
         if not self.playing:
-            await self.play_next(interaction.channel)
+            await self.play_next(channel)
         else:
-            await interaction.followup.send(f"🎵 キューに追加しました: **{title}**")
+            await channel.send(f"🎵 キューに追加しました: **{title}**")
 
 
 class Music(commands.Cog):
@@ -109,6 +113,21 @@ class Music(commands.Cog):
             self.players[guild.id] = MusicPlayer(self.bot, guild)
         return self.players[guild.id]
 
+    async def _ensure_voice(self, interaction: discord.Interaction) -> bool:
+        """VCに接続済みか確認。未接続なら自動join。失敗時Falseを返す"""
+        if interaction.guild.voice_client:
+            return True
+        if interaction.user.voice is None:
+            await interaction.followup.send(
+                "❌ ボイスチャンネルに参加してから実行してください。", ephemeral=True
+            )
+            return False
+        await interaction.user.voice.channel.connect()
+        return True
+
+    # -------------------------
+    # /join
+    # -------------------------
     @app_commands.command(name="join", description="ボイスチャンネルに参加します")
     async def join(self, interaction: discord.Interaction):
         if interaction.user.voice is None:
@@ -123,32 +142,41 @@ class Music(commands.Cog):
             await channel.connect()
         await interaction.response.send_message(f"🔊 {channel.name} に参加しました。")
 
+    # -------------------------
+    # /leave
+    # -------------------------
     @app_commands.command(name="leave", description="ボイスチャンネルから退出します")
     async def leave(self, interaction: discord.Interaction):
         voice = interaction.guild.voice_client
-        if voice:
-            player = self.get_player(interaction.guild)
-            player.queue.clear()
-            player.playing = False
-            await voice.disconnect()
-            await interaction.response.send_message("👋 退出しました。")
-        else:
+        if not voice:
             await interaction.response.send_message("❌ 接続していません。", ephemeral=True)
+            return
+        player = self.get_player(interaction.guild)
+        player.queue.clear()
+        player.playing = False
+        await voice.disconnect()
+        await interaction.response.send_message("👋 退出しました。")
 
+    # -------------------------
+    # /play
+    # -------------------------
     @app_commands.command(name="play", description="音楽を再生します")
     @app_commands.describe(query="曲名またはURL")
     async def play(self, interaction: discord.Interaction, query: str):
+        # ★ defer で先に応答を確保
         await interaction.response.defer()
 
-        if interaction.guild.voice_client is None:
-            if interaction.user.voice is None:
-                await interaction.followup.send("❌ ボイスチャンネルに参加してください。")
-                return
-            await interaction.user.voice.channel.connect()
+        # VC接続確認（_ensure_voice内でfollowupを使う）
+        if not await self._ensure_voice(interaction):
+            return
 
         player = self.get_player(interaction.guild)
-        await player.add_to_queue(interaction, query)
+        # ★ channelを渡してinteractionは使わない
+        await player.add_to_queue(interaction.channel, query)
 
+    # -------------------------
+    # /skip
+    # -------------------------
     @app_commands.command(name="skip", description="次の曲へスキップします")
     async def skip(self, interaction: discord.Interaction):
         voice = interaction.guild.voice_client
@@ -158,6 +186,9 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message("❌ 再生中の曲がありません。", ephemeral=True)
 
+    # -------------------------
+    # /stop
+    # -------------------------
     @app_commands.command(name="stop", description="再生を停止してキューをクリアします")
     async def stop(self, interaction: discord.Interaction):
         voice = interaction.guild.voice_client
@@ -170,6 +201,9 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message("❌ 再生していません。", ephemeral=True)
 
+    # -------------------------
+    # /pause
+    # -------------------------
     @app_commands.command(name="pause", description="一時停止します")
     async def pause(self, interaction: discord.Interaction):
         voice = interaction.guild.voice_client
@@ -179,6 +213,9 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message("❌ 再生中ではありません。", ephemeral=True)
 
+    # -------------------------
+    # /resume
+    # -------------------------
     @app_commands.command(name="resume", description="再開します")
     async def resume(self, interaction: discord.Interaction):
         voice = interaction.guild.voice_client
@@ -188,6 +225,9 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message("❌ 一時停止されていません。", ephemeral=True)
 
+    # -------------------------
+    # /queue
+    # -------------------------
     @app_commands.command(name="queue", description="キューを表示します")
     async def queue(self, interaction: discord.Interaction):
         player = self.get_player(interaction.guild)
@@ -202,6 +242,9 @@ class Music(commands.Cog):
         )
         await interaction.response.send_message(embed=embed)
 
+    # -------------------------
+    # /nowplaying
+    # -------------------------
     @app_commands.command(name="nowplaying", description="現在再生中の曲を表示します")
     async def nowplaying(self, interaction: discord.Interaction):
         player = self.get_player(interaction.guild)
@@ -217,6 +260,9 @@ class Music(commands.Cog):
         embed.set_thumbnail(url=info.get("thumbnail"))
         await interaction.response.send_message(embed=embed)
 
+    # -------------------------
+    # /loop
+    # -------------------------
     @app_commands.command(name="loop", description="ループモードを設定します（off / single / all）")
     @app_commands.describe(mode="off / single / all")
     async def loop(self, interaction: discord.Interaction, mode: str):
@@ -229,6 +275,9 @@ class Music(commands.Cog):
         player.loop_mode = mode
         await interaction.response.send_message(f"🔁 ループモード: **{mode}**")
 
+    # -------------------------
+    # /shuffle
+    # -------------------------
     @app_commands.command(name="shuffle", description="キューをシャッフルします")
     async def shuffle(self, interaction: discord.Interaction):
         player = self.get_player(interaction.guild)
@@ -238,6 +287,9 @@ class Music(commands.Cog):
         random.shuffle(player.queue)
         await interaction.response.send_message("🔀 シャッフルしました。")
 
+    # -------------------------
+    # /remove
+    # -------------------------
     @app_commands.command(name="remove", description="キューから指定番号の曲を削除します")
     @app_commands.describe(index="削除する曲番号")
     async def remove(self, interaction: discord.Interaction, index: int):

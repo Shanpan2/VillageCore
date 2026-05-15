@@ -21,6 +21,7 @@ async def load_cogs():
         "cogs.vote",
         "cogs.janken",
         "cogs.welcome",
+        "cogs.music",
         # Features/
         "Features.attendance",
         "Features.dice",
@@ -30,6 +31,7 @@ async def load_cogs():
         "Features.role_panel",
         "Features.ticket",
         "Features.uno",
+        "Features.youtube_notify",
     ]
     for cog in cogs:
         try:
