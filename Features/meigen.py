@@ -34,8 +34,22 @@ class Meigen(commands.Cog):
 
         content = message.content
         content = content.replace(f"<@!{self.bot.user.id}>", "").replace(f"<@{self.bot.user.id}>", "").strip()
+        # If user only mentioned bot with no text, try to use previous non-bot message
         if not content:
-            return
+            prev = None
+            async for m in message.channel.history(limit=6):
+                if m.id == message.id:
+                    continue
+                if m.author.bot:
+                    continue
+                if m.content and m.content.strip():
+                    prev = m
+                    break
+            if prev:
+                content = prev.content.strip()
+            else:
+                await message.reply("迷言にするテキストが見つかりません。メンションに続けてテキストを送るか、直前のメッセージをメンションだけで参照できます。")
+                return
 
         text = None
         match = re.search(r"迷言[「『](.*?)[」』]", content)
@@ -99,21 +113,43 @@ class Meigen(commands.Cog):
         else:
             font = ImageFont.load_default()
 
-        margin = 60
-        lines = textwrap.wrap(text, width=20)
-        bbox = draw.textbbox((0, 0), "A", font=font)
-        line_height = (bbox[3] - bbox[1]) + 12
+        # Choose font size to fit the image width
+        max_width = img.width - 120
+        # try decreasing font sizes until the longest wrapped line fits
+        size = 64
+        while size >= 18:
+            try:
+                test_font = ImageFont.truetype(str(font_path), size) if font_path.exists() else ImageFont.load_default()
+            except Exception:
+                test_font = ImageFont.load_default()
+            # wrap by characters approximate; then measure
+            lines = textwrap.wrap(text, width=40)
+            too_big = False
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=test_font)
+                if bbox[2] - bbox[0] > max_width:
+                    too_big = True
+                    break
+            if not too_big:
+                font = test_font
+                break
+            size -= 4
 
-        y = margin
-        for line in lines:
+        # center vertically
+        lines = textwrap.wrap(text, width=40)
+        line_heights = [draw.textbbox((0, 0), l, font=font)[3] - draw.textbbox((0, 0), l, font=font)[1] for l in lines]
+        total_h = sum(line_heights) + (len(lines)-1) * 12
+        y = (img.height - total_h) // 2
+        for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
             w = bbox[2] - bbox[0]
             x = (img.width - w) // 2
-            for dx in [-2, 2]:
-                for dy in [-2, 2]:
+            # outline
+            for dx in (-2, -1, 1, 2):
+                for dy in (-2, -1, 1, 2):
                     draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
             draw.text((x, y), line, font=font, fill=(255, 255, 255))
-            y += line_height
+            y += lh + 12
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
