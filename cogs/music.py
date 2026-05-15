@@ -136,12 +136,16 @@ class Music(commands.Cog):
             )
             return
         await interaction.response.defer()
-        vc_channel = interaction.user.voice.channel
-        if interaction.guild.voice_client:
-            await interaction.guild.voice_client.move_to(vc_channel)
-        else:
-            await vc_channel.connect()
-        await interaction.followup.send(f"🔊 {vc_channel.name} に参加しました。")
+        try:
+            vc_channel = interaction.user.voice.channel
+            if interaction.guild.voice_client:
+                await interaction.guild.voice_client.move_to(vc_channel)
+            else:
+                await vc_channel.connect()
+            await interaction.followup.send(f"🔊 {vc_channel.name} に参加しました。")
+        except Exception as e:
+            print(f"[join error] {e}")
+            await interaction.followup.send(f"❌ エラー: {e}")
 
     # -------------------------
     # /leave
@@ -164,16 +168,15 @@ class Music(commands.Cog):
     @app_commands.command(name="play", description="音楽を再生します")
     @app_commands.describe(query="曲名またはURL")
     async def play(self, interaction: discord.Interaction, query: str):
-        # ★ defer で先に応答を確保
         await interaction.response.defer()
-
-        # VC接続確認（_ensure_voice内でfollowupを使う）
-        if not await self._ensure_voice(interaction):
-            return
-
-        player = self.get_player(interaction.guild)
-        # ★ channelを渡してinteractionは使わない
-        await player.add_to_queue(interaction.channel, query)
+        try:
+            if not await self._ensure_voice(interaction):
+                return
+            player = self.get_player(interaction.guild)
+            await player.add_to_queue(interaction.channel, query)
+        except Exception as e:
+            print(f"[play error] {e}")
+            await interaction.followup.send(f"❌ エラー: {e}")
 
     # -------------------------
     # /skip

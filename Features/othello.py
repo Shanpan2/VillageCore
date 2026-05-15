@@ -12,7 +12,9 @@ class Othello(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # ★ ここに guilds() を追加する（ギルドIDはあなたのID）
     @app_commands.command(name="othello", description="オセロゲームを開始します")
+    @app_commands.guilds(discord.Object(id=1405716361933754408))
     async def othello(self, interaction: discord.Interaction):
         game_id = str(interaction.id)
 
