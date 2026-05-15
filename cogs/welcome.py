@@ -3,20 +3,24 @@ from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 import aiohttp
 import io
+from pathlib import Path
 
 class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     async def create_welcome_card(self, member):
+        base_path = Path(__file__).resolve().parent.parent
+        assets_path = base_path / "assets" / "welcome"
+
         # 背景画像
         try:
-            background = Image.open("assets/welcome_bg.png").convert("RGBA")
-        except:
+            background = Image.open(assets_path / "welcome_bg.png").convert("RGBA")
+        except Exception:
             background = Image.new("RGBA", (800, 400), (30, 30, 30, 255))
 
         # アイコンURL（未設定ユーザー対応）
-        avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
+        avatar_url = member.display_avatar.url if hasattr(member, "display_avatar") else member.avatar.url if member.avatar else member.default_avatar.url
 
         # アイコン取得
         async with aiohttp.ClientSession() as session:
@@ -40,12 +44,12 @@ class Welcome(commands.Cog):
         # テキスト
         draw = ImageDraw.Draw(background)
         try:
-            font = ImageFont.truetype("assets/rounded.ttf", 60)
-        except:
+            font = ImageFont.truetype(str(assets_path / "rounded.ttf"), 60)
+        except Exception:
             font = ImageFont.load_default()
 
         draw.text((300, 80), "Welcome!", fill="white", font=font)
-        draw.text((300, 160), f"{member.name}", fill="white", font=font)
+        draw.text((300, 160), f"{member.display_name}", fill="white", font=font)
 
         # バイトに変換
         buffer = io.BytesIO()
@@ -56,14 +60,26 @@ class Welcome(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member):
         # system_channel が無い場合の fallback
-        channel = member.guild.system_channel or member.guild.text_channels[0]
+        channel = member.guild.system_channel
+        if channel is None or not channel.permissions_for(member.guild.me).send_messages:
+            for text_channel in member.guild.text_channels:
+                if text_channel.permissions_for(member.guild.me).send_messages:
+                    channel = text_channel
+                    break
+
+        if channel is None:
+            print(f"⚠️ Welcome: no sendable channel found for guild {member.guild.id}")
+            return
 
         card = await self.create_welcome_card(member)
 
-        await channel.send(
-            content=f"{member.mention} さん、ようこそ！",
-            file=discord.File(card, "welcome.png")
-        )
+        try:
+            await channel.send(
+                content=f"{member.mention} さん、ようこそ！",
+                file=discord.File(card, "welcome.png")
+            )
+        except Exception as e:
+            print(f"⚠️ Welcome send failed: {e}")
 
 async def setup(bot):
     await bot.add_cog(Welcome(bot))
