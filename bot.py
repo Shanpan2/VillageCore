@@ -40,7 +40,6 @@ async def load_cogs():
             await bot.load_extension(cog)
             print(f"  ✅ loaded: {cog}")
         except Exception as e:
-            # ファイルが存在しない・構文エラーなどはスキップして続行
             print(f"  ⚠️  skipped: {cog} → {e}")
 
 
@@ -60,7 +59,10 @@ def register_persistent_views():
 # ==========================
 @bot.event
 async def on_ready():
-    register_persistent_views()
+    try:
+        register_persistent_views()
+    except Exception as e:
+        print(f"⚠️ register_persistent_views エラー: {e}")
 
     guild = discord.Object(id=GUILD_ID)
 
