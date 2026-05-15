@@ -114,15 +114,6 @@ def generate_othello_image(board, valid_moves=None):
         draw.line([(pos, 0), (pos, board_size)], fill=line_color, width=3)
         draw.line([(0, pos), (board_size, pos)], fill=line_color, width=3)
 
-    # 盤面の隅を少し強調
-    inset = cell_size // 6
-    for x in range(2, 6, 2):
-        for y in range(2, 6, 2):
-            cx = x * cell_size + cell_size // 2
-            cy = y * cell_size + cell_size // 2
-            r = cell_size // 12
-            draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(200, 200, 120))
-
     # 置ける場所のヒントを描画
     if valid_moves:
         for x, y in valid_moves:
@@ -130,14 +121,15 @@ def generate_othello_image(board, valid_moves=None):
             py = y * cell_size
             center_x = px + cell_size // 2
             center_y = py + cell_size // 2
-            hint_radius = int(cell_size * 0.2)
+            hint_radius = int(cell_size * 0.26)
             draw.ellipse(
                 [center_x-hint_radius, center_y-hint_radius, center_x+hint_radius, center_y+hint_radius],
+                fill=(250, 220, 100, 120),
                 outline=(250, 220, 100),
                 width=4,
             )
             draw.ellipse(
-                [center_x-hint_radius+6, center_y-hint_radius+6, center_x+hint_radius-6, center_y+hint_radius-6],
+                [center_x-hint_radius+8, center_y-hint_radius+8, center_x+hint_radius-8, center_y+hint_radius-8],
                 outline=(250, 220, 100),
                 width=2,
             )
