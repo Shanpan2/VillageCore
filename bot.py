@@ -1,4 +1,5 @@
 import os
+import sys
 import discord
 from discord.ext import commands
 import asyncio
@@ -70,8 +71,8 @@ async def on_ready():
     bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
 
-    print(f"✅ Bot ready: {bot.user} ({bot.user.id})")
-    print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}")
+    print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
+    print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
 
 
 async def handle_ping(request):
@@ -87,29 +88,31 @@ async def start_health_server():
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-    print(f"🌐 Health server running on port {PORT}")
+    print(f"🌐 Health server running on port {PORT}", flush=True)
 
 
 # ==========================
 # エントリポイント
 # ==========================
 async def main():
-    print("🚀 Starting bot process")
+    print("🚀 Starting bot process", flush=True)
+    print(f"🔑 DISCORD_TOKEN set: {TOKEN is not None}", flush=True)
+    print(f"🌐 PORT={PORT}", flush=True)
 
     if TOKEN is None:
-        print("❌ DISCORD_TOKEN が設定されていません")
+        print("❌ DISCORD_TOKEN が設定されていません", flush=True)
         return
 
     await db_init()
     await load_cogs()
 
-    print(f"🌐 Starting health server on port {PORT}")
+    print(f"🌐 Starting health server on port {PORT}", flush=True)
     asyncio.create_task(start_health_server())
 
     try:
         await bot.start(TOKEN)
     except Exception as e:
-        print(f"❌ Bot failed to start: {type(e).__name__}: {e}")
+        print(f"❌ Bot failed to start: {type(e).__name__}: {e}", flush=True)
         raise
 
 
