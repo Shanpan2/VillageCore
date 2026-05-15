@@ -25,18 +25,30 @@ class Othello(commands.Cog):
             board[3][4] = 1
             board[4][3] = 1
 
-            othello_games[game_id] = {"board": board, "turn": 1}
+            othello_games[game_id] = {
+                "board": board,
+                "turn": 1,
+                "black_id": interaction.user.id,
+                "white_id": None,
+            }
 
+            valid_moves = get_valid_moves(board, 1)
             img = generate_othello_image(board)
             file = discord.File(img, filename="othello.png")
 
             embed = discord.Embed(
                 title="🎮 オセロ開始！",
-                description="黒番（先手）です。",
+                description=(
+                    f"黒番（先手）：<@{interaction.user.id}>\n"
+                    "白番（後手）：まだ参加していません。\n"
+                    "置ける場所を選択してください。"
+                ),
                 color=0x2ECC71,
             )
             await interaction.response.send_message(
-                embed=embed, file=file, view=OthelloView(game_id)
+                embed=embed,
+                file=file,
+                view=OthelloView(game_id, valid_moves),
             )
         except Exception as e:
             print(f"[Othello] command error: {type(e).__name__}: {e}")
@@ -68,6 +80,17 @@ def get_flipped(board, x, y, turn):
             cy += dy
 
     return flipped
+
+
+def get_valid_moves(board, turn):
+    moves = []
+    for y in range(8):
+        for x in range(8):
+            if board[y][x] != 0:
+                continue
+            if get_flipped(board, x, y, turn):
+                moves.append((x, y))
+    return moves
 
 
 def generate_othello_image(board):
