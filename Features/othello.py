@@ -78,7 +78,7 @@ def generate_othello_image(board):
     border_color = (15, 30, 15)
 
     board_img = Image.new("RGBA", (board_size, board_size), board_color)
-    draw = Image.Draw.Draw(board_img)
+    draw = ImageDraw.Draw(board_img)
 
     # グリッド線
     for i in range(9):
