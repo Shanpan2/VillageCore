@@ -33,7 +33,7 @@ class Othello(commands.Cog):
             }
 
             valid_moves = get_valid_moves(board, 1)
-            img = generate_othello_image(board)
+            img = generate_othello_image(board, valid_moves)
             file = discord.File(img, filename="othello.png")
 
             embed = discord.Embed(
@@ -93,7 +93,7 @@ def get_valid_moves(board, turn):
     return moves
 
 
-def generate_othello_image(board):
+def generate_othello_image(board, valid_moves=None):
     board_size = 640
     cell_size = board_size // 8
     line_color = (20, 40, 20)
@@ -122,6 +122,25 @@ def generate_othello_image(board):
             cy = y * cell_size + cell_size // 2
             r = cell_size // 12
             draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(200, 200, 120))
+
+    # 置ける場所のヒントを描画
+    if valid_moves:
+        for x, y in valid_moves:
+            px = x * cell_size
+            py = y * cell_size
+            center_x = px + cell_size // 2
+            center_y = py + cell_size // 2
+            hint_radius = int(cell_size * 0.2)
+            draw.ellipse(
+                [center_x-hint_radius, center_y-hint_radius, center_x+hint_radius, center_y+hint_radius],
+                outline=(250, 220, 100),
+                width=4,
+            )
+            draw.ellipse(
+                [center_x-hint_radius+6, center_y-hint_radius+6, center_x+hint_radius-6, center_y+hint_radius-6],
+                outline=(250, 220, 100),
+                width=2,
+            )
 
     # 石を描画
     for y in range(8):
@@ -223,10 +242,6 @@ async def handle_othello_move(interaction, game_id, x, y):
         # ターン交代
         game["turn"] = 2 if turn == 1 else 1
 
-        # 画像生成
-        img = generate_othello_image(board)
-        file = discord.File(img, filename="othello.png")
-
         valid_moves = get_valid_moves(board, game["turn"])
         if not valid_moves:
             next_turn = 2 if game["turn"] == 1 else 1
@@ -244,6 +259,8 @@ async def handle_othello_move(interaction, game_id, x, y):
                     winner = "白"
                 else:
                     winner = "引き分け"
+                img = generate_othello_image(board, [])
+                file = discord.File(img, filename="othello.png")
                 try:
                     await interaction.message.edit(
                         embed=discord.Embed(
@@ -266,6 +283,9 @@ async def handle_othello_move(interaction, game_id, x, y):
                 return
         else:
             status_text = "置ける場所を選択してください。"
+
+        img = generate_othello_image(board, valid_moves)
+        file = discord.File(img, filename="othello.png")
 
         player_text = (
             f"黒: <@{game['black_id']}>\n"

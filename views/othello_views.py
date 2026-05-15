@@ -146,7 +146,7 @@ class JoinButton(discord.ui.Button):
             # 盤面更新
             board = game["board"]
             valid_moves = get_valid_moves(board, game["turn"])
-            img = generate_othello_image(board)
+            img = generate_othello_image(board, valid_moves)
             file = discord.File(img, filename="othello.png")
 
             player_text = (
