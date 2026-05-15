@@ -1,5 +1,3 @@
-# views/othello_views.py
-
 import discord
 
 class OthelloView(discord.ui.View):
@@ -72,7 +70,6 @@ class OthelloConfirmButton(discord.ui.Button):
             )
             return
 
-        # ★ 遅延 import（循環参照を防ぐ）
         from Features.othello import handle_othello_move
 
         await handle_othello_move(
