@@ -156,6 +156,32 @@ async def handle_othello_move(interaction, game_id, x, y):
 
         board = game["board"]
         turn = game["turn"]
+        black_id = game["black_id"]
+        white_id = game["white_id"]
+
+        if turn == 1 and interaction.user.id != black_id:
+            await interaction.followup.send(
+                f"❌ 黒番のプレイヤーは <@{black_id}> です。黒番の方のみ操作できます。",
+                ephemeral=True,
+            )
+            return
+
+        if turn == 2:
+            if white_id is None:
+                if interaction.user.id == black_id:
+                    await interaction.followup.send(
+                        "❌ 先手と同じ人は後手を担当できません。別のユーザーが後手になります。",
+                        ephemeral=True,
+                    )
+                    return
+                game["white_id"] = interaction.user.id
+                white_id = interaction.user.id
+            elif interaction.user.id != white_id:
+                await interaction.followup.send(
+                    f"❌ 白番のプレイヤーは <@{white_id}> です。白番の方のみ操作できます。",
+                    ephemeral=True,
+                )
+                return
 
         # すでに置かれている
         if board[y][x] != 0:
@@ -179,13 +205,61 @@ async def handle_othello_move(interaction, game_id, x, y):
         img = generate_othello_image(board)
         file = discord.File(img, filename="othello.png")
 
+        valid_moves = get_valid_moves(board, game["turn"])
+        if not valid_moves:
+            next_turn = 2 if game["turn"] == 1 else 1
+            other_moves = get_valid_moves(board, next_turn)
+            if other_moves:
+                game["turn"] = next_turn
+                valid_moves = other_moves
+                status_text = "置ける場所がないためターンをスキップしました。"
+            else:
+                black_count = sum(cell == 1 for row in board for cell in row)
+                white_count = sum(cell == 2 for row in board for cell in row)
+                if black_count > white_count:
+                    winner = "黒"
+                elif white_count > black_count:
+                    winner = "白"
+                else:
+                    winner = "引き分け"
+                await interaction.response.edit_message(
+                    embed=discord.Embed(
+                        title="🎮 オセロ 終了",
+                        description=(
+                            f"ゲーム終了！\n"
+                            f"黒 {black_count} - 白 {white_count} で {winner} の勝利です。"
+                        ),
+                        color=0x2ECC71,
+                    ),
+                    attachments=[file],
+                    view=None,
+                )
+                return
+        else:
+            status_text = "置ける場所を選択してください。"
+
+        player_text = (
+            f"黒: <@{game['black_id']}>\n"
+            f"白: <@{game['white_id']}>\n"
+            if game["white_id"]
+            else f"黒: <@{game['black_id']}>\n白: まだ参加していません。\n"
+        )
+
         embed = discord.Embed(
             title="🎮 オセロ",
-            description=f"{'黒' if game['turn'] == 1 else '白'}番です。",
+            description=(
+                f"{player_text}"
+                f"{'黒' if game['turn'] == 1 else '白'}番です。\n"
+                f"{status_text}"
+            ),
             color=0x2ECC71,
         )
 
-        await interaction.response.edit_message(embed=embed, attachments=[file], view=OthelloView(game_id))
+        await interaction.response.edit_message(
+            embed=embed,
+            attachments=[file],
+            view=OthelloView(game_id, valid_moves),
+        )
     except Exception as e:
         print(f"[Othello] move error: {type(e).__name__}: {e}")
         traceback.print_exc()
