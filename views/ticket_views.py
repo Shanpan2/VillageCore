@@ -1,88 +1,79 @@
 import discord
 
-class OthelloView(discord.ui.View):
-    def __init__(self, game_id: str):
+class TicketButtonView(discord.ui.View):
+    def __init__(self, bot: discord.ext.commands.Bot):
         super().__init__(timeout=None)
-        self.game_id = game_id
-        self.selected_col = None
-        self.selected_row = None
-
-        self.add_item(OthelloColSelect(game_id))
-        self.add_item(OthelloRowSelect(game_id))
-        self.add_item(OthelloConfirmButton(game_id))
+        self.bot = bot
+        self.add_item(TicketButton())
 
 
-class OthelloColSelect(discord.ui.Select):
-    def __init__(self, game_id: str):
-        options = [
-            discord.SelectOption(label=f"列 {chr(65+i)}（{i}）", value=str(i))
-            for i in range(8)
-        ]
-        super().__init__(
-            placeholder="① 列を選択（A〜H）",
-            options=options,
-            custom_id=f"othello_col_{game_id}",
-            row=0,
+class TicketModal(discord.ui.Modal, title="チケットを作成"):
+    subject = discord.ui.TextInput(
+        label="件名",
+        style=discord.TextStyle.short,
+        max_length=100,
+        placeholder="件名を入力してください",
+    )
+    description = discord.ui.TextInput(
+        label="詳細",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        placeholder="チケットの内容を詳しく入力してください",
+    )
+
+    def __init__(self, bot: discord.ext.commands.Bot):
+        super().__init__()
+        self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ticket_text = (
+            f"**🎫 新しいチケット**\n"
+            f"送信者: {interaction.user.mention}\n"
+            f"件名: {self.subject.value}\n"
+            f"内容:\n{self.description.value}"
         )
-        self.game_id = game_id
 
-    async def callback(self, interaction: discord.Interaction):
-        self.view.selected_col = int(self.values[0])
-        # ★ defer しない（これが重要）
-        await interaction.response.defer(ephemeral=True)
-
-
-class OthelloRowSelect(discord.ui.Select):
-    def __init__(self, game_id: str):
-        options = [
-            discord.SelectOption(label=f"行 {i+1}", value=str(i))
-            for i in range(8)
-        ]
-        super().__init__(
-            placeholder="② 行を選択（1〜8）",
-            options=options,
-            custom_id=f"othello_row_{game_id}",
-            row=1,
+        await interaction.response.send_message(
+            "✅ チケットを送信しました。管理者が確認します。",
+            ephemeral=True,
         )
-        self.game_id = game_id
 
-    async def callback(self, interaction: discord.Interaction):
-        self.view.selected_row = int(self.values[0])
-        # ★ defer しない
-        await interaction.response.defer(ephemeral=True)
-
-
-class OthelloConfirmButton(discord.ui.Button):
-    def __init__(self, game_id: str):
-        super().__init__(
-            label="ここに置く ✅",
-            style=discord.ButtonStyle.success,
-            custom_id=f"othello_confirm_{game_id}",
-            row=2,
-        )
-        self.game_id = game_id
-
-    async def callback(self, interaction: discord.Interaction):
-        view = self.view
-
-        if view.selected_col is None or view.selected_row is None:
-            await interaction.followup.send(
-                "❌ 列と行を両方選んでから確定してください。",
-                ephemeral=True
-            )
+        guild = interaction.guild
+        if guild is None:
             return
 
-        # ★ ボタンでは defer を使う（ここは OK）
-        await interaction.response.defer()
+        target_channel = None
+        for channel in guild.text_channels:
+            if channel.name in ("ticket", "tickets", "support", "help"):
+                target_channel = channel
+                break
 
-        from Features.othello import handle_othello_move
+        if target_channel is None:
+            target_channel = guild.system_channel
 
-        await handle_othello_move(
-            interaction,
-            self.game_id,
-            view.selected_col,
-            view.selected_row
+        if target_channel is None:
+            try:
+                owner = guild.owner
+                if owner is not None:
+                    await owner.send(ticket_text)
+                    return
+            except Exception:
+                target_channel = interaction.channel
+
+        if target_channel is not None:
+            try:
+                await target_channel.send(ticket_text)
+            except Exception:
+                pass
+
+
+class TicketButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="📩 チケットを作成",
+            style=discord.ButtonStyle.primary,
+            custom_id="ticket_button",
         )
 
-        view.selected_col = None
-        view.selected_row = None
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(TicketModal(self.view.bot))
