@@ -13,7 +13,6 @@ class Othello(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="othello", description="オセロゲームを開始します")
-    @app_commands.guilds(discord.Object(id=1405716361933754408))
     async def othello(self, interaction: discord.Interaction):
         print(f"[Othello] command invoked by {interaction.user} ({interaction.user.id}), interaction {interaction.id}")
         try:

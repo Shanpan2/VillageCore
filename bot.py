@@ -9,7 +9,7 @@ from bot_instance import bot
 from database.config_db import db_init
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = 1405716361933754408
+GUILD_ID = os.getenv("GUILD_ID")
 PORT = int(os.getenv("PORT", "8000"))
 
 
@@ -65,14 +65,16 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ register_persistent_views エラー: {e}")
 
-    guild = discord.Object(id=GUILD_ID)
-
-    # ギルドコマンドを同期（即時反映）
-    bot.tree.copy_global_to(guild=guild)
-    synced = await bot.tree.sync(guild=guild)
-
-    print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
-    print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
+    if GUILD_ID:
+        guild = discord.Object(id=int(GUILD_ID))
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
+        print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
+    else:
+        synced = await bot.tree.sync()
+        print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
+        print(f"🔄 Synced {len(synced)} global slash commands", flush=True)
 
 
 async def handle_ping(request):

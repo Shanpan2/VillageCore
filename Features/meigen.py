@@ -32,15 +32,31 @@ class Meigen(commands.Cog):
         if self.bot.user not in message.mentions:
             return
 
-        if "迷言" not in message.content:
+        content = message.content
+        content = content.replace(f"<@!{self.bot.user.id}>", "").replace(f"<@{self.bot.user.id}>", "").strip()
+        if not content:
             return
 
-        match = re.search(r"迷言[「『](.*?)[」』]", message.content)
-        if not match:
-            await message.reply("迷言の形式は 迷言「テキスト」 だよ。")
-            return
-
-        text = match.group(1)
+        text = None
+        match = re.search(r"迷言[「『](.*?)[」』]", content)
+        if match:
+            text = match.group(1).strip()
+        else:
+            raw = content
+            if raw.lower().startswith("meigen"):
+                raw = raw[len("meigen"):].strip()
+            if raw.startswith("名言"):
+                raw = raw[len("名言"):].strip()
+            if raw.startswith("迷言"):
+                raw = raw[len("迷言"):].strip()
+            if raw.startswith("「") or raw.startswith("『"):
+                raw = raw[1:]
+            if raw.endswith("」") or raw.endswith("』"):
+                raw = raw[:-1]
+            text = raw.strip()
+            if not text:
+                await message.reply("迷言の形式は 迷言「テキスト」 だよ。例: @bot 迷言「テキスト」 または @bot テキスト")
+                return
 
         try:
             buffer = self._generate_image(text)
