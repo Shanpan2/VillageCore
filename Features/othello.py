@@ -34,7 +34,55 @@ class Othello(commands.Cog):
         await interaction.response.send_message(
             embed=embed, file=file, view=OthelloView(game_id)
         )
+def get_flipped(board, x, y, turn):
+    enemy = 2 if turn == 1 else 1
+    flipped = []
+    directions = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]
+
+    for dx, dy in directions:
+        temp = []
+        cx, cy = x + dx, y + dy
+        while 0 <= cx < 8 and 0 <= cy < 8:
+            if board[cy][cx] == enemy:
+                temp.append((cx, cy))
+            elif board[cy][cx] == turn:
+                flipped.extend(temp)
+                break
+            else:
+                break
+            cx += dx
+            cy += dy
+
+    return flipped
+
+
+def generate_othello_image(board):
+    board_img = Image.open("assets/othello/board.png").convert("RGBA")
+
+    cell_size = board_img.width // 8
+
+    black = Image.open("assets/othello/black.png").convert("RGBA").resize((cell_size, cell_size))
+    white = Image.open("assets/othello/white.png").convert("RGBA").resize((cell_size, cell_size))
+    empty = Image.open("assets/othello/empty.png").convert((cell_size, cell_size))
+
+    for y in range(8):
+        for x in range(8):
+            px = x * cell_size
+            py = y * cell_size
+
+            if board[y][x] == 1:
+                board_img.paste(black, (px, py), black)
+            elif board[y][x] == 2:
+                board_img.paste(white, (px, py), white)
+            else:
+                board_img.paste(empty, (px, py), empty)
+
+    path = "othello_temp.png"
+    board_img.save(path)
+    return path
+
 
 
 async def setup(bot):
     await bot.add_cog(Othello(bot))
+
