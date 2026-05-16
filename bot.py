@@ -16,7 +16,8 @@ except ModuleNotFoundError:
 if load_dotenv:
     load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID") or "1405716361933754408"
+GUILD_ID = os.getenv("GUILD_ID")
+LEGACY_GUILD_ID = os.getenv("LEGACY_GUILD_ID", "1405716361933754408")
 PORT = int(os.getenv("PORT", "8000"))
 COMMANDS_SYNCED = False
 PERSISTENT_VIEWS_REGISTERED = False
@@ -34,6 +35,7 @@ async def load_cogs():
         "cogs.janken",
         "cogs.welcome",
         "cogs.music",
+        "cogs.ai_chat",
         "cogs.help",
         # Features/
         "Features.attendance",
@@ -74,6 +76,19 @@ async def clear_global_commands():
         print(f"⚠️ Global slash command cleanup failed: {type(e).__name__}: {e}", flush=True)
 
 
+async def clear_legacy_guild_commands():
+    if not LEGACY_GUILD_ID:
+        return
+    try:
+        guild = discord.Object(id=int(LEGACY_GUILD_ID))
+        print(f"🔄 Clearing legacy guild slash commands: {LEGACY_GUILD_ID}", flush=True)
+        bot.tree.clear_commands(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"🔄 Legacy guild slash commands after cleanup: {len(synced)}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Legacy guild command cleanup failed: {type(e).__name__}: {e}", flush=True)
+
+
 # ==========================
 # on_ready
 # ==========================
@@ -107,6 +122,7 @@ async def on_ready():
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
     else:
         synced = await bot.tree.sync()
+        asyncio.create_task(clear_legacy_guild_commands())
         COMMANDS_SYNCED = True
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} global slash commands", flush=True)
@@ -135,7 +151,7 @@ async def main():
     print("🚀 Starting bot process", flush=True)
     print(f"🔑 DISCORD_TOKEN set: {TOKEN is not None}", flush=True)
     print(f"🌐 PORT={PORT}", flush=True)
-    print(f"🛡️ GUILD_ID={GUILD_ID}", flush=True)
+    print(f"🛡️ GUILD_ID={GUILD_ID or '(global sync)'}", flush=True)
 
     if TOKEN is None:
         print("❌ DISCORD_TOKEN が設定されていません", flush=True)
