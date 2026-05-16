@@ -59,10 +59,12 @@ async def load_cogs():
 # 永続 View の登録
 # ==========================
 def register_persistent_views():
-    from views.ticket_views import TicketButtonView
+    from views.ticket_views import ClosedTicketView, TicketButtonView, TicketControlView
     from views.role_panel_views import RolePanelView
     # ★ AttendanceView は attendance.py に統合したため削除
     bot.add_view(TicketButtonView(bot))
+    bot.add_view(TicketControlView())
+    bot.add_view(ClosedTicketView())
     bot.add_view(RolePanelView(0))
 
 

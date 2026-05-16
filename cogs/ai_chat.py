@@ -81,7 +81,19 @@ class AIChat(commands.Cog):
         if message.author.bot or not self.bot.user:
             return
 
-        if self.bot.user not in message.mentions:
+        is_mentioned = self.bot.user in message.mentions
+        is_reply_to_bot = False
+        if message.reference:
+            replied_message = message.reference.resolved
+            if not isinstance(replied_message, discord.Message) and message.reference.message_id:
+                try:
+                    replied_message = await message.channel.fetch_message(message.reference.message_id)
+                except Exception:
+                    replied_message = None
+            if isinstance(replied_message, discord.Message):
+                is_reply_to_bot = replied_message.author.id == self.bot.user.id
+
+        if not is_mentioned and not is_reply_to_bot:
             return
 
         question = MENTION_RE.sub("", message.content).strip()
