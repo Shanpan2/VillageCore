@@ -114,18 +114,6 @@ class Music(commands.Cog):
             self.players[guild.id] = MusicPlayer(self.bot, guild)
         return self.players[guild.id]
 
-    async def _ensure_voice(self, interaction: discord.Interaction) -> bool:
-        """VCに接続済みか確認。未接続なら自動join。失敗時Falseを返す"""
-        if interaction.guild.voice_client:
-            return True
-        if interaction.user.voice is None:
-            await interaction.followup.send(
-                "❌ ボイスチャンネルに参加してから実行してください。", ephemeral=True
-            )
-            return False
-        await interaction.user.voice.channel.connect()
-        return True
-
     # -------------------------
     # /join
     # -------------------------
@@ -164,20 +152,50 @@ class Music(commands.Cog):
         await interaction.response.send_message("👋 退出しました。")
 
     # -------------------------
-    # /play
+    # /play  ★「考え中」を出さない版
     # -------------------------
     @app_commands.command(name="play", description="音楽を再生します")
     @app_commands.describe(query="曲名またはURL")
     async def play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
-        try:
-            if not await self._ensure_voice(interaction):
+        # VCチェックは即座に実施（3秒以内）
+        if interaction.user.voice is None:
+            await interaction.response.send_message(
+                "❌ ボイスチャンネルに参加してから実行してください。", ephemeral=True
+            )
+            return
+
+        # ★ 即座に応答して「考え中」を出さない
+        await interaction.response.send_message(f"🔍 `{query}` を検索中…")
+
+        # VC接続
+        if not interaction.guild.voice_client:
+            try:
+                await interaction.user.voice.channel.connect()
+            except Exception as e:
+                await interaction.edit_original_response(content=f"❌ VC接続エラー: {e}")
                 return
+
+        # バックグラウンドで検索・再生（時間がかかってもタイムアウトしない）
+        asyncio.create_task(
+            self._play_task(interaction, query)
+        )
+
+    async def _play_task(self, interaction: discord.Interaction, query: str):
+        """バックグラウンドで曲を検索してキューに追加する"""
+        try:
             player = self.get_player(interaction.guild)
             await player.add_to_queue(interaction.channel, query)
+            # 「検索中…」メッセージを削除
+            try:
+                await interaction.delete_original_response()
+            except Exception:
+                pass
         except Exception as e:
             print(f"[play error] {e}")
-            await interaction.followup.send(f"❌ エラー: {e}")
+            try:
+                await interaction.edit_original_response(content=f"❌ エラー: {e}")
+            except Exception:
+                pass
 
     # -------------------------
     # /skip
@@ -303,7 +321,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("❌ 正しい番号を指定してください。", ephemeral=True)
             return
         removed = player.queue.pop(index - 1)
-        await interaction.response.send_message(f"🗑️ 削除しました: {removed}")
+        await interaction.response.send_message(f"🗑️ 削除しました: **{removed['title']}**")
 
 
 async def setup(bot: commands.Bot):
