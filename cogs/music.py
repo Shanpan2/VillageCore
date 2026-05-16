@@ -12,11 +12,24 @@ import yt_dlp
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 
+
+class QuietYtdlpLogger:
+    def debug(self, msg):
+        pass
+
+    def warning(self, msg):
+        print(f"[yt-dlp warning] {msg}", flush=True)
+
+    def error(self, msg):
+        pass
+
+
 YDL_OPTIONS = {
-    "format": "251/250/249/140/bestaudio/best[acodec!=none]/best",
+    "format": "bestaudio*/best*",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
+    "logger": QuietYtdlpLogger(),
     "default_search": "ytsearch1",
     "extract_flat": False,
     "cachedir": False,
@@ -25,7 +38,8 @@ YDL_OPTIONS = {
     "fragment_retries": 3,
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "web"],
+            "player_client": ["default", "mweb", "web_embedded", "ios"],
+            "formats": ["missing_pot", "incomplete"],
         },
     },
     "http_headers": {
@@ -38,10 +52,10 @@ YDL_OPTIONS = {
     },
 }
 YDL_PLAY_FORMATS = (
-    "251/250/249/140/bestaudio/best[acodec!=none]/best",
-    "bestaudio/best",
-    "best[acodec!=none]/best",
-    "best/worst",
+    "bestaudio*[protocol^=http]/bestaudio*/best*[protocol^=http]/best*",
+    "251/250/249/140/bestaudio*/best*",
+    "best*[acodec!=none]/best*",
+    "best*/worst*",
     None,
 )
 
