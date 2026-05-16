@@ -15,6 +15,10 @@ YDL_OPTIONS = {
 cookie_file = os.getenv("YTDLP_COOKIE_FILE")
 if cookie_file:
     YDL_OPTIONS["cookiefile"] = cookie_file
+    if os.path.exists(cookie_file):
+        print(f"🎧 YTDLP cookie file loaded: {cookie_file}")
+    else:
+        print(f"⚠️ YTDLP cookie file path set but not found: {cookie_file}")
 
 
 def format_yt_dlp_error(error: Exception, prefix: str = "エラー") -> str:

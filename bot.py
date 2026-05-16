@@ -102,6 +102,7 @@ async def main():
     print("🚀 Starting bot process", flush=True)
     print(f"🔑 DISCORD_TOKEN set: {TOKEN is not None}", flush=True)
     print(f"🌐 PORT={PORT}", flush=True)
+    print(f"🛡️ GUILD_ID={GUILD_ID}", flush=True)
 
     if TOKEN is None:
         print("❌ DISCORD_TOKEN が設定されていません", flush=True)
