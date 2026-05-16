@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 
 YDL_OPTIONS = {
-    "format": "best[acodec!=none]/best",
+    "format": "251/250/249/140/bestaudio/best[acodec!=none]/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -23,6 +23,11 @@ YDL_OPTIONS = {
     "socket_timeout": 20,
     "retries": 3,
     "fragment_retries": 3,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "web"],
+        },
+    },
     "http_headers": {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -33,9 +38,11 @@ YDL_OPTIONS = {
     },
 }
 YDL_PLAY_FORMATS = (
+    "251/250/249/140/bestaudio/best[acodec!=none]/best",
     "bestaudio/best",
     "best[acodec!=none]/best",
     "best/worst",
+    None,
 )
 
 cookie_file = os.getenv("YTDLP_COOKIE_FILE") or str(DEFAULT_COOKIE_FILE)
@@ -81,7 +88,11 @@ def _extract_info(query: str):
     last_error = None
     for requested_format in YDL_PLAY_FORMATS:
         options = YDL_OPTIONS.copy()
-        options["format"] = requested_format
+        if requested_format:
+            options["format"] = requested_format
+        else:
+            options.pop("format", None)
+            options["ignore_no_formats_error"] = True
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 return ydl.extract_info(query, download=False)
@@ -234,8 +245,16 @@ class MusicPlayer:
         if query.startswith("spotify:"):
             query = query.replace("spotify:", "https://open.spotify.com/")
 
-        if not query.startswith(("http://", "https://")):
-            query = f"ytsearch1:{query}"
+        if query.startswith(("http://", "https://")):
+            item = {"url": query, "title": query}
+            self.queue.append(item)
+            if not self.playing:
+                await self.play_next(channel)
+            else:
+                await channel.send(f"🎶 キューに追加しました: **{query}**")
+            return
+
+        query = f"ytsearch1:{query}"
 
         try:
             info = await asyncio.to_thread(_extract_metadata, query)
