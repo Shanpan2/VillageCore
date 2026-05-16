@@ -1,78 +1,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFont
-import aiohttp
-import io
 from pathlib import Path
 from database.config_db import db_get, db_set
 
 class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    async def create_welcome_card(self, member):
-        base_path = Path(__file__).resolve().parent.parent
-        assets_path = base_path / "assets" / "welcome"
-
-        # キャンバス
-        width, height = 900, 300
-        # 背景画像
-        try:
-            background = Image.open(assets_path / "welcome_bg.png").convert("RGBA")
-            background = background.resize((width, height), Image.LANCZOS)
-        except Exception:
-            background = Image.new("RGBA", (width, height), (30, 30, 30, 255))
-
-        # アイコンURL（未設定ユーザー対応）
-        avatar_url = member.display_avatar.url if hasattr(member, "display_avatar") else member.avatar.url if member.avatar else member.default_avatar.url
-
-        # アイコン取得
-        async with aiohttp.ClientSession() as session:
-            async with session.get(avatar_url) as resp:
-                avatar_bytes = await resp.read()
-
-        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-
-        # 高品質丸切り抜き（2倍で作って縮小）
-        size = 200
-        big = avatar.resize((size*2, size*2))
-        mask = Image.new("L", (size*2, size*2), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, size*2, size*2), fill=255)
-        big.putalpha(mask)
-        avatar = big.resize((size, size), Image.LANCZOS)
-
-        # 合成
-        avatar_x = 40
-        avatar_y = (height - size) // 2
-        background.paste(avatar, (avatar_x, avatar_y), avatar)
-
-        # テキスト
-        draw = ImageDraw.Draw(background)
-        try:
-            font_big = ImageFont.truetype(str(assets_path / "rounded.ttf"), 48)
-            font_small = ImageFont.truetype(str(assets_path / "rounded.ttf"), 28)
-        except Exception:
-            font_big = ImageFont.load_default()
-            font_small = ImageFont.load_default()
-
-        # Welcome とユーザー名を右側に表示
-        text_x = avatar_x + size + 30
-        welcome_text = "ようこそ！"
-        name_text = f"{member.display_name}"
-        guild_text = f"{member.guild.name}" if member.guild else ""
-
-        draw.text((text_x, avatar_y + 10), welcome_text, fill="white", font=font_small)
-        draw.text((text_x, avatar_y + 40), name_text, fill="white", font=font_big)
-        if guild_text:
-            draw.text((text_x, avatar_y + 100), guild_text, fill=(200,200,200), font=font_small)
-
-        # バイトに変換
-        buffer = io.BytesIO()
-        background.save(buffer, format="PNG")
-        buffer.seek(0)
-        return buffer
 
     def _welcome_channel_key(self, guild_id: int) -> str:
         return f"welcome_channel_{guild_id}"

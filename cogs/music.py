@@ -40,20 +40,20 @@ class MusicPlayer:
             return
 
         if self.loop_mode == "single" and self.current:
-            url = self.current
+            item = self.current
         else:
-            url = self.queue.pop(0)
+            item = self.queue.pop(0)
             if self.loop_mode == "all":
-                self.queue.append(url)
+                self.queue.append(item)
 
-        self.current = url
+        self.current = item
         self.playing = True
 
         loop = self.bot.loop
 
         try:
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(item["url"], download=False)
                 audio_url = info["url"]
             self.current_info = info
         except Exception as e:
@@ -95,7 +95,8 @@ class MusicPlayer:
             await channel.send(f"❌ 取得エラー: {e}")
             return
 
-        self.queue.append(url)
+        item = {"url": url, "title": title}
+        self.queue.append(item)
 
         if not self.playing:
             await self.play_next(channel)
@@ -238,7 +239,7 @@ class Music(commands.Cog):
         if not player.queue:
             await interaction.response.send_message("📭 キューは空です。")
             return
-        lines = [f"{i+1}. {url}" for i, url in enumerate(player.queue)]
+        lines = [f"{i+1}. {item['title']}" for i, item in enumerate(player.queue)]
         embed = discord.Embed(
             title="📜 キュー一覧",
             description="\n".join(lines),
