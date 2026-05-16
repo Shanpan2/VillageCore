@@ -25,7 +25,7 @@ class QuietYtdlpLogger:
 
 
 YDL_OPTIONS = {
-    "format": "bestaudio*/best*",
+    "format": "bestaudio[abr>=128]/bestaudio/best[acodec!=none]",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -55,10 +55,9 @@ YDL_OPTIONS = {
     },
 }
 YDL_PLAY_FORMATS = (
-    "bestaudio*[protocol^=http]/bestaudio*/best*[protocol^=http]/best*",
-    "251/250/249/140/bestaudio*/best*",
-    "best*[acodec!=none]/best*",
-    "best*/worst*",
+    "bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
+    "251/250/249/140/bestaudio[abr>=128]/bestaudio",
+    "best[acodec!=none][height<=720]/best[acodec!=none]",
     None,
 )
 
@@ -72,7 +71,7 @@ elif os.getenv("YTDLP_COOKIE_FILE"):
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
+    "options": "-vn -ar 48000 -ac 2",
 }
 
 
@@ -147,9 +146,6 @@ def _youtube_url_from_entry(entry: dict) -> str | None:
 
 
 def _pick_audio_url(info: dict) -> str | None:
-    if info.get("url") and info.get("acodec") != "none":
-        return info["url"]
-
     formats = info.get("formats") or []
     audio_formats = [
         fmt
@@ -168,13 +164,27 @@ def _pick_audio_url(info: dict) -> str | None:
     if not audio_formats:
         return None
 
+    def quality_score(fmt: dict):
+        ext = fmt.get("ext")
+        acodec = fmt.get("acodec") or ""
+        protocol = fmt.get("protocol") or ""
+        abr = fmt.get("abr") or 0
+        asr = fmt.get("asr") or 0
+        opus_bonus = 1000 if "opus" in acodec or ext == "webm" else 0
+        http_bonus = 200 if protocol.startswith("http") else 0
+        complete_penalty = -500 if fmt.get("has_drm") or fmt.get("format_note") == "storyboard" else 0
+        return (opus_bonus + http_bonus + complete_penalty, abr, asr)
+
     audio_formats.sort(
-        key=lambda fmt: (
-            fmt.get("abr") or 0,
-            fmt.get("asr") or 0,
-            fmt.get("filesize") or fmt.get("filesize_approx") or 0,
-        ),
+        key=quality_score,
         reverse=True,
+    )
+    selected = audio_formats[0]
+    print(
+        "[music] selected audio format: "
+        f"id={selected.get('format_id')} ext={selected.get('ext')} "
+        f"acodec={selected.get('acodec')} abr={selected.get('abr')}",
+        flush=True,
     )
     return audio_formats[0]["url"]
 
@@ -230,7 +240,10 @@ class MusicPlayer:
                 raise RuntimeError("音声URLを取得できませんでした。")
 
             self.current_info = info
-            source = await discord.FFmpegOpusAudio.from_probe(audio_url, **FFMPEG_OPTIONS)
+            source = discord.PCMVolumeTransformer(
+                discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
+                volume=0.8,
+            )
         except Exception as e:
             if channel:
                 await channel.send(format_yt_dlp_error(e, prefix="再生エラー"))
