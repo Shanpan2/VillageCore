@@ -7,10 +7,9 @@ import asyncio
 import random
 
 YDL_OPTIONS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio",
+    "noplaylist": True,
     "quiet": True,
-    "no_warnings": True,
-    "default_search": "ytsearch",
 }
 
 cookie_file = os.getenv("YTDLP_COOKIE_FILE")
