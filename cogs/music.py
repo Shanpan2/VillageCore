@@ -1,3 +1,4 @@
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -11,6 +12,10 @@ YDL_OPTIONS = {
     "no_warnings": True,
     "default_search": "ytsearch",
 }
+
+cookie_file = os.getenv("YTDLP_COOKIE_FILE")
+if cookie_file:
+    YDL_OPTIONS["cookiefile"] = cookie_file
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -58,8 +63,15 @@ class MusicPlayer:
                 audio_url = info["url"]
             self.current_info = info
         except Exception as e:
+            err_text = str(e).strip().splitlines()[0]
             if channel:
-                await channel.send(f"❌ 再生エラー: {e}")
+                if "Sign in to confirm you’re not a bot" in err_text or "Use --cookies-from-browser" in err_text:
+                    await channel.send(
+                        "❌ 再生エラー: この動画は YouTube 側の制限により再生できません。"
+                        " `YTDLP_COOKIE_FILE` に cookie ファイルを設定するか、別の動画を試してください。"
+                    )
+                else:
+                    await channel.send(f"❌ 再生エラー: {err_text}")
             await self.play_next(channel)
             return
 
@@ -103,7 +115,14 @@ class MusicPlayer:
                     await channel.send("❌ 再生用URLが取得できませんでした。")
                     return
         except Exception as e:
-            await channel.send(f"❌ 取得エラー: {e}")
+            err_text = str(e).strip().splitlines()[0]
+            if "Sign in to confirm you’re not a bot" in err_text or "Use --cookies-from-browser" in err_text:
+                await channel.send(
+                    "❌ 取得エラー: この動画は YouTube 側の制限により再生できません。"
+                    " `YTDLP_COOKIE_FILE` に cookie ファイルを設定するか、別の動画を試してください。"
+                )
+            else:
+                await channel.send(f"❌ 取得エラー: {err_text}")
             return
 
         item = {"url": url, "title": title}

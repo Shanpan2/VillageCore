@@ -383,6 +383,30 @@ async def handle_uno_declare(
     )
 
 
+async def handle_uno_surrender(
+    interaction: discord.Interaction, game_id: str, user_id: int
+):
+    state = uno_games.get(game_id)
+    if not state:
+        await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
+        return
+
+    if interaction.user.id != user_id:
+        await interaction.response.send_message(
+            "❌ あなたはこの降参ボタンを使えません。", ephemeral=True
+        )
+        return
+
+    remaining = [uid for uid in state["players"] if uid != user_id]
+    winners = ", ".join(f"<@{uid}>" for uid in remaining) if remaining else "なし"
+    uno_games.pop(game_id, None)
+
+    await interaction.response.edit_message(
+        content=f"⛔ <@{user_id}> が降参しました。\nゲーム終了。勝者: {winners}",
+        view=None,
+    )
+
+
 # ============================================================
 # ユーティリティ
 # ============================================================

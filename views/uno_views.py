@@ -19,6 +19,7 @@ class UnoHandView(discord.ui.View):
         self.user_id = user_id
         self.add_item(UnoCardSelect(game_id, user_id, hand))
         self.add_item(UnoDrawButton(game_id, user_id))
+        self.add_item(UnoSurrenderButton(game_id, user_id))
 
 
 class UnoCardSelect(discord.ui.Select):
@@ -63,6 +64,23 @@ class UnoDrawButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         from Features.uno import handle_draw_card
         await handle_draw_card(interaction, self.game_id, self.user_id)
+
+
+class UnoSurrenderButton(discord.ui.Button):
+    """降参してゲームを終了する"""
+    def __init__(self, game_id: str, user_id: int):
+        super().__init__(
+            label="⚔️ 降参",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"uno_surrender_{game_id}_{user_id}",
+            row=2,
+        )
+        self.game_id = game_id
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        from Features.uno import handle_uno_surrender
+        await handle_uno_surrender(interaction, self.game_id, self.user_id)
 
 
 # ============================================================

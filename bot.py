@@ -25,6 +25,7 @@ async def load_cogs():
         "cogs.janken",
         "cogs.welcome",
         "cogs.music",
+        "cogs.help",
         # Features/
         "Features.attendance",
         "Features.dice",
@@ -66,11 +67,10 @@ async def on_ready():
 
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
-        # Use guild-specific sync only to avoid duplicate global+guild registration.
-        await bot.tree.clear_commands(guild=guild)
+        # Sync guild commands, then remove any stale global commands from Discord.
         synced = await bot.tree.sync(guild=guild)
-        # Clear global commands when operating in a single guild scope to prevent stale duplicates.
         await bot.tree.clear_commands()
+        await bot.tree.sync()
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
     else:
