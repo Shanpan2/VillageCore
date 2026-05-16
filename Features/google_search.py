@@ -60,10 +60,12 @@ class GoogleSearch(commands.Cog):
             items = await asyncio.to_thread(self.search, query, count)
         except Exception as e:
             print(f"[google_search error] {type(e).__name__}: {e}", flush=True)
+            detail = str(e)[:500] or type(e).__name__
             await interaction.followup.send(
                 "❌ Google検索でエラーが発生しました。\n"
                 "`GOOGLE_SEARCH_API_KEY` と `GOOGLE_SEARCH_ENGINE_ID`、"
-                "Custom Search JSON API の有効化を確認してください。",
+                "Custom Search JSON API の有効化を確認してください。\n"
+                f"詳細: `{detail}`",
                 ephemeral=True,
             )
             return

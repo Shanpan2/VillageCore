@@ -430,8 +430,12 @@ def generate_deck() -> list[str]:
 
 
 def generate_hand_image(cards: list[str]) -> str:
-    card_width, card_height = 150, 220
-    img = Image.new("RGBA", (card_width * len(cards), card_height), (0, 0, 0, 0))
+    card_width, card_height = 120, 180
+    gap = 10
+    margin = 14
+    width = max(1, len(cards)) * card_width + max(0, len(cards) - 1) * gap + margin * 2
+    height = card_height + margin * 2
+    img = Image.new("RGBA", (width, height), (32, 36, 45, 255))
 
     for i, card in enumerate(cards):
         path = f"assets/uno/{card}.png"
@@ -443,15 +447,77 @@ def generate_hand_image(cards: list[str]) -> str:
                 card_img = None
 
         if card_img is None:
-            card_img = Image.new("RGBA", (card_width, card_height), (255, 255, 255, 255))
-            draw = ImageDraw.Draw(card_img)
-            font = ImageFont.load_default()
-            draw.text((10, 80), card, fill=(0, 0, 0), font=font)
-        img.paste(card_img, (i * card_width, 0), card_img)
+            card_img = draw_uno_card(card, card_width, card_height)
+        img.paste(card_img, (margin + i * (card_width + gap), margin), card_img)
 
     out = "uno_hand.png"
     img.save(out)
     return out
+
+
+def draw_uno_card(card: str, width: int, height: int) -> Image.Image:
+    color_map = {
+        "red": (219, 58, 52),
+        "yellow": (242, 198, 65),
+        "green": (56, 156, 85),
+        "blue": (54, 116, 204),
+        "wild": (34, 34, 40),
+    }
+    label_map = {
+        "skip": "SKIP",
+        "reverse": "REV",
+        "draw2": "+2",
+        "draw": "+2",
+        "wild": "WILD",
+        "wild_draw": "+4",
+        "wild_draw4": "+4",
+    }
+
+    parts = card.split("_")
+    color = parts[0] if parts[0] in color_map else "wild"
+    value = "_".join(parts[1:]) if len(parts) > 1 else card
+    if card.startswith("wild"):
+        color = "wild"
+        value = card
+
+    bg = color_map[color]
+    text = label_map.get(value, label_map.get(card, value.upper()))
+    if value.isdigit():
+        text = value
+
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=14, fill=(245, 245, 245), outline=(20, 20, 20), width=3)
+    draw.rounded_rectangle((8, 8, width - 9, height - 9), radius=11, fill=bg)
+    draw.ellipse((20, 40, width - 20, height - 40), fill=(245, 245, 245))
+
+    if color == "wild":
+        quadrants = [
+            ((22, 42, width // 2, height // 2), color_map["red"]),
+            ((width // 2, 42, width - 22, height // 2), color_map["yellow"]),
+            ((22, height // 2, width // 2, height - 42), color_map["green"]),
+            ((width // 2, height // 2, width - 22, height - 42), color_map["blue"]),
+        ]
+        for box, fill in quadrants:
+            draw.pieslice(box, 0, 360, fill=fill)
+
+    big_font = ImageFont.load_default()
+    small_font = ImageFont.load_default()
+    try:
+        big_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
+        small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
+    except Exception:
+        pass
+
+    text_color = (20, 20, 20) if color == "yellow" else (255, 255, 255)
+    center_color = (20, 20, 20)
+    draw.text((12, 12), text, fill=text_color, font=small_font)
+    bbox = draw.textbbox((0, 0), text, font=big_font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+    draw.text(((width - tw) / 2, (height - th) / 2 - 2), text, fill=center_color, font=big_font)
+    draw.text((width - 12, height - 12), text, fill=text_color, font=small_font, anchor="rd")
+    return image
 
 
 def can_play(card: str, top: str) -> bool:
