@@ -32,6 +32,11 @@ YDL_OPTIONS = {
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     },
 }
+YDL_PLAY_FORMATS = (
+    "bestaudio/best",
+    "best[acodec!=none]/best",
+    "best/worst",
+)
 
 cookie_file = os.getenv("YTDLP_COOKIE_FILE") or str(DEFAULT_COOKIE_FILE)
 if cookie_file and os.path.exists(cookie_file):
@@ -73,8 +78,44 @@ def format_yt_dlp_error(error: Exception, prefix: str = "エラー") -> str:
 
 
 def _extract_info(query: str):
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-        return ydl.extract_info(query, download=False)
+    last_error = None
+    for requested_format in YDL_PLAY_FORMATS:
+        options = YDL_OPTIONS.copy()
+        options["format"] = requested_format
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                return ydl.extract_info(query, download=False)
+        except Exception as e:
+            last_error = e
+            if "requested format is not available" not in str(e).lower():
+                raise
+
+    raise last_error
+
+
+def _extract_metadata(query: str):
+    options = YDL_OPTIONS.copy()
+    options.pop("format", None)
+    options["extract_flat"] = "in_playlist"
+    with yt_dlp.YoutubeDL(options) as ydl:
+        return ydl.extract_info(query, download=False, process=False)
+
+
+def _youtube_url_from_entry(entry: dict) -> str | None:
+    for key in ("webpage_url", "original_url"):
+        url = entry.get(key)
+        if url:
+            return url
+
+    url = entry.get("url")
+    if url and url.startswith(("http://", "https://")):
+        return url
+
+    video_id = entry.get("id") or url
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+
+    return None
 
 
 def _pick_audio_url(info: dict) -> str | None:
@@ -197,7 +238,7 @@ class MusicPlayer:
             query = f"ytsearch1:{query}"
 
         try:
-            info = await asyncio.to_thread(_extract_info, query)
+            info = await asyncio.to_thread(_extract_metadata, query)
             if "entries" in info:
                 entries = [entry for entry in info["entries"] if entry]
                 if not entries:
@@ -207,7 +248,7 @@ class MusicPlayer:
             else:
                 entry = info
 
-            url = entry.get("webpage_url") or entry.get("original_url") or entry.get("url")
+            url = _youtube_url_from_entry(entry)
             title = entry.get("title", "Unknown title")
             if not url:
                 await channel.send("❌ 再生用URLを取得できませんでした。")
@@ -230,6 +271,7 @@ class Music(commands.Cog):
         self.bot = bot
         self.players: dict[int, MusicPlayer] = {}
         self.leave_tasks: dict[int, asyncio.Task] = {}
+        self.monitor_tasks: dict[int, asyncio.Task] = {}
 
     def get_player(self, guild: discord.Guild) -> MusicPlayer:
         if guild.id not in self.players:
@@ -241,21 +283,49 @@ class Music(commands.Cog):
         if task and not task.done():
             task.cancel()
 
-    async def leave_if_alone(self, guild: discord.Guild, delay: int = 30):
-        await asyncio.sleep(delay)
+    def cancel_monitor_task(self, guild_id: int):
+        task = self.monitor_tasks.pop(guild_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    def start_monitor_task(self, guild: discord.Guild):
+        task = self.monitor_tasks.get(guild.id)
+        if task and not task.done():
+            return
+        self.monitor_tasks[guild.id] = asyncio.create_task(self.monitor_voice_channel(guild))
+
+    async def disconnect_if_alone(self, guild: discord.Guild) -> bool:
         voice = guild.voice_client
         if not voice or not voice.channel:
-            return
+            return True
 
         humans = [member for member in voice.channel.members if not member.bot]
         if humans:
-            return
+            return False
 
         player = self.get_player(guild)
         player.reset()
         if voice.is_playing() or voice.is_paused():
             voice.stop()
         await voice.disconnect()
+        return True
+
+    async def leave_if_alone(self, guild: discord.Guild, delay: int = 30):
+        await asyncio.sleep(delay)
+        if await self.disconnect_if_alone(guild):
+            self.cancel_monitor_task(guild.id)
+
+    async def monitor_voice_channel(self, guild: discord.Guild):
+        try:
+            while True:
+                await asyncio.sleep(30)
+                voice = guild.voice_client
+                if not voice or not voice.channel:
+                    return
+                if await self.disconnect_if_alone(guild):
+                    return
+        finally:
+            self.monitor_tasks.pop(guild.id, None)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -265,18 +335,21 @@ class Music(commands.Cog):
         voice = member.guild.voice_client
         if not voice or not voice.channel:
             self.cancel_leave_task(member.guild.id)
+            self.cancel_monitor_task(member.guild.id)
             return
 
-        if after.channel == voice.channel and not member.bot:
+        if after.channel and after.channel.id == voice.channel.id and not member.bot:
             self.cancel_leave_task(member.guild.id)
+            self.start_monitor_task(member.guild)
             return
 
-        if before.channel != voice.channel:
+        if not before.channel or before.channel.id != voice.channel.id:
             return
 
         humans = [vc_member for vc_member in voice.channel.members if not vc_member.bot]
         if humans:
             self.cancel_leave_task(member.guild.id)
+            self.start_monitor_task(member.guild)
             return
 
         self.cancel_leave_task(member.guild.id)
@@ -299,6 +372,7 @@ class Music(commands.Cog):
             else:
                 await vc_channel.connect()
             self.cancel_leave_task(interaction.guild.id)
+            self.start_monitor_task(interaction.guild)
             await interaction.followup.send(f"🔊 {vc_channel.name} に参加しました。")
         except Exception as e:
             print(f"[join error] {e}", flush=True)
@@ -311,6 +385,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("❌ 接続していません。", ephemeral=True)
             return
         self.cancel_leave_task(interaction.guild.id)
+        self.cancel_monitor_task(interaction.guild.id)
         player = self.get_player(interaction.guild)
         player.reset()
         if voice.is_playing() or voice.is_paused():
@@ -345,6 +420,7 @@ class Music(commands.Cog):
                     return
 
         self.cancel_leave_task(interaction.guild.id)
+        self.start_monitor_task(interaction.guild)
         asyncio.create_task(self._play_task(interaction, query))
 
     async def _play_task(self, interaction: discord.Interaction, query: str):

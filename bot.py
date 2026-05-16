@@ -65,10 +65,13 @@ def register_persistent_views():
 
 
 async def clear_global_commands():
-    print("🔄 Clearing global slash commands so only guild commands remain...", flush=True)
-    bot.tree.clear_commands()
-    cleared_global = await bot.tree.sync()
-    print(f"🔄 Global slash commands after cleanup: {len(cleared_global)}", flush=True)
+    try:
+        print("🔄 Clearing global slash commands so only guild commands remain...", flush=True)
+        bot.tree.clear_commands(guild=None)
+        cleared_global = await bot.tree.sync(guild=None)
+        print(f"🔄 Global slash commands after cleanup: {len(cleared_global)}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Global slash command cleanup failed: {type(e).__name__}: {e}", flush=True)
 
 
 # ==========================
