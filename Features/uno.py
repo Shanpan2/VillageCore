@@ -398,7 +398,7 @@ def generate_hand_image(cards: list[str]) -> str:
         else:
             card_img = Image.new("RGBA", (card_width, card_height), (255, 255, 255, 255))
             draw = ImageDraw.Draw(card_img)
-            font = ImageFont.truetype("assets/meigen/font.ttf", 40)
+            font = ImageFont.load_default()
             draw.text((10, 80), card, fill=(0, 0, 0), font=font)
         img.paste(card_img, (i * card_width, 0), card_img)
 

@@ -18,13 +18,16 @@ class Dice(commands.Cog):
         if message.author.bot:
             return
 
-        # CCB check pattern: "CCB<=<number>"
-        ccb_match = re.fullmatch(r"ccb<=(\d+)", message.content.lower())
+        # CCB check pattern: CCB<=数字 / CCB>=数字 / CCB<数字 / CCB>数字
+        content = message.content.lower().strip()
+        ccb_match = re.fullmatch(r"ccb\s*(<=|>=|<|>)\s*(\d+)", content)
         if ccb_match:
-            await self._handle_ccb_check(message, int(ccb_match.group(1)))
+            comparator = ccb_match.group(1)
+            difficulty = int(ccb_match.group(2))
+            await self._handle_ccb_check(message, comparator, difficulty)
             return
 
-        match = re.fullmatch(r"(\d*)d(\d+)", message.content.lower())
+        match = re.fullmatch(r"(\d*)d(\d+)", content)
         if not match:
             return
 
@@ -73,47 +76,52 @@ class Dice(commands.Cog):
         )
         await message.reply(embed=embed)
 
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(Dice(bot))
-
-    async def _handle_ccb_check(self, message: discord.Message, difficulty: int):
-        """CCB (Custom Check Box) システム: CCB<=<number> 形式
-        - 1d100 をロール
-        - ロール値 ≤ 難易度値で成功
-        - 1-5: クリティカル成功
-        - 96-100: ファンブル失敗
-        """
+    async def _handle_ccb_check(self, message: discord.Message, comparator: str, difficulty: int):
+        """CCB (Custom Check Box) システム: CCB<= / CCB>= / CCB< / CCB> 形式"""
         roll = random.randint(1, 100)
-        
-        # 難易度の妥当性チェック
+
         if difficulty < 1 or difficulty > 100:
             await message.reply("❌ CCB の難易度は 1〜100 の範囲で指定してください。")
             return
-        
-        # 結果の判定
-        title = "🎲 CCB 判定"
-        desc = f"**難易度: {difficulty}** に対して 1d100 をロール\n"
-        desc += f"**結果: {roll}**\n\n"
-        
+
+        result = f"**難易度: CCB{comparator}{difficulty}** に対して 1d100 をロール\n"
+        result += f"**結果: {roll}**\n\n"
         color = 0x3498DB
-        
-        if roll <= 5:
-            desc += f"🌟 **クリティカル成功！** ({roll} ≦ 5)\n最高の成功です！"
+
+        if roll <= CRITICAL_MAX:
+            result += f"🌟 **クリティカル成功！** ({roll} ≦ {CRITICAL_MAX})\n最高の成功です！"
             color = 0xFFD700
-        elif roll >= 96:
-            desc += f"💀 **ファンブル！** ({roll} ≧ 96)\n最悪の失敗…"
+        elif roll >= FUMBLE_MIN:
+            result += f"💀 **ファンブル！** ({roll} ≧ {FUMBLE_MIN})\n最悪の失敗…"
             color = 0xFF0000
-        elif roll <= difficulty:
-            desc += f"✅ **成功！** ({roll} ≦ {difficulty})"
-            color = 0x2ECC71
         else:
-            desc += f"❌ **失敗** ({roll} > {difficulty})"
-            color = 0x95A5A6
-        
+            if comparator == "<=":
+                success = roll <= difficulty
+                comparison = f"{roll} ≦ {difficulty}"
+            elif comparator == "<":
+                success = roll < difficulty
+                comparison = f"{roll} < {difficulty}"
+            elif comparator == ">=":
+                success = roll >= difficulty
+                comparison = f"{roll} ≧ {difficulty}"
+            else:
+                success = roll > difficulty
+                comparison = f"{roll} > {difficulty}"
+
+            if success:
+                result += f"✅ **成功！** ({comparison})"
+                color = 0x2ECC71
+            else:
+                result += f"❌ **失敗** ({comparison})"
+                color = 0x95A5A6
+
         embed = discord.Embed(
-            title=title,
-            description=desc,
+            title="🎲 CCB 判定",
+            description=result,
             color=color,
         )
         await message.reply(embed=embed)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Dice(bot))
