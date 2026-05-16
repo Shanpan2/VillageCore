@@ -13,7 +13,6 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 
 YDL_OPTIONS = {
-    "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
@@ -77,6 +76,39 @@ def _extract_info(query: str):
         return ydl.extract_info(query, download=False)
 
 
+def _pick_audio_url(info: dict) -> str | None:
+    if info.get("url") and info.get("acodec") != "none":
+        return info["url"]
+
+    formats = info.get("formats") or []
+    audio_formats = [
+        fmt
+        for fmt in formats
+        if fmt.get("url")
+        and fmt.get("acodec") not in (None, "none")
+        and fmt.get("vcodec") in (None, "none")
+    ]
+    if not audio_formats:
+        audio_formats = [
+            fmt
+            for fmt in formats
+            if fmt.get("url") and fmt.get("acodec") not in (None, "none")
+        ]
+
+    if not audio_formats:
+        return None
+
+    audio_formats.sort(
+        key=lambda fmt: (
+            fmt.get("abr") or 0,
+            fmt.get("asr") or 0,
+            fmt.get("filesize") or fmt.get("filesize_approx") or 0,
+        ),
+        reverse=True,
+    )
+    return audio_formats[0]["url"]
+
+
 def _get_audio_source(audio_url: str):
     return discord.FFmpegOpusAudio.from_probe(audio_url, **FFMPEG_OPTIONS)
 
@@ -127,7 +159,7 @@ class MusicPlayer:
                     raise RuntimeError("検索結果が見つかりませんでした。")
                 info = entries[0]
 
-            audio_url = info.get("url")
+            audio_url = _pick_audio_url(info)
             if not audio_url:
                 raise RuntimeError("音声URLを取得できませんでした。")
 

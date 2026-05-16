@@ -85,12 +85,14 @@ async def on_ready():
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
         # Keep slash commands guild-scoped so Discord does not show global + guild duplicates.
+        bot.tree.clear_commands(guild=guild)
         print("🔄 Copying slash commands to target guild...", flush=True)
         bot.tree.copy_global_to(guild=guild)
 
-        print("🔄 Clearing global slash commands...", flush=True)
+        print("🔄 Clearing global slash commands so only guild commands remain...", flush=True)
         bot.tree.clear_commands()
-        await bot.tree.sync()
+        cleared_global = await bot.tree.sync()
+        print(f"🔄 Global slash commands after cleanup: {len(cleared_global)}", flush=True)
 
         print("🔄 Syncing current guild slash commands...", flush=True)
         synced = await bot.tree.sync(guild=guild)
