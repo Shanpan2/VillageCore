@@ -4,6 +4,11 @@ import re
 import random
 
 
+# 1d100 専用の判定閾値
+CRITICAL_MAX = 5    # 1〜5: クリティカル
+FUMBLE_MIN = 96     # 96〜100: ファンブル
+
+
 class Dice(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -32,10 +37,33 @@ class Dice(commands.Cog):
         total = sum(rolls)
         result_text = " + ".join(map(str, rolls))
 
+        # 1d100 のみクリティカル/ファンブル判定
+        special = None
+        color = 0x3498DB
+
+        if times == 1 and sides == 100:
+            value = rolls[0]
+            if value <= CRITICAL_MAX:
+                special = f"🌟 **クリティカル！** ({value} ≦ {CRITICAL_MAX})\n最高の成功！"
+                color = 0xFFD700
+            elif value >= FUMBLE_MIN:
+                special = f"💀 **ファンブル！** ({value} ≧ {FUMBLE_MIN})\n最悪の失敗…"
+                color = 0xFF0000
+            elif value <= 50:
+                special = f"✅ **成功** ({value})"
+                color = 0x2ECC71
+            else:
+                special = f"❌ **失敗** ({value})"
+                color = 0x95A5A6
+
+        desc = f"**{times}d{sides}** の結果：\n{result_text} = **{total}**"
+        if special:
+            desc += f"\n\n{special}"
+
         embed = discord.Embed(
             title="🎲 ダイスロール",
-            description=f"**{times}d{sides}** の結果：\n{result_text} = **{total}**",
-            color=0x3498DB,
+            description=desc,
+            color=color,
         )
         await message.reply(embed=embed)
 

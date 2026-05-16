@@ -1,13 +1,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageEnhance
 import random
 import re
 import textwrap
 from pathlib import Path
 import aiohttp
-from PIL import ImageFilter
 import io
 
 
@@ -20,6 +19,8 @@ class Meigen(commands.Cog):
         await interaction.response.defer()
         try:
             avatar_url = interaction.user.display_avatar.url if interaction.user else None
+            if not avatar_url and self.bot.user:
+                avatar_url = self.bot.user.display_avatar.url
             buffer = await Meigen._generate_image(text, avatar_url=avatar_url)
             buffer.seek(0)
             await interaction.followup.send(file=discord.File(buffer, filename="meigen.png"))
@@ -77,6 +78,8 @@ class Meigen(commands.Cog):
 
         try:
             avatar_url = message.author.display_avatar.url if message.author else None
+            if not avatar_url and self.bot.user:
+                avatar_url = self.bot.user.display_avatar.url
             buffer = await Meigen._generate_image(text, avatar_url=avatar_url)
             buffer.seek(0)
             file = discord.File(buffer, filename="meigen.png")
@@ -106,7 +109,6 @@ class Meigen(commands.Cog):
         else:
             img = Meigen._generate_fallback_background()
 
-        # if avatar url provided, try to fetch and use as right-side background
         avatar_img = None
         if avatar_url:
             try:
@@ -118,28 +120,40 @@ class Meigen(commands.Cog):
             except Exception:
                 avatar_img = None
 
-        if avatar_img:
-            # ensure canvas size large enough
-            target_w, target_h = max(img.width, 900), max(img.height, 400)
-            if img.width < target_w or img.height < target_h:
-                img = img.resize((target_w, target_h), Image.LANCZOS)
-            # place avatar on right half, fill height
-            avatar_h = img.height
-            avatar_w = avatar_h  # make square for filling
-            avatar_resized = avatar_img.resize((avatar_w, avatar_h), Image.LANCZOS)
-            # paste avatar on right side
-            img.paste(avatar_resized, (img.width - avatar_w, 0), avatar_resized)
-            # darken avatar side for contrast
-            overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            draw_overlay = ImageDraw.Draw(overlay)
-            draw_overlay.rectangle([img.width - avatar_w, 0, img.width, img.height], fill=(0, 0, 0, 120))
-            img = Image.alpha_composite(img, overlay)
-            # slight blur on avatar to make text pop
-            img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
+        output_size = (900, 500)
+        if avatar_img is not None:
+            avatar_bg = ImageOps.fit(avatar_img, output_size, Image.LANCZOS)
+            avatar_bg = avatar_bg.convert("RGBA")
+            avatar_bg = ImageEnhance.Brightness(avatar_bg).enhance(1.15)
+            avatar_bg = ImageEnhance.Color(avatar_bg).enhance(1.1)
+            overlay_dark = Image.new("RGBA", output_size, (0, 0, 0, 12))
+            overlay_light = Image.new("RGBA", output_size, (255, 255, 255, 36))
+            avatar_bg = Image.alpha_composite(avatar_bg, overlay_dark)
+            avatar_bg = Image.alpha_composite(avatar_bg, overlay_light)
+            avatar_bg = avatar_bg.filter(ImageFilter.GaussianBlur(radius=2))
+            img = avatar_bg
+        else:
+            img = img.resize(output_size, Image.LANCZOS)
 
         draw = ImageDraw.Draw(img)
 
         font_path = assets_path / "font.ttf"
+
+        def find_system_font(names):
+            possible_dirs = [
+                Path("/usr/share/fonts"),
+                Path("/usr/local/share/fonts"),
+                Path("C:/Windows/Fonts"),
+                Path("/Library/Fonts"),
+                Path("/System/Library/Fonts"),
+            ]
+            for root in possible_dirs:
+                if not root.exists():
+                    continue
+                for name in names:
+                    for path in root.rglob(name):
+                        if path.is_file():
+                            yield path
 
         def get_truetype(size: int):
             if font_path.exists():
@@ -147,85 +161,100 @@ class Meigen(commands.Cog):
                     return ImageFont.truetype(str(font_path), size)
                 except Exception:
                     pass
-            # try common system fonts by name
-            for name in ("meiryo.ttc", "MSGothic.ttc", "msgothic.ttc", "YuGothicUI.ttf", "arial.ttf"):
+
+            candidate_names = [
+                "NotoSansJP-VF.ttf",
+                "NotoSerifJP-VF.ttf",
+                "NotoSansCJKjp-Regular.otf",
+                "NotoSansCJKjp-Regular.ttf",
+                "NotoSansJP-Regular.otf",
+                "NotoSansJP-Regular.ttf",
+                "meiryo.ttc",
+                "meiryo.ttf",
+                "msgothic.ttc",
+                "msgothic.ttf",
+                "YuGothicUI.ttf",
+                "YuGothic.ttf",
+                "MS Gothic.ttf",
+                "Yu Gothic UI.ttf",
+                "ipag.ttf",
+                "ipagp.ttf",
+                "TakaoPGothic.ttf",
+                "TakaoPMincho.ttf",
+                "arial.ttf",
+            ]
+            for name in candidate_names:
                 try:
                     return ImageFont.truetype(name, size)
                 except Exception:
                     continue
-            # try widely available ttf bundled with many environments
-            for name in ("DejaVuSans.ttf", "DejaVuSans.otf", "LiberationSans-Regular.ttf"):
+
+            for path in find_system_font(candidate_names):
                 try:
-                    return ImageFont.truetype(name, size)
+                    return ImageFont.truetype(str(path), size)
                 except Exception:
                     continue
+
             return ImageFont.load_default()
 
-        # Choose font size to fit the image width and compute wrapping based on measured char width
-        max_width = img.width - 120
-        size = 72
-        font = get_truetype(size)
-        while size >= 18:
-            font = get_truetype(size)
-            sample_char = "あ"
-            try:
-                char_bbox = draw.textbbox((0, 0), sample_char, font=font)
-                char_w = max(4, char_bbox[2] - char_bbox[0])
-            except Exception:
-                char_w = 12
-            approx_chars = max(8, max_width // char_w)
-            lines = textwrap.wrap(text, width=approx_chars)
+        def wrap_text(raw_text: str, font_obj: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+            lines: list[str] = []
+            current = ""
+            for ch in raw_text:
+                candidate = current + ch
+                bbox = draw.textbbox((0, 0), candidate, font=font_obj)
+                if bbox[2] - bbox[0] <= max_width or not current:
+                    current = candidate
+                else:
+                    lines.append(current)
+                    current = ch
+            if current:
+                lines.append(current)
+            return lines
+
+        max_text_width = img.width - 120
+        font_size = 72
+        font = get_truetype(font_size)
+        lines = wrap_text(text, font, max_text_width)
+
+        while font_size > 28:
             too_big = False
             for line in lines:
                 bbox = draw.textbbox((0, 0), line, font=font)
-                if bbox[2] - bbox[0] > max_width:
+                if bbox[2] - bbox[0] > max_text_width:
                     too_big = True
                     break
-            if not too_big:
-                break
-            size -= 4
+            if too_big or len(lines) > 6:
+                font_size -= 4
+                font = get_truetype(font_size)
+                lines = wrap_text(text, font, max_text_width)
+                continue
+            break
 
-        # final wrapping with chosen font
-        try:
-            char_bbox = draw.textbbox((0, 0), "あ", font=font)
-            char_w = max(4, char_bbox[2] - char_bbox[0])
-        except Exception:
-            char_w = 12
-        approx_chars = max(8, max_width // char_w)
-        lines = textwrap.wrap(text, width=approx_chars)
+        line_heights = [draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in lines]
+        total_h = sum(line_heights) + max(0, len(lines) - 1) * 18
+        y = max(40, (img.height - total_h) // 2)
 
-        # center vertically
-        line_heights = [draw.textbbox((0, 0), l, font=font)[3] - draw.textbbox((0, 0), l, font=font)[1] for l in lines]
-        total_h = sum(line_heights) + (len(lines)-1) * 12
-        y = (img.height - total_h) // 2
-
-        # draw semi-transparent box behind text for contrast
         if total_h > 0:
-            max_w = 0
-            for line in lines:
-                bbox = draw.textbbox((0, 0), line, font=font)
-                w = bbox[2] - bbox[0]
-                if w > max_w:
-                    max_w = w
-            pad_x, pad_y = 24, 18
+            max_w = max(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0] for line in lines)
+            pad_x, pad_y = 30, 22
             box_x0 = (img.width - max_w) // 2 - pad_x
-            box_y0 = y - 6
+            box_y0 = y - pad_y
             box_x1 = (img.width + max_w) // 2 + pad_x
-            box_y1 = y + total_h + 6
-            box_x0 = max(8, box_x0)
-            box_y0 = max(8, box_y0)
-            box_x1 = min(img.width - 8, box_x1)
-            box_y1 = min(img.height - 8, box_y1)
-            draw.rectangle([box_x0, box_y0, box_x1, box_y1], fill=(0, 0, 0, 160))
+            box_y1 = y + total_h + pad_y
+            box_x0 = max(18, box_x0)
+            box_y0 = max(18, box_y0)
+            box_x1 = min(img.width - 18, box_x1)
+            box_y1 = min(img.height - 18, box_y1)
+            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, fill=(255, 255, 255, 200))
+            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, outline=(255, 255, 255, 140), width=2)
 
         for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
-            w = bbox[2] - bbox[0]
-            x = (img.width - w) // 2
-            for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
-                draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
-            draw.text((x, y), line, font=font, fill=(255, 255, 255))
-            y += lh + 12
+            x = (img.width - (bbox[2] - bbox[0])) // 2
+            draw.text((x + 1, y + 1), line, font=font, fill=(0, 0, 0, 100))
+            draw.text((x, y), line, font=font, fill=(24, 24, 24))
+            y += lh + 18
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
@@ -234,15 +263,20 @@ class Meigen(commands.Cog):
 
     @staticmethod
     def _generate_fallback_background() -> Image.Image:
-        width, height = 800, 400
-        img = Image.new("RGBA", (width, height), (30, 30, 40, 255))
+        width, height = 900, 500
+        img = Image.new("RGBA", (width, height), (34, 42, 61, 255))
         draw = ImageDraw.Draw(img)
 
-        for i in range(0, height, 20):
-            color = 40 + (i // 10 % 2) * 10
-            draw.rectangle([0, i, width, i + 10], fill=(color, color + 10, color + 20, 255))
+        for y in range(0, height, 25):
+            alpha = 24 if (y // 25) % 2 == 0 else 16
+            draw.rectangle([0, y, width, y + 25], fill=(38, 50, 76, alpha))
 
-        draw.rectangle([0, 0, width, height], outline=(255, 255, 255, 30), width=4)
+        dark = Image.new("RGBA", (width, height), (8, 14, 28, 120))
+        img = Image.alpha_composite(img, dark)
+        img.putalpha(255)
+
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, width, height], outline=(255, 255, 255, 20), width=3)
         return img
 
 
