@@ -244,7 +244,7 @@ class Meigen(commands.Cog):
 
         if total_h > 0:
             max_w = max(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0] for line in lines)
-            pad_x, pad_y = 30, 22
+            pad_x, pad_y = 40, 30
             box_x0 = (img.width - max_w) // 2 - pad_x
             box_y0 = y - pad_y
             box_x1 = (img.width + max_w) // 2 + pad_x
@@ -253,14 +253,30 @@ class Meigen(commands.Cog):
             box_y0 = max(18, box_y0)
             box_x1 = min(img.width - 18, box_x1)
             box_y1 = min(img.height - 18, box_y1)
-            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, fill=(255, 255, 255, 230))
-            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, outline=(0, 0, 0, 50), width=2)
+            draw.rounded_rectangle(
+                [box_x0, box_y0, box_x1, box_y1],
+                radius=24,
+                fill=(18, 22, 32, 230),
+            )
+            draw.rounded_rectangle(
+                [box_x0, box_y0, box_x1, box_y1],
+                radius=24,
+                outline=(255, 255, 255, 80),
+                width=2,
+            )
 
+        stroke_width = max(2, font_size // 20)
         for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
             x = (img.width - (bbox[2] - bbox[0])) // 2
-            draw.text((x + 2, y + 2), line, font=font, fill=(0, 0, 0, 140))
-            draw.text((x, y), line, font=font, fill=(24, 24, 24))
+            draw.text(
+                (x, y),
+                line,
+                font=font,
+                fill=(255, 255, 255, 255),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, 220),
+            )
             y += lh + 18
 
         buffer = io.BytesIO()
