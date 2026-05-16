@@ -30,7 +30,7 @@ class Uno(commands.Cog):
         game_id = str(interaction.channel_id)
 
         uno_games[game_id] = {
-            "players": [],
+            "players": [interaction.user.id],
             "hands": {},
             "deck": [],
             "discard": [],
@@ -43,6 +43,7 @@ class Uno(commands.Cog):
 
         await interaction.response.send_message(
             f"🎮 UNOゲームを作成しました！\n"
+            f"{interaction.user.mention} は自動で参加しました。\n"
             f"`/uno_join` で参加してください。\n"
             f"チャレンジ機能：**{'ON' if challenge else 'OFF'}**"
         )
@@ -88,6 +89,12 @@ class Uno(commands.Cog):
             return
 
         state = uno_games[game_id]
+
+        if state.get("hands"):
+            await interaction.response.send_message(
+                "❌ このUNOゲームはすでに開始しています。", ephemeral=True
+            )
+            return
 
         if len(state["players"]) < 2:
             await interaction.response.send_message(
@@ -428,9 +435,14 @@ def generate_hand_image(cards: list[str]) -> str:
 
     for i, card in enumerate(cards):
         path = f"assets/uno/{card}.png"
-        if os.path.exists(path):
-            card_img = Image.open(path).resize((card_width, card_height))
-        else:
+        card_img = None
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            try:
+                card_img = Image.open(path).convert("RGBA").resize((card_width, card_height))
+            except Exception:
+                card_img = None
+
+        if card_img is None:
             card_img = Image.new("RGBA", (card_width, card_height), (255, 255, 255, 255))
             draw = ImageDraw.Draw(card_img)
             font = ImageFont.load_default()

@@ -44,6 +44,7 @@ async def load_cogs():
         "Features.omikuji",
         "Features.othello",
         "Features.role_panel",
+        "Features.sevens",
         "Features.ticket",
         "Features.uno",
         "Features.youtube_notify",
