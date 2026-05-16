@@ -40,11 +40,13 @@ class YoutubeNotify(commands.Cog):
         self.bot = bot
         self.posted_ids: set[str] = set()
         self.notify_channel_id = DEFAULT_NOTIFY_CHANNEL_ID
+        self.skip_existing_on_first_check = True
 
     async def cog_load(self):
         saved = await db_get(POSTED_KEY)
         if saved:
             self.posted_ids = {video_id for video_id in saved.split(",") if video_id}
+            self.skip_existing_on_first_check = False
 
         saved_channel = await db_get(CHANNEL_KEY)
         if saved_channel:
@@ -83,6 +85,7 @@ class YoutubeNotify(commands.Cog):
         videos = await self.bot.loop.run_in_executor(None, self._search_videos, CHECK_KEYWORD)
         now = datetime.now(timezone.utc)
         posted_count = 0
+        due_unposted = []
 
         for video in sorted(videos, key=lambda item: item["post_at"] or datetime.min.replace(tzinfo=timezone.utc)):
             vid_id = video["id"]
@@ -92,7 +95,23 @@ class YoutubeNotify(commands.Cog):
             post_at = video["post_at"]
             if post_at and post_at > now:
                 continue
+            due_unposted.append(video)
 
+        if self.skip_existing_on_first_check:
+            for video in due_unposted:
+                self.posted_ids.add(video["id"])
+            self.skip_existing_on_first_check = False
+            trimmed = list(self.posted_ids)[-500:]
+            await db_set(POSTED_KEY, ",".join(trimmed))
+            print(
+                f"[YoutubeNotify] First check: marked {len(due_unposted)} existing videos as posted.",
+                flush=True,
+            )
+            return 0
+
+        for video in due_unposted:
+            vid_id = video["id"]
+            post_at = video["post_at"]
             embed = discord.Embed(
                 title=video["title"],
                 url=f"https://www.youtube.com/watch?v={vid_id}",

@@ -11,7 +11,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DENO_INSTALL=/usr/local
+ENV DATABASE_PATH=/data/config.db
 RUN curl -fsSL https://deno.land/install.sh | sh
+RUN mkdir -p /data
 
 WORKDIR /app
 
