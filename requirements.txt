@@ -7,3 +7,4 @@ aiosqlite
 yt-dlp
 PyNaCl>=1.5.0
 google-api-python-client
+python-dotenv>=1.0.0

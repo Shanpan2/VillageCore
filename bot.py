@@ -7,9 +7,14 @@ from aiohttp import web
 
 from bot_instance import bot
 from database.config_db import db_init
-from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID") or "1405716361933754408"
 PORT = int(os.getenv("PORT", "8000"))
