@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 
 YDL_OPTIONS = {
+    "format": "best[acodec!=none]/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,

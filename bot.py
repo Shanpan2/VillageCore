@@ -64,6 +64,13 @@ def register_persistent_views():
     bot.add_view(RolePanelView(0))
 
 
+async def clear_global_commands():
+    print("🔄 Clearing global slash commands so only guild commands remain...", flush=True)
+    bot.tree.clear_commands()
+    cleared_global = await bot.tree.sync()
+    print(f"🔄 Global slash commands after cleanup: {len(cleared_global)}", flush=True)
+
+
 # ==========================
 # on_ready
 # ==========================
@@ -89,13 +96,9 @@ async def on_ready():
         print("🔄 Copying slash commands to target guild...", flush=True)
         bot.tree.copy_global_to(guild=guild)
 
-        print("🔄 Clearing global slash commands so only guild commands remain...", flush=True)
-        bot.tree.clear_commands()
-        cleared_global = await bot.tree.sync()
-        print(f"🔄 Global slash commands after cleanup: {len(cleared_global)}", flush=True)
-
         print("🔄 Syncing current guild slash commands...", flush=True)
         synced = await bot.tree.sync(guild=guild)
+        asyncio.create_task(clear_global_commands())
         COMMANDS_SYNCED = True
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)

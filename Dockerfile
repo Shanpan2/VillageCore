@@ -6,7 +6,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-ARG CACHE_BUST=20260515c
+ARG CACHE_BUST=20260516a
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir "PyNaCl>=1.5.0" "discord.py[voice]"
 
