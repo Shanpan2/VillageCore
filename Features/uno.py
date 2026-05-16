@@ -115,16 +115,27 @@ class Uno(commands.Cog):
         })
 
         # 手札画像をDM送信
+        failed_dm: list[str] = []
         for user_id in state["players"]:
             path = generate_hand_image(hands[user_id])
             file = discord.File(path, filename="hand.png")
             member = interaction.guild.get_member(user_id)
             if member:
-                await member.send(file=file)
+                try:
+                    await member.send(file=file)
+                except Exception:
+                    failed_dm.append(member.mention)
 
         first_player = state["players"][0]
+        followup_text = (
+            f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>"
+        )
+        if failed_dm:
+            followup_text += "\n\n⚠️ DM送信に失敗したプレイヤーがあります。DMを受信できる状態にしてください。\n"
+            followup_text += " " + " ".join(failed_dm)
+
         await interaction.followup.send(
-            f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>",
+            followup_text,
             view=UnoHandView(game_id, first_player, hands[first_player]),
         )
 
