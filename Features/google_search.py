@@ -7,8 +7,15 @@ from discord.ext import commands
 from googleapiclient.discovery import build
 
 
-GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY") or os.getenv("GOOGLE_API_KEY")
-GOOGLE_SEARCH_ENGINE_ID = os.getenv("GOOGLE_SEARCH_ENGINE_ID") or os.getenv("GOOGLE_CSE_ID")
+GOOGLE_SEARCH_API_KEY = (
+    os.getenv("GOOGLE_SEARCH_API_KEY")
+    or os.getenv("GOOGLE_SEARCH")
+    or os.getenv("GOOGLE_API_KEY")
+)
+GOOGLE_SEARCH_ENGINE_ID = (
+    os.getenv("GOOGLE_SEARCH_ENGINE_ID")
+    or os.getenv("GOOGLE_CSE_ID")
+)
 DEFAULT_RESULT_COUNT = 5
 
 
