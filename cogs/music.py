@@ -179,10 +179,6 @@ def _pick_audio_url(info: dict) -> str | None:
     return audio_formats[0]["url"]
 
 
-def _get_audio_source(audio_url: str):
-    return discord.FFmpegOpusAudio.from_probe(audio_url, **FFMPEG_OPTIONS)
-
-
 class MusicPlayer:
     def __init__(self, bot: commands.Bot, guild: discord.Guild):
         self.bot = bot
@@ -234,7 +230,7 @@ class MusicPlayer:
                 raise RuntimeError("音声URLを取得できませんでした。")
 
             self.current_info = info
-            source = await asyncio.to_thread(_get_audio_source, audio_url)
+            source = await discord.FFmpegOpusAudio.from_probe(audio_url, **FFMPEG_OPTIONS)
         except Exception as e:
             if channel:
                 await channel.send(format_yt_dlp_error(e, prefix="再生エラー"))
