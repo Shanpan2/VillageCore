@@ -7,10 +7,14 @@ from aiohttp import web
 
 from bot_instance import bot
 from database.config_db import db_init
+from dotenv import load_dotenv
 
+load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")
+GUILD_ID = os.getenv("GUILD_ID") or "1405716361933754408"
 PORT = int(os.getenv("PORT", "8000"))
+COMMANDS_SYNCED = False
+PERSISTENT_VIEWS_REGISTERED = False
 
 
 # ==========================
@@ -60,26 +64,37 @@ def register_persistent_views():
 # ==========================
 @bot.event
 async def on_ready():
+    global COMMANDS_SYNCED, PERSISTENT_VIEWS_REGISTERED
+
     try:
-        register_persistent_views()
+        if not PERSISTENT_VIEWS_REGISTERED:
+            register_persistent_views()
+            PERSISTENT_VIEWS_REGISTERED = True
     except Exception as e:
         print(f"⚠️ register_persistent_views エラー: {e}")
 
+    if COMMANDS_SYNCED:
+        print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
+        return
+
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
-        # Remove stale global and guild commands, then sync only the current guild.
+        # Keep slash commands guild-scoped so Discord does not show global + guild duplicates.
+        print("🔄 Copying slash commands to target guild...", flush=True)
+        bot.tree.copy_global_to(guild=guild)
+
         print("🔄 Clearing global slash commands...", flush=True)
-        await bot.tree.clear_commands()
+        bot.tree.clear_commands()
         await bot.tree.sync()
-        print("🔄 Clearing guild slash commands...", flush=True)
-        await bot.tree.clear_commands(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print("🔄 Registering current guild slash commands...", flush=True)
+
+        print("🔄 Syncing current guild slash commands...", flush=True)
         synced = await bot.tree.sync(guild=guild)
+        COMMANDS_SYNCED = True
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
     else:
         synced = await bot.tree.sync()
+        COMMANDS_SYNCED = True
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} global slash commands", flush=True)
 
