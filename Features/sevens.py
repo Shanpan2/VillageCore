@@ -1,4 +1,5 @@
 import random
+from io import BytesIO
 from pathlib import Path
 
 import discord
@@ -131,6 +132,84 @@ async def send_hand(member: discord.Member, hand: list[tuple[str, int]], playabl
         "あなたの7並べの手札です。\n"
         "`*` が付いているカードは現在出せます。\n"
         + " ".join(labels)
+    )
+
+
+def draw_card(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    card: tuple[str, int],
+    font: ImageFont.ImageFont,
+    small_font: ImageFont.ImageFont,
+    playable: bool = False,
+):
+    x, y = xy
+    suit, rank = card
+    suit_color = (196, 34, 34) if suit in ("H", "D") else (25, 25, 25)
+    outline = (255, 206, 84) if playable else (220, 220, 210)
+    width = 4 if playable else 2
+
+    draw.rounded_rectangle(
+        (x, y, x + 92, y + 128),
+        radius=10,
+        fill=(248, 248, 240),
+        outline=outline,
+        width=width,
+    )
+    label = rank_label(rank)
+    draw.text((x + 10, y + 8), label, fill=suit_color, font=small_font)
+    draw.text((x + 10, y + 30), SUIT_SYMBOLS[suit], fill=suit_color, font=small_font)
+
+    center_text = f"{SUIT_SYMBOLS[suit]}{label}"
+    bbox = draw.textbbox((0, 0), center_text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text((x + 46 - tw / 2, y + 64 - th / 2), center_text, fill=suit_color, font=font)
+
+    if playable:
+        draw.rounded_rectangle((x + 9, y + 101, x + 83, y + 121), radius=5, fill=(255, 206, 84))
+        draw.text((x + 23, y + 102), "PLAY", fill=(38, 38, 38), font=small_font)
+
+
+def hand_file(member: discord.Member, hand: list[tuple[str, int]], playable: list[tuple[str, int]]) -> discord.File:
+    sorted_hand = sorted(hand, key=lambda c: (SUITS.index(c[0]), c[1]))
+    playable_set = set(playable)
+    card_w, card_h = 92, 128
+    gap = 14
+    cols = min(7, max(1, len(sorted_hand)))
+    rows = max(1, (len(sorted_hand) + cols - 1) // cols)
+    width = 34 + cols * card_w + (cols - 1) * gap + 34
+    height = 72 + rows * card_h + (rows - 1) * gap + 42
+    image = Image.new("RGB", (width, height), (33, 94, 72))
+    draw = ImageDraw.Draw(image)
+
+    try:
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+        card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+        small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+    except Exception:
+        title_font = ImageFont.load_default()
+        card_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+
+    draw.text((30, 22), "Your hand - Sevens", fill=(255, 255, 255), font=title_font)
+    for index, card in enumerate(sorted_hand):
+        col = index % cols
+        row = index // cols
+        x = 34 + col * (card_w + gap)
+        y = 72 + row * (card_h + gap)
+        draw_card(draw, (x, y), card, card_font, small_font, card in playable_set)
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename=f"sevens_hand_{member.id}.png")
+
+
+async def send_hand(member: discord.Member, hand: list[tuple[str, int]], playable: list[tuple[str, int]]):
+    await member.send(
+        "あなたの7並べの手札です。\n"
+        "黄色い枠のカードは現在出せます。",
+        file=hand_file(member, hand, playable),
     )
 
 
