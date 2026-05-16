@@ -220,23 +220,29 @@ class Meigen(commands.Cog):
             return lines
 
         max_text_width = img.width - 120
-        font_size = 72
+        font_size = 110
         font = get_truetype(font_size)
         lines = wrap_text(text, font, max_text_width)
 
-        while font_size > 28:
+        while font_size > 38:
             too_big = False
             for line in lines:
                 bbox = draw.textbbox((0, 0), line, font=font)
                 if bbox[2] - bbox[0] > max_text_width:
                     too_big = True
                     break
-            if too_big or len(lines) > 6:
+            if too_big or len(lines) > 4:
                 font_size -= 4
                 font = get_truetype(font_size)
                 lines = wrap_text(text, font, max_text_width)
                 continue
             break
+
+        if len(lines) > 4 and font_size <= 38:
+            wrapped = []
+            for line in lines:
+                wrapped.extend(wrap_text(line, font, max_text_width))
+            lines = wrapped
 
         line_heights = [draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in lines]
         total_h = sum(line_heights) + max(0, len(lines) - 1) * 18
@@ -265,7 +271,7 @@ class Meigen(commands.Cog):
                 width=2,
             )
 
-        stroke_width = max(2, font_size // 20)
+        stroke_width = max(2, font_size // 16)
         for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
             x = (img.width - (bbox[2] - bbox[0])) // 2
