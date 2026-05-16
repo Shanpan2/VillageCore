@@ -1,14 +1,25 @@
 FROM python:3.13-slim-bookworm
 
-RUN apt-get update && apt-get install -y ffmpeg libffi-dev libsodium-dev && apt-get clean
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    libffi-dev \
+    libsodium-dev \
+    unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV DENO_INSTALL=/usr/local
+RUN curl -fsSL https://deno.land/install.sh | sh
 
 WORKDIR /app
 
 COPY requirements.txt .
 
-ARG CACHE_BUST=20260516a
+ARG CACHE_BUST=20260516b
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir --upgrade yt-dlp "PyNaCl>=1.5.0" "discord.py[voice]"
+    pip install --no-cache-dir --upgrade "yt-dlp[default]" "PyNaCl>=1.5.0" "discord.py[voice]"
 
 COPY . .
 

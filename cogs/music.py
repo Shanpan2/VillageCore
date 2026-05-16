@@ -30,6 +30,9 @@ YDL_OPTIONS = {
     "quiet": True,
     "no_warnings": True,
     "logger": QuietYtdlpLogger(),
+    "js_runtimes": {
+        "deno": {},
+    },
     "default_search": "ytsearch1",
     "extract_flat": False,
     "cachedir": False,
@@ -38,7 +41,7 @@ YDL_OPTIONS = {
     "fragment_retries": 3,
     "extractor_args": {
         "youtube": {
-            "player_client": ["default", "mweb", "web_embedded", "ios"],
+            "player_client": ["default", "mweb", "web_embedded"],
             "formats": ["missing_pot", "incomplete"],
         },
     },
