@@ -121,19 +121,26 @@ class Meigen(commands.Cog):
                 avatar_img = None
 
         output_size = (900, 500)
+        img = img.resize(output_size, Image.LANCZOS)
+
         if avatar_img is not None:
-            avatar_bg = ImageOps.fit(avatar_img, output_size, Image.LANCZOS)
-            avatar_bg = avatar_bg.convert("RGBA")
-            avatar_bg = ImageEnhance.Brightness(avatar_bg).enhance(1.15)
-            avatar_bg = ImageEnhance.Color(avatar_bg).enhance(1.1)
-            overlay_dark = Image.new("RGBA", output_size, (0, 0, 0, 12))
-            overlay_light = Image.new("RGBA", output_size, (255, 255, 255, 36))
-            avatar_bg = Image.alpha_composite(avatar_bg, overlay_dark)
-            avatar_bg = Image.alpha_composite(avatar_bg, overlay_light)
-            avatar_bg = avatar_bg.filter(ImageFilter.GaussianBlur(radius=2))
-            img = avatar_bg
-        else:
-            img = img.resize(output_size, Image.LANCZOS)
+            avatar_bg = ImageOps.fit(avatar_img, (650, 650), Image.LANCZOS).convert("RGBA")
+            avatar_bg = ImageEnhance.Color(avatar_bg).enhance(1.05)
+            avatar_bg = ImageEnhance.Brightness(avatar_bg).enhance(1.1)
+            avatar_bg = avatar_bg.filter(ImageFilter.GaussianBlur(radius=24))
+
+            overlay = Image.new("RGBA", output_size, (255, 255, 255, 0))
+            avatar_x = output_size[0] - 520
+            avatar_y = (output_size[1] - 650) // 2
+            avatar_mask = avatar_bg.split()[3].point(lambda p: min(p, 220))
+            overlay.paste(avatar_bg, (avatar_x, avatar_y), avatar_mask)
+            overlay = ImageEnhance.Brightness(overlay).enhance(1.02)
+            overlay = Image.alpha_composite(img, overlay)
+
+            tone = Image.new("RGBA", output_size, (255, 255, 255, 36))
+            shadow = Image.new("RGBA", output_size, (0, 0, 0, 18))
+            img = Image.alpha_composite(overlay, tone)
+            img = Image.alpha_composite(img, shadow)
 
         draw = ImageDraw.Draw(img)
 
@@ -246,13 +253,13 @@ class Meigen(commands.Cog):
             box_y0 = max(18, box_y0)
             box_x1 = min(img.width - 18, box_x1)
             box_y1 = min(img.height - 18, box_y1)
-            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, fill=(255, 255, 255, 200))
-            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, outline=(255, 255, 255, 140), width=2)
+            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, fill=(255, 255, 255, 230))
+            draw.rounded_rectangle([box_x0, box_y0, box_x1, box_y1], radius=20, outline=(0, 0, 0, 50), width=2)
 
         for line, lh in zip(lines, line_heights):
             bbox = draw.textbbox((0, 0), line, font=font)
             x = (img.width - (bbox[2] - bbox[0])) // 2
-            draw.text((x + 1, y + 1), line, font=font, fill=(0, 0, 0, 100))
+            draw.text((x + 2, y + 2), line, font=font, fill=(0, 0, 0, 140))
             draw.text((x, y), line, font=font, fill=(24, 24, 24))
             y += lh + 18
 

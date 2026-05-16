@@ -77,6 +77,9 @@ class Welcome(commands.Cog):
     def _welcome_channel_key(self, guild_id: int) -> str:
         return f"welcome_channel_{guild_id}"
 
+    def _welcome_message_key(self, guild_id: int) -> str:
+        return f"welcome_message_{guild_id}"
+
     async def _get_configured_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
         raw = await db_get(self._welcome_channel_key(guild.id))
         if not raw:
@@ -91,6 +94,23 @@ class Welcome(commands.Cog):
         if not channel.permissions_for(guild.me).send_messages:
             return None
         return channel
+
+    async def _get_configured_message(self, guild: discord.Guild) -> str | None:
+        raw = await db_get(self._welcome_message_key(guild.id))
+        if not raw:
+            return None
+        return raw
+
+    def _format_welcome_message(self, member: discord.Member, template: str | None) -> str:
+        if template is None:
+            return f"{member.mention} さん、ようこそ！"
+        guild_name = member.guild.name if member.guild else ""
+        return (
+            template
+            .replace("{mention}", member.mention)
+            .replace("{user}", member.display_name)
+            .replace("{server}", guild_name)
+        )
 
     async def _get_send_channel(self, member: discord.Member) -> discord.TextChannel | None:
         configured = await self._get_configured_channel(member.guild)
@@ -152,10 +172,29 @@ class Welcome(commands.Cog):
         )
 
     @app_commands.command(
-        name="welcome_channel_reset",
-        description="ウェルカム送信先の設定をリセットします。"
+        name="welcome_message",
+        description="ウェルカムメッセージを設定または確認します。"
     )
-    async def welcome_channel_reset(self, interaction: discord.Interaction):
+    @app_commands.describe(message="メッセージ。{mention}、{user}、{server} を使えます。")
+    async def welcome_message(
+        self,
+        interaction: discord.Interaction,
+        message: str | None = None,
+    ):
+        if message is None:
+            configured = await self._get_configured_message(interaction.guild)
+            if configured:
+                await interaction.response.send_message(
+                    f"✅ 現在のウェルカムメッセージ: ` {configured} `",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "ℹ️ 現在、ウェルカムメッセージは設定されていません。デフォルトのメッセージが使用されます。",
+                    ephemeral=True,
+                )
+            return
+
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(
                 "❌ このコマンドを使うにはサーバー管理権限が必要です。",
@@ -163,9 +202,34 @@ class Welcome(commands.Cog):
             )
             return
 
-        await db_set(self._welcome_channel_key(interaction.guild.id), "")
+        if len(message) > 200:
+            await interaction.response.send_message(
+                "❌ メッセージは200文字以内で設定してください。",
+                ephemeral=True,
+            )
+            return
+
+        await db_set(self._welcome_message_key(interaction.guild.id), message)
         await interaction.response.send_message(
-            "✅ ウェルカム送信先をリセットしました。system_channel または送信可能なチャンネルが使用されます。",
+            "✅ ウェルカムメッセージを設定しました。",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="welcome_message_reset",
+        description="ウェルカムメッセージをリセットします。"
+    )
+    async def welcome_message_reset(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "❌ このコマンドを使うにはサーバー管理権限が必要です。",
+                ephemeral=True,
+            )
+            return
+
+        await db_set(self._welcome_message_key(interaction.guild.id), "")
+        await interaction.response.send_message(
+            "✅ ウェルカムメッセージをリセットしました。デフォルトメッセージが使用されます。",
             ephemeral=True,
         )
 
@@ -177,13 +241,11 @@ class Welcome(commands.Cog):
             print(f"⚠️ Welcome: no sendable channel found for guild {member.guild.id}")
             return
 
-        card = await self.create_welcome_card(member)
+        message_template = await self._get_configured_message(member.guild)
+        message = self._format_welcome_message(member, message_template)
 
         try:
-            await channel.send(
-                content=f"{member.mention} さん、ようこそ！",
-                file=discord.File(card, "welcome.png")
-            )
+            await channel.send(content=message)
         except Exception as e:
             print(f"⚠️ Welcome send failed: {e}")
 
