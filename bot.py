@@ -68,8 +68,13 @@ async def on_ready():
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
         # Remove stale global and guild commands, then sync only the current guild.
+        print("🔄 Clearing global slash commands...", flush=True)
         await bot.tree.clear_commands()
+        await bot.tree.sync()
+        print("🔄 Clearing guild slash commands...", flush=True)
         await bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print("🔄 Registering current guild slash commands...", flush=True)
         synced = await bot.tree.sync(guild=guild)
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
