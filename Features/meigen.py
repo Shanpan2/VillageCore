@@ -219,7 +219,7 @@ class Meigen(commands.Cog):
                 lines.append(current)
             return lines
 
-        max_text_width = img.width - 120
+        max_text_width = img.width - 180
         font_size = 110
         font = get_truetype(font_size)
         lines = wrap_text(text, font, max_text_width)
@@ -245,31 +245,46 @@ class Meigen(commands.Cog):
             lines = wrapped
 
         line_heights = [draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in lines]
-        total_h = sum(line_heights) + max(0, len(lines) - 1) * 18
-        y = max(40, (img.height - total_h) // 2)
+        total_h = sum(line_heights) + max(0, len(lines) - 1) * 20
 
-        if total_h > 0:
-            max_w = max(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0] for line in lines)
-            pad_x, pad_y = 40, 30
-            box_x0 = (img.width - max_w) // 2 - pad_x
-            box_y0 = y - pad_y
-            box_x1 = (img.width + max_w) // 2 + pad_x
-            box_y1 = y + total_h + pad_y
-            box_x0 = max(18, box_x0)
-            box_y0 = max(18, box_y0)
-            box_x1 = min(img.width - 18, box_x1)
-            box_y1 = min(img.height - 18, box_y1)
-            draw.rounded_rectangle(
-                [box_x0, box_y0, box_x1, box_y1],
-                radius=24,
-                fill=(18, 22, 32, 230),
-            )
-            draw.rounded_rectangle(
-                [box_x0, box_y0, box_x1, box_y1],
-                radius=24,
-                outline=(255, 255, 255, 80),
-                width=2,
-            )
+        label_text = "迷言"
+        label_font = get_truetype(min(48, font_size + 4))
+        label_bbox = draw.textbbox((0, 0), label_text, font=label_font)
+        label_h = label_bbox[3] - label_bbox[1]
+        label_padding = 18
+        content_h = total_h + label_h + label_padding
+
+        pad_x, pad_y = 42, 32
+        max_w = max(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0] for line in lines)
+        min_box_width = min(img.width - 160, 760)
+        box_width = max(max_w + pad_x * 2, min_box_width)
+        box_x0 = (img.width - box_width) // 2
+        box_x1 = box_x0 + box_width
+        box_y0 = max(18, (img.height - content_h) // 2 - pad_y)
+        box_y1 = min(img.height - 18, box_y0 + content_h + pad_y)
+
+        draw.rounded_rectangle(
+            [box_x0, box_y0, box_x1, box_y1],
+            radius=24,
+            fill=(18, 22, 32, 230),
+        )
+        draw.rounded_rectangle(
+            [box_x0, box_y0, box_x1, box_y1],
+            radius=24,
+            outline=(255, 255, 255, 80),
+            width=2,
+        )
+
+        label_x = box_x0 + 28
+        label_y = box_y0 + 20
+        draw.text(
+            (label_x, label_y),
+            label_text,
+            font=label_font,
+            fill=(255, 255, 255, 255),
+        )
+
+        y = box_y0 + label_h + label_padding
 
         stroke_width = max(2, font_size // 16)
         for line, lh in zip(lines, line_heights):
@@ -283,7 +298,7 @@ class Meigen(commands.Cog):
                 stroke_width=stroke_width,
                 stroke_fill=(0, 0, 0, 220),
             )
-            y += lh + 18
+            y += lh + 20
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
