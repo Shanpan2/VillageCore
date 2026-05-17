@@ -1,28 +1,28 @@
 # VillageCore
 
-VillageCore is a multi-purpose Discord server management bot.
+VillageCore は、Discordサーバー運営向けの多機能Botです。
 
-It includes music playback, tickets, role panels, attendance tracking, polls, YouTube notifications, AI replies, mini games, search, server logs, diagnostics, and backup tools.
+音楽再生、チケット、役職パネル、出席管理、投票、YouTube通知、AI応答、ミニゲーム、検索、サーバーログ、診断、バックアップなどをまとめて扱えます。
 
-## Features
+English README: [README_EN.md](README_EN.md)
 
-- Music playback
-- AI mention/reply responses
-- Ticket creation, reopen, transcript export, archive channel, and channel deletion
-- Multi-role role panels
-- Attendance points and history
-- Polls
-- YouTube hashtag notifications with multiple keyword support
-- DuckDuckGo search command
-- Server logs
-- Bot diagnostics and permission checks
-- Backup export/import
-- Setup guide for new servers
-- UNO, Sevens, Othello, Janken, Omikuji, and Dice
+## 主な機能
 
-## Environment Variables
+- 音楽再生
+- メンション/リプライによるAI応答
+- チケット作成、再オープン、ログ保存、ログ送信先設定、チャンネル削除
+- 複数ロール対応の役職パネル
+- 出席ポイントと履歴管理
+- 投票
+- 複数ハッシュタグ対応のYouTube通知
+- DuckDuckGo検索
+- サーバーログ
+- Bot診断、権限チェック
+- バックアップ/復元
+- 初期設定ガイド
+- UNO、7並べ、オセロ、じゃんけん、おみくじ、ダイス
 
-Required:
+## 必要な環境変数
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
@@ -31,7 +31,7 @@ GEMINI_API_KEY=your_gemini_api_key
 YOUTUBE_API_KEY=your_youtube_data_api_key
 ```
 
-Optional:
+任意:
 
 ```env
 YOUTUBE_NOTIFY_CHANNEL_ID=channel_id
@@ -40,9 +40,9 @@ YOUTUBE_CHECK_INTERVAL_MINUTES=10
 PORT=8000
 ```
 
-## First Setup
+## 初期設定
 
-After starting the bot, run these commands in Discord:
+Bot起動後、Discordサーバー内で以下を実行してください。
 
 ```text
 /bot_status
@@ -55,25 +55,25 @@ After starting the bot, run these commands in Discord:
 /setup_guide
 ```
 
-## Backup
+## バックアップ
 
-Export all DB-backed settings and records:
+DBに保存している設定や記録をJSONで出力します。
 
 ```text
 /backup_export
 ```
 
-Restore from a backup JSON:
+バックアップJSONから復元します。
 
 ```text
 /backup_import
 ```
 
-Some restored settings are cached while the bot is running, so restart the bot after importing a backup.
+復元後、一部機能はBot再起動後に反映されます。
 
-## Security
+## 注意
 
-Do not publish these files:
+以下のファイルは公開しないでください。
 
 - `.env`
 - `cookies.txt`
@@ -81,15 +81,15 @@ Do not publish these files:
 - `attendance_backup.json`
 - `ticket_logs/`
 
-YouTube `cookies.txt` can contain private account data. Keep it out of public repositories.
+YouTubeの `cookies.txt` には個人アカウント情報が含まれる可能性があります。公開リポジトリには含めないでください。
 
-If secrets were ever committed or pushed, regenerate the affected tokens, API keys, and cookies.
+過去に秘密情報をコミットまたはpushした場合は、該当するトークン、APIキー、Cookieを再生成してください。
 
-## Run
+## 起動
 
 ```bash
 pip install -r requirements.txt
 python bot.py
 ```
 
-Docker deployment is supported with the included `Dockerfile`.
+Docker環境では同梱の `Dockerfile` を利用できます。
