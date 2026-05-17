@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 
 import discord
@@ -20,6 +21,9 @@ except ModuleNotFoundError:
 
 MENTION_RE = re.compile(r"<@!?\d+>")
 MAX_HISTORY_TURNS = 10
+DEFAULT_USER_COOLDOWN_SECONDS = 30
+DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
+DEFAULT_QUOTA_BACKOFF_SECONDS = 60
 
 
 def sanitize_error_text(text: str, api_key: str | None = None) -> str:
@@ -78,6 +82,11 @@ class AIChat(commands.Cog):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
+        self.user_cooldown_seconds = int(os.getenv("AI_USER_COOLDOWN_SECONDS", str(DEFAULT_USER_COOLDOWN_SECONDS)))
+        self.global_cooldown_seconds = int(os.getenv("AI_GLOBAL_COOLDOWN_SECONDS", str(DEFAULT_GLOBAL_COOLDOWN_SECONDS)))
+        self.quota_backoff_seconds = int(os.getenv("AI_QUOTA_BACKOFF_SECONDS", str(DEFAULT_QUOTA_BACKOFF_SECONDS)))
+        self.user_next_allowed: dict[tuple[int | str, int], float] = {}
+        self.global_next_allowed = 0.0
 
     async def cog_load(self):
         if not self.client:
@@ -95,6 +104,22 @@ class AIChat(commands.Cog):
 
     async def save_memory(self, guild_id: int | None, user_id: int, history: list[dict]):
         await db_set(memory_key(guild_id, user_id), json.dumps(history[-MAX_HISTORY_TURNS:], ensure_ascii=False))
+
+    def cooldown_remaining(self, guild_id: int | None, user_id: int) -> int:
+        now = time.monotonic()
+        scope = guild_id if guild_id is not None else "dm"
+        user_wait = self.user_next_allowed.get((scope, user_id), 0) - now
+        global_wait = self.global_next_allowed - now
+        return max(0, int(max(user_wait, global_wait) + 0.999))
+
+    def mark_cooldown(self, guild_id: int | None, user_id: int):
+        now = time.monotonic()
+        scope = guild_id if guild_id is not None else "dm"
+        self.user_next_allowed[(scope, user_id)] = now + self.user_cooldown_seconds
+        self.global_next_allowed = now + self.global_cooldown_seconds
+
+    def mark_quota_backoff(self):
+        self.global_next_allowed = max(self.global_next_allowed, time.monotonic() + self.quota_backoff_seconds)
 
     def build_prompt(self, message: discord.Message, question: str, history: list[dict]) -> str:
         display_name = getattr(message.author, "display_name", message.author.name)
@@ -157,9 +182,16 @@ class AIChat(commands.Cog):
             await message.reply("質問内容も一緒に送ってください。例: `@Bot 今日の予定を整理して`")
             return
 
+        guild_id = message.guild.id if message.guild else None
+        wait_seconds = self.cooldown_remaining(guild_id, message.author.id)
+        if wait_seconds > 0:
+            await message.reply(f"AI応答は少しクールダウン中です。あと {wait_seconds} 秒ほど待ってから試してください。")
+            return
+        self.mark_cooldown(guild_id, message.author.id)
+
         async with message.channel.typing():
             try:
-                history = await self.load_memory(message.guild.id if message.guild else None, message.author.id)
+                history = await self.load_memory(guild_id, message.author.id)
                 prompt = self.build_prompt(message, question, history)
                 reply = await asyncio.to_thread(self.generate_reply, prompt)
                 history.append(
@@ -169,10 +201,13 @@ class AIChat(commands.Cog):
                         "assistant": reply[:1500],
                     }
                 )
-                await self.save_memory(message.guild.id if message.guild else None, message.author.id, history)
+                await self.save_memory(guild_id, message.author.id, history)
             except Exception as e:
                 detail = sanitize_error_text(str(e), self.api_key)
                 print(f"[ai_chat error] {type(e).__name__}: {detail}", flush=True)
+                status = getattr(e, "code", None) or getattr(e, "status_code", None)
+                if status == 429:
+                    self.mark_quota_backoff()
                 await message.reply(f"AI応答中にエラーが発生しました: {type(e).__name__}\n{user_friendly_ai_error(e, self.api_key)}")
                 return
 
