@@ -48,6 +48,7 @@ async def load_cogs():
         "cogs.help",
         # Features/
         "Features.attendance",
+        "Features.daifugo",
         "Features.dice",
         "Features.google_search",
         "Features.omikuji",
