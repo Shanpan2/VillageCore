@@ -17,6 +17,7 @@ Japanese README: [README.md](README.md)
 - YouTube hashtag notifications with multiple keyword support
 - DuckDuckGo search command
 - Server logs
+- NG word moderation
 - Bot diagnostics and permission checks
 - Backup export/import
 - Birthday notifications
@@ -51,6 +52,7 @@ After starting the bot, run these commands in Discord:
 /bot_status
 /permission_check
 /server_log_channel
+/ng_word_add
 /ticket_log_channel
 /youtube_notify_channel
 /youtube_notify_keywords

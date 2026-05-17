@@ -41,6 +41,7 @@ async def load_cogs():
         "cogs.janken",
         "cogs.welcome",
         "cogs.music",
+        "cogs.ng_words",
         "cogs.ai_chat",
         "cogs.help",
         # Features/

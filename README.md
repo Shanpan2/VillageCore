@@ -17,6 +17,7 @@ English README: [README_EN.md](README_EN.md)
 - 複数ハッシュタグ対応のYouTube通知
 - DuckDuckGo検索
 - サーバーログ
+- NGワード管理
 - Bot診断、権限チェック
 - バックアップ/復元
 - 誕生日通知
@@ -49,6 +50,7 @@ Bot起動後、Discordサーバー内で以下を実行してください。
 /bot_status
 /permission_check
 /server_log_channel
+/ng_word_add
 /ticket_log_channel
 /youtube_notify_channel
 /youtube_notify_keywords

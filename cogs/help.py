@@ -17,6 +17,7 @@ CATEGORIES = {
             "backup",
             "birthday",
             "clean",
+            "ng_word",
             "permission_check",
             "role_panel",
             "server_log",
