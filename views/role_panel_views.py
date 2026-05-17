@@ -7,10 +7,49 @@ from database.config_db import db_get
 
 ROLE_PANEL_KEY_PREFIX = "role_panel:"
 ROLE_PANEL_SELECT_ID = "role_panel_select"
+LEGACY_ROLE_PANEL_BUTTON_ID = "role_toggle"
 
 
 def role_panel_key(message_id: int) -> str:
     return f"{ROLE_PANEL_KEY_PREFIX}{message_id}"
+
+
+async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list[int]):
+    if not interaction.guild or not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+        return
+
+    added = []
+    removed = []
+    failed = []
+
+    for role_id in selected_role_ids:
+        role = interaction.guild.get_role(role_id)
+        if role is None:
+            failed.append(f"不明なロール({role_id})")
+            continue
+
+        try:
+            if role in interaction.user.roles:
+                await interaction.user.remove_roles(role, reason="Role panel toggle")
+                removed.append(role.name)
+            else:
+                await interaction.user.add_roles(role, reason="Role panel toggle")
+                added.append(role.name)
+        except discord.Forbidden:
+            failed.append(f"{role.name}(権限不足)")
+        except discord.HTTPException:
+            failed.append(f"{role.name}(処理失敗)")
+
+    lines = []
+    if added:
+        lines.append("付与: " + ", ".join(added))
+    if removed:
+        lines.append("解除: " + ", ".join(removed))
+    if failed:
+        lines.append("失敗: " + ", ".join(failed))
+
+    await interaction.response.send_message("\n".join(lines) or "変更はありませんでした。", ephemeral=True)
 
 
 class RolePanelSelect(discord.ui.Select):
@@ -40,7 +79,7 @@ class RolePanelSelect(discord.ui.Select):
         raw = await db_get(role_panel_key(interaction.message.id))
         if not raw:
             await interaction.response.send_message(
-                "この役職パネルの設定が見つかりません。管理者に再設置してもらってください。",
+                "この役職パネルの設定が見つかりません。管理者に再設置または変換してもらってください。",
                 ephemeral=True,
             )
             return
@@ -52,40 +91,46 @@ class RolePanelSelect(discord.ui.Select):
             await interaction.response.send_message("有効なロールが選択されていません。", ephemeral=True)
             return
 
-        added = []
-        removed = []
-        failed = []
-
-        for role_id in selected_role_ids:
-            role = interaction.guild.get_role(role_id)
-            if role is None:
-                failed.append(f"不明なロール({role_id})")
-                continue
-
-            try:
-                if role in interaction.user.roles:
-                    await interaction.user.remove_roles(role, reason="Role panel toggle")
-                    removed.append(role.name)
-                else:
-                    await interaction.user.add_roles(role, reason="Role panel toggle")
-                    added.append(role.name)
-            except discord.Forbidden:
-                failed.append(f"{role.name}(権限不足)")
-            except discord.HTTPException:
-                failed.append(f"{role.name}(処理失敗)")
-
-        lines = []
-        if added:
-            lines.append("付与: " + ", ".join(added))
-        if removed:
-            lines.append("解除: " + ", ".join(removed))
-        if failed:
-            lines.append("失敗: " + ", ".join(failed))
-
-        await interaction.response.send_message("\n".join(lines) or "変更はありませんでした。", ephemeral=True)
+        await toggle_roles(interaction, selected_role_ids)
 
 
 class RolePanelView(discord.ui.View):
     def __init__(self, role_ids: list[int] | None = None, role_names: dict[int, str] | None = None):
         super().__init__(timeout=None)
         self.add_item(RolePanelSelect(role_ids, role_names))
+
+
+class LegacyRolePanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(LegacyRoleToggleButton())
+
+
+class LegacyRoleToggleButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="ロール付与 / 解除",
+            style=discord.ButtonStyle.primary,
+            custom_id=LEGACY_ROLE_PANEL_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        raw = await db_get(role_panel_key(interaction.message.id))
+        if not raw:
+            await interaction.response.send_message(
+                "この古い役職パネルはロール情報を復元できていません。"
+                "管理者に `/role_panel_migrate` で変換してもらってください。",
+                ephemeral=True,
+            )
+            return
+
+        data = json.loads(raw)
+        role_ids = [int(role_id) for role_id in data.get("role_ids", [])]
+        if len(role_ids) != 1:
+            await interaction.response.send_message(
+                "このパネルは複数ロール設定です。新しい選択メニューからロールを選んでください。",
+                ephemeral=True,
+            )
+            return
+
+        await toggle_roles(interaction, role_ids)
