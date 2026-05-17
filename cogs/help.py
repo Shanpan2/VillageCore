@@ -1,36 +1,140 @@
 import discord
-from discord.ext import commands
 from discord import app_commands
+from discord.ext import commands
+
+
+CATEGORIES = {
+    "music": {
+        "label": "音楽",
+        "emoji": "🎵",
+        "prefixes": ("music", "play", "pause", "resume", "skip", "stop", "queue", "nowplaying", "leave"),
+    },
+    "admin": {
+        "label": "管理",
+        "emoji": "🛠️",
+        "prefixes": ("clean", "role_panel", "ticket", "welcome", "youtube_notify"),
+    },
+    "attendance": {
+        "label": "出席管理",
+        "emoji": "📋",
+        "prefixes": ("attend",),
+    },
+    "games": {
+        "label": "ゲーム",
+        "emoji": "🎮",
+        "prefixes": ("janken", "dice", "omikuji", "othello", "uno", "sevens"),
+    },
+    "utility": {
+        "label": "便利機能",
+        "emoji": "🔎",
+        "prefixes": ("google_search", "reminder", "vote"),
+    },
+    "ai": {
+        "label": "AI",
+        "emoji": "🤖",
+        "prefixes": ("ai",),
+    },
+}
+
+
+def command_category(command: app_commands.Command) -> str:
+    for category, data in CATEGORIES.items():
+        if command.name.startswith(data["prefixes"]):
+            return category
+    return "utility"
+
+
+def build_category_embed(bot: commands.Bot, category: str) -> discord.Embed:
+    data = CATEGORIES[category]
+    commands_list = sorted(
+        [
+            command
+            for command in bot.tree.walk_commands()
+            if command.parent is None and command_category(command) == category
+        ],
+        key=lambda command: command.name,
+    )
+
+    embed = discord.Embed(
+        title=f"{data['emoji']} {data['label']}コマンド",
+        color=0x00BFFF,
+    )
+
+    if not commands_list:
+        embed.description = "このカテゴリのコマンドはありません。"
+        return embed
+
+    lines = []
+    for command in commands_list:
+        description = command.description or "説明なし"
+        lines.append(f"`/{command.name}`\n{description}")
+    embed.description = "\n\n".join(lines)[:4000]
+    embed.set_footer(text="メニューからカテゴリを切り替えられます。")
+    return embed
+
+
+def build_overview_embed(bot: commands.Bot) -> discord.Embed:
+    counts = {category: 0 for category in CATEGORIES}
+    for command in bot.tree.walk_commands():
+        if command.parent is None:
+            counts[command_category(command)] += 1
+
+    embed = discord.Embed(
+        title="📘 コマンドヘルプ",
+        description="カテゴリを選ぶと、その種類のコマンドだけ表示します。",
+        color=0x00BFFF,
+    )
+    for category, data in CATEGORIES.items():
+        embed.add_field(
+            name=f"{data['emoji']} {data['label']}",
+            value=f"{counts[category]}件",
+            inline=True,
+        )
+    return embed
+
+
+class HelpCategorySelect(discord.ui.Select):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        options = [
+            discord.SelectOption(
+                label=data["label"],
+                value=category,
+                emoji=data["emoji"],
+            )
+            for category, data in CATEGORIES.items()
+        ]
+        super().__init__(
+            placeholder="表示するカテゴリを選んでください",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            embed=build_category_embed(self.bot, self.values[0]),
+            view=HelpView(self.bot),
+        )
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, bot: commands.Bot):
+        super().__init__(timeout=180)
+        self.add_item(HelpCategorySelect(bot))
 
 
 class Help(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="help", description="利用可能なスラッシュコマンドを表示します")
+    @app_commands.command(name="help", description="コマンドをカテゴリ別に表示します")
     async def help(self, interaction: discord.Interaction):
-        commands_list = sorted(
-            [c for c in self.bot.tree.walk_commands() if c.parent is None],
-            key=lambda c: c.name,
+        await interaction.response.send_message(
+            embed=build_overview_embed(self.bot),
+            view=HelpView(self.bot),
+            ephemeral=True,
         )
-
-        lines = [f"/{command.name} — {command.description or '説明なし'}" for command in commands_list]
-        if not lines:
-            await interaction.response.send_message("❌ 表示するコマンドが見つかりませんでした。", ephemeral=True)
-            return
-
-        description = "\n".join(lines)
-        if len(description) > 1900:
-            description = "\n".join(lines[:30])
-            description += f"\n\n...他 {len(lines) - 30} 件"
-
-        embed = discord.Embed(
-            title="📘 コマンドヘルプ",
-            description=description,
-            color=0x00BFFF,
-        )
-        embed.set_footer(text="/ でコマンドを入力できます。よく使うものをまとめています。")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

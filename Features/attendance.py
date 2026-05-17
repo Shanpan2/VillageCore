@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-from database.config_db import db_get, db_set
+from pathlib import Path
+from database.config_db import DB_PATH, db_get, db_set
 import json
 
 
@@ -22,6 +23,8 @@ ATTEND_STATUSES = [
 ]
 
 DB_KEY = "attendance_data"
+LEGACY_ATTEND_PATH = Path("attend_data.json")
+ATTEND_BACKUP_PATH = Path(DB_PATH).with_name("attendance_backup.json")
 
 
 # ============================================================
@@ -66,11 +69,27 @@ async def load_attend() -> dict:
             return json.loads(raw)
         except Exception:
             pass
+
+    for path in (ATTEND_BACKUP_PATH, LEGACY_ATTEND_PATH):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            await save_attend(data)
+            return data
+        except Exception:
+            continue
+
     return {"members": {}, "notify_channel_id": None}
 
 
 async def save_attend(data: dict):
     await db_set(DB_KEY, json.dumps(data, ensure_ascii=False))
+    try:
+        ATTEND_BACKUP_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ATTEND_BACKUP_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[attendance backup error] {type(e).__name__}: {e}", flush=True)
 
 
 # ============================================================
