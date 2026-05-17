@@ -31,6 +31,10 @@ async def load_cogs():
         # cogs/
         "cogs.clean",
         "cogs.reminder",
+        "cogs.bot_status",
+        "cogs.permission_check",
+        "cogs.server_logs",
+        "cogs.setup_guide",
         "cogs.vote",
         "cogs.janken",
         "cogs.welcome",

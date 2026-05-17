@@ -6,9 +6,15 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
+from database.config_db import db_get
+
 
 TICKET_OWNER_PREFIX = "ticket_owner_id="
 TICKET_LOG_DIR = Path("ticket_logs")
+
+
+def ticket_log_channel_key(guild_id: int) -> str:
+    return f"ticket_log_channel:{guild_id}"
 
 
 def sanitize_channel_name(value: str) -> str:
@@ -81,6 +87,30 @@ async def create_ticket_log(channel: discord.TextChannel, closed_by: discord.abc
     path = TICKET_LOG_DIR / file_name
     path.write_text(text, encoding="utf-8")
     return discord.File(BytesIO(text.encode("utf-8")), filename=file_name), path
+
+
+def ticket_log_file_from_path(path: Path) -> discord.File:
+    return discord.File(BytesIO(path.read_bytes()), filename=path.name)
+
+
+async def send_ticket_log_to_archive(
+    guild: discord.Guild,
+    ticket_channel: discord.TextChannel,
+    closed_by: discord.abc.User,
+    log_path: Path | None,
+):
+    raw = await db_get(ticket_log_channel_key(guild.id))
+    if not raw or log_path is None or not log_path.exists():
+        return
+
+    archive_channel = guild.get_channel(int(raw))
+    if not isinstance(archive_channel, discord.TextChannel):
+        return
+
+    embed = discord.Embed(title="チケットログ", color=0x534AB7)
+    embed.add_field(name="チケット", value=f"#{ticket_channel.name} (`{ticket_channel.id}`)", inline=False)
+    embed.add_field(name="閉じた人", value=f"{closed_by.mention} (`{closed_by.id}`)", inline=False)
+    await archive_channel.send(embed=embed, file=ticket_log_file_from_path(log_path))
 
 
 class TicketButtonView(discord.ui.View):
@@ -230,6 +260,7 @@ class CloseTicketButton(discord.ui.Button):
             log_note = f"ログ保存先: `{log_path}`"
         except Exception as e:
             log_file = None
+            log_path = None
             log_note = f"ログ保存に失敗しました: `{type(e).__name__}: {e}`"
 
         owner = interaction.guild.get_member(owner_id) if owner_id else None
@@ -262,6 +293,7 @@ class CloseTicketButton(discord.ui.Button):
         )
         files = [log_file] if log_file else []
         await channel.send(embed=embed, view=ClosedTicketView(), files=files)
+        await send_ticket_log_to_archive(interaction.guild, channel, interaction.user, log_path)
         await interaction.followup.send("チケットを閉じました。", ephemeral=True)
 
 

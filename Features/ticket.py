@@ -2,7 +2,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+from database.config_db import db_set
 from views.ticket_views import TicketButtonView
+from views.ticket_views import ticket_log_channel_key
 
 
 class Ticket(commands.Cog):
@@ -28,6 +30,15 @@ class Ticket(commands.Cog):
         embed.set_footer(text="チケットの内容は管理者のみに共有されます。")
 
         await interaction.response.send_message(embed=embed, view=TicketButtonView(self.bot))
+
+    @app_commands.command(name="ticket_log_channel", description="【管理者】チケットログの送信先を現在のチャンネルに設定します")
+    @app_commands.default_permissions(manage_channels=True)
+    async def ticket_log_channel(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ticket_log_channel_key(interaction.guild_id), str(interaction.channel_id))
+        await interaction.response.send_message(f"チケットログ送信先を {interaction.channel.mention} に設定しました。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

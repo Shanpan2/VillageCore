@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 
@@ -25,12 +26,24 @@ def guild_channel_key(guild_id: int) -> str:
     return f"youtube_notify_channel_id:{guild_id}"
 
 
-def guild_keyword_key(guild_id: int) -> str:
-    return f"youtube_notify_keyword:{guild_id}"
+def guild_keywords_key(guild_id: int) -> str:
+    return f"youtube_notify_keywords:{guild_id}"
 
 
 def posted_key(guild_id: int, keyword: str) -> str:
     return f"youtube_posted_ids:{guild_id}:{keyword}"
+
+
+def parse_keywords(value: str) -> list[str]:
+    keywords = []
+    seen = set()
+    for part in value.replace("\n", ",").split(","):
+        keyword = part.strip()
+        if not keyword or keyword in seen:
+            continue
+        keywords.append(keyword)
+        seen.add(keyword)
+    return keywords[:10]
 
 
 def parse_youtube_time(value: str | None) -> datetime | None:
@@ -72,9 +85,16 @@ class YoutubeNotify(commands.Cog):
         if guild_id in self.settings:
             return self.settings[guild_id]
 
-        saved_keyword = await db_get(guild_keyword_key(guild_id)) or await db_get(LEGACY_KEYWORD_KEY)
-        keyword = saved_keyword or DEFAULT_CHECK_KEYWORD
-        await db_set(guild_keyword_key(guild_id), keyword)
+        raw_keywords = await db_get(guild_keywords_key(guild_id))
+        if raw_keywords:
+            try:
+                keywords = json.loads(raw_keywords)
+            except json.JSONDecodeError:
+                keywords = parse_keywords(raw_keywords)
+        else:
+            legacy_keyword = await db_get(LEGACY_KEYWORD_KEY)
+            keywords = [legacy_keyword or DEFAULT_CHECK_KEYWORD]
+            await db_set(guild_keywords_key(guild_id), json.dumps(keywords, ensure_ascii=False))
 
         saved_channel = await db_get(guild_channel_key(guild_id)) or await db_get(LEGACY_CHANNEL_KEY)
         channel_id = DEFAULT_NOTIFY_CHANNEL_ID
@@ -86,20 +106,24 @@ class YoutubeNotify(commands.Cog):
         if channel_id:
             await db_set(guild_channel_key(guild_id), str(channel_id))
 
-        saved_posted = await db_get(posted_key(guild_id, keyword)) or await db_get(LEGACY_POSTED_KEY)
-        posted_ids = {video_id for video_id in saved_posted.split(",") if video_id} if saved_posted else set()
+        posted_ids = {}
+        skip_first = {}
+        for keyword in keywords:
+            saved_posted = await db_get(posted_key(guild_id, keyword)) or await db_get(LEGACY_POSTED_KEY)
+            ids = {video_id for video_id in saved_posted.split(",") if video_id} if saved_posted else set()
+            posted_ids[keyword] = ids
+            skip_first[keyword] = not bool(ids)
 
         self.settings[guild_id] = {
             "channel_id": channel_id,
-            "keyword": keyword,
+            "keywords": keywords,
             "posted_ids": posted_ids,
-            "skip_existing_on_first_check": not bool(posted_ids),
+            "skip_first": skip_first,
         }
         return self.settings[guild_id]
 
     async def save_posted_ids(self, guild_id: int, keyword: str, posted_ids: set[str]):
-        trimmed = list(posted_ids)[-500:]
-        await db_set(posted_key(guild_id, keyword), ",".join(trimmed))
+        await db_set(posted_key(guild_id, keyword), ",".join(list(posted_ids)[-500:]))
 
     async def post_due_videos(self, guild_id: int | None = None) -> int:
         if not YOUTUBE_API_KEY:
@@ -127,11 +151,10 @@ class YoutubeNotify(commands.Cog):
             if not isinstance(channel, (discord.TextChannel, discord.Thread)):
                 continue
 
-            keyword = settings["keyword"]
-            if keyword not in search_cache:
-                search_cache[keyword] = await self.bot.loop.run_in_executor(None, self._search_videos, keyword)
-
-            posted_total += await self.post_videos_for_channel(guild.id, channel, keyword, search_cache[keyword])
+            for keyword in settings["keywords"]:
+                if keyword not in search_cache:
+                    search_cache[keyword] = await self.bot.loop.run_in_executor(None, self._search_videos, keyword)
+                posted_total += await self.post_videos_for_channel(guild.id, channel, keyword, search_cache[keyword])
 
         return posted_total
 
@@ -143,7 +166,8 @@ class YoutubeNotify(commands.Cog):
         videos: list[dict],
     ) -> int:
         settings = await self.get_settings(guild_id)
-        posted_ids: set[str] = settings["posted_ids"]
+        posted_ids: set[str] = settings["posted_ids"].setdefault(keyword, set())
+        settings["skip_first"].setdefault(keyword, not bool(posted_ids))
         now = datetime.now(timezone.utc)
         due_unposted = []
 
@@ -156,15 +180,12 @@ class YoutubeNotify(commands.Cog):
                 continue
             due_unposted.append(video)
 
-        if settings["skip_existing_on_first_check"]:
+        if settings["skip_first"][keyword]:
             for video in due_unposted:
                 posted_ids.add(video["id"])
-            settings["skip_existing_on_first_check"] = False
+            settings["skip_first"][keyword] = False
             await self.save_posted_ids(guild_id, keyword, posted_ids)
-            print(
-                f"[YoutubeNotify] Guild {guild_id}: marked {len(due_unposted)} existing videos as posted.",
-                flush=True,
-            )
+            print(f"[YoutubeNotify] Guild {guild_id}: marked {len(due_unposted)} existing videos for {keyword}.", flush=True)
             return 0
 
         posted_count = 0
@@ -179,9 +200,8 @@ class YoutubeNotify(commands.Cog):
             )
             if video["thumbnail"]:
                 embed.set_thumbnail(url=video["thumbnail"])
-            embed.set_footer(text=f"🎥 {video['channel']}")
-
-            await channel.send(content=f"🎬 **{keyword}** の動画が公開されました！", embed=embed)
+            embed.set_footer(text=f"動画投稿者: {video['channel']}")
+            await channel.send(content=f"**{keyword}** の動画が公開されました！", embed=embed)
             posted_ids.add(video_id)
             posted_count += 1
 
@@ -225,13 +245,12 @@ class YoutubeNotify(commands.Cog):
             description = snippet.get("description", "")
             if keyword not in title and keyword not in description:
                 continue
-
             live_details = item.get("liveStreamingDetails", {})
-            scheduled_at = parse_youtube_time(live_details.get("scheduledStartTime"))
-            actual_start = parse_youtube_time(live_details.get("actualStartTime"))
-            published_at = parse_youtube_time(snippet.get("publishedAt"))
-            post_at = actual_start or scheduled_at or published_at
-
+            post_at = (
+                parse_youtube_time(live_details.get("actualStartTime"))
+                or parse_youtube_time(live_details.get("scheduledStartTime"))
+                or parse_youtube_time(snippet.get("publishedAt"))
+            )
             results.append(
                 {
                     "id": item["id"],
@@ -242,7 +261,6 @@ class YoutubeNotify(commands.Cog):
                     "post_at": post_at,
                 }
             )
-
         return results
 
     @app_commands.command(name="youtube_check", description="【管理者】YouTube通知を今すぐチェックします")
@@ -258,37 +276,44 @@ class YoutubeNotify(commands.Cog):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
-
         settings = await self.get_settings(interaction.guild_id)
         settings["channel_id"] = interaction.channel_id
         await db_set(guild_channel_key(interaction.guild_id), str(interaction.channel_id))
-        await interaction.response.send_message(
-            f"YouTube通知先を {interaction.channel.mention} に記憶しました。",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"YouTube通知先を {interaction.channel.mention} に記憶しました。", ephemeral=True)
 
-    @app_commands.command(name="youtube_notify_keyword", description="YouTube通知で検索するハッシュタグを設定します")
+    @app_commands.command(name="youtube_notify_keyword", description="YouTube通知で検索するハッシュタグを1つ設定します")
     @app_commands.describe(keyword="例: #おちゃめ村")
     @app_commands.default_permissions(manage_guild=True)
     async def youtube_notify_keyword(self, interaction: discord.Interaction, keyword: str):
+        await self.set_keywords(interaction, [keyword.strip()])
+
+    @app_commands.command(name="youtube_notify_keywords", description="YouTube通知で検索するハッシュタグを複数設定します")
+    @app_commands.describe(keywords="例: #おちゃめ村,#告知,#切り抜き")
+    @app_commands.default_permissions(manage_guild=True)
+    async def youtube_notify_keywords(self, interaction: discord.Interaction, keywords: str):
+        await self.set_keywords(interaction, parse_keywords(keywords))
+
+    async def set_keywords(self, interaction: discord.Interaction, keywords: list[str]):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
-
-        keyword = keyword.strip()
-        if not keyword:
+        keywords = [keyword for keyword in keywords if keyword]
+        if not keywords:
             await interaction.response.send_message("キーワードを入力してください。", ephemeral=True)
             return
 
         settings = await self.get_settings(interaction.guild_id)
-        settings["keyword"] = keyword
-        settings["posted_ids"] = set()
-        settings["skip_existing_on_first_check"] = True
-        await db_set(guild_keyword_key(interaction.guild_id), keyword)
-        await db_set(posted_key(interaction.guild_id, keyword), "")
+        settings["keywords"] = keywords
+        settings["posted_ids"] = {keyword: set() for keyword in keywords}
+        settings["skip_first"] = {keyword: True for keyword in keywords}
+        await db_set(guild_keywords_key(interaction.guild_id), json.dumps(keywords, ensure_ascii=False))
+        for keyword in keywords:
+            await db_set(posted_key(interaction.guild_id, keyword), "")
+
         await interaction.response.send_message(
-            f"YouTube通知キーワードを **{keyword}** に記憶しました。\n"
-            "次回チェック時、既存動画は重複通知防止のため既読扱いになります。",
+            "YouTube通知キーワードを記憶しました。\n"
+            + "\n".join(f"- {keyword}" for keyword in keywords)
+            + "\n次回チェック時、既存動画は重複通知防止のため既読扱いになります。",
             ephemeral=True,
         )
 
@@ -297,14 +322,14 @@ class YoutubeNotify(commands.Cog):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
-
         settings = await self.get_settings(interaction.guild_id)
         channel = self.bot.get_channel(settings["channel_id"]) if settings["channel_id"] else None
         channel_text = channel.mention if isinstance(channel, discord.TextChannel) else "未設定"
+        posted_total = sum(len(ids) for ids in settings["posted_ids"].values())
         await interaction.response.send_message(
             f"通知先: {channel_text}\n"
-            f"検索キーワード: **{settings['keyword']}**\n"
-            f"記憶済み動画数: **{len(settings['posted_ids'])}**",
+            f"検索キーワード:\n" + "\n".join(f"- {keyword}" for keyword in settings["keywords"]) + "\n"
+            f"記憶済み動画数: **{posted_total}**",
             ephemeral=True,
         )
 

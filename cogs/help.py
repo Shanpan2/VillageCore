@@ -12,7 +12,17 @@ CATEGORIES = {
     "admin": {
         "label": "管理",
         "emoji": "🛠️",
-        "prefixes": ("clean", "role_panel", "ticket", "welcome", "youtube_notify"),
+        "prefixes": (
+            "bot_status",
+            "clean",
+            "permission_check",
+            "role_panel",
+            "server_log",
+            "setup_guide",
+            "ticket",
+            "welcome",
+            "youtube_notify",
+        ),
     },
     "attendance": {
         "label": "出席管理",
