@@ -14,7 +14,7 @@ class BotStatus(commands.Cog):
 
     @app_commands.command(name="bot_status", description="BotのAPI/DB/権限状態を診断します")
     @app_commands.default_permissions(administrator=True)
-    async def bot_status(self, interaction: discord.Interaction):
+    async def show_status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
         db_ok = False
