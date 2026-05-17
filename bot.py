@@ -67,7 +67,7 @@ def register_persistent_views():
     bot.add_view(TicketButtonView(bot))
     bot.add_view(TicketControlView())
     bot.add_view(ClosedTicketView())
-    bot.add_view(RolePanelView(0))
+    bot.add_view(RolePanelView())
 
 
 async def clear_global_commands():

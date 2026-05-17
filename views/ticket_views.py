@@ -1,10 +1,13 @@
 import re
+from io import BytesIO
+from pathlib import Path
 
 import discord
 from discord.ext import commands
 
 
 TICKET_OWNER_PREFIX = "ticket_owner_id="
+TICKET_LOG_DIR = Path("ticket_logs")
 
 
 def sanitize_channel_name(value: str) -> str:
@@ -40,6 +43,43 @@ async def get_or_create_ticket_category(guild: discord.Guild) -> discord.Categor
         return None
 
     return await guild.create_category("Tickets", reason="Ticket category setup")
+
+
+async def create_ticket_log(channel: discord.TextChannel, closed_by: discord.abc.User) -> tuple[discord.File, Path]:
+    lines = [
+        f"Ticket Log: #{channel.name}",
+        f"Guild: {channel.guild.name} ({channel.guild.id})",
+        f"Channel ID: {channel.id}",
+        f"Closed by: {closed_by} ({closed_by.id})",
+        "-" * 60,
+        "",
+    ]
+
+    async for message in channel.history(limit=None, oldest_first=True):
+        created_at = message.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        author = f"{message.author} ({message.author.id})"
+        content = message.content or ""
+        lines.append(f"[{created_at}] {author}")
+        if content:
+            lines.append(content)
+        for embed in message.embeds:
+            if embed.title:
+                lines.append(f"[Embed Title] {embed.title}")
+            if embed.description:
+                lines.append(f"[Embed Description] {embed.description}")
+            for field in embed.fields:
+                lines.append(f"[Embed Field] {field.name}: {field.value}")
+        for attachment in message.attachments:
+            lines.append(f"[Attachment] {attachment.filename}: {attachment.url}")
+        lines.append("")
+
+    text = "\n".join(lines)
+    safe_name = sanitize_channel_name(channel.name)
+    file_name = f"{safe_name}-{channel.id}.txt"
+    TICKET_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = TICKET_LOG_DIR / file_name
+    path.write_text(text, encoding="utf-8")
+    return discord.File(BytesIO(text.encode("utf-8")), filename=file_name), path
 
 
 class TicketButtonView(discord.ui.View):
@@ -82,13 +122,14 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("❌ サーバー内で実行してください。", ephemeral=True)
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
 
         me = guild.me
         if not me or not me.guild_permissions.manage_channels:
             await interaction.response.send_message(
-                "❌ Botにチャンネル管理権限がありません。", ephemeral=True
+                "Botにチャンネル管理権限がありません。",
+                ephemeral=True,
             )
             return
 
@@ -129,7 +170,7 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
         )
 
         embed = discord.Embed(
-            title="🎫 新しいチケット",
+            title="新しいチケット",
             description=self.description.value,
             color=0x534AB7,
         )
@@ -143,14 +184,15 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
             view=TicketControlView(),
         )
         await interaction.response.send_message(
-            f"✅ チケットを作成しました: {channel.mention}", ephemeral=True
+            f"チケットを作成しました: {channel.mention}",
+            ephemeral=True,
         )
 
 
 class TicketButton(discord.ui.Button):
     def __init__(self):
         super().__init__(
-            label="📩 チケットを作成",
+            label="チケットを作成",
             style=discord.ButtonStyle.primary,
             custom_id="ticket_button",
         )
@@ -170,14 +212,23 @@ class CloseTicketButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel) or not interaction.guild:
-            await interaction.response.send_message("❌ チケットチャンネルで実行してください。", ephemeral=True)
+            await interaction.response.send_message("チケットチャンネルで実行してください。", ephemeral=True)
             return
 
         owner_id = get_ticket_owner_id(channel)
         is_owner = owner_id == interaction.user.id
         if not is_owner and not is_ticket_admin(interaction.user):
-            await interaction.response.send_message("❌ このチケットを閉じる権限がありません。", ephemeral=True)
+            await interaction.response.send_message("このチケットを閉じる権限がありません。", ephemeral=True)
             return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            log_file, log_path = await create_ticket_log(channel, interaction.user)
+            log_note = f"ログ保存先: `{log_path}`"
+        except Exception as e:
+            log_file = None
+            log_note = f"ログ保存に失敗しました: `{type(e).__name__}: {e}`"
 
         owner = interaction.guild.get_member(owner_id) if owner_id else None
         if owner:
@@ -203,11 +254,13 @@ class CloseTicketButton(discord.ui.Button):
                 )
 
         embed = discord.Embed(
-            title="🔒 チケットを閉じました",
-            description="管理者は下のボタンから再オープンできます。",
+            title="チケットを閉じました",
+            description="管理者は下のボタンから再オープンできます。\n" + log_note,
             color=0xE67E22,
         )
-        await interaction.response.send_message(embed=embed, view=ClosedTicketView())
+        files = [log_file] if log_file else []
+        await channel.send(embed=embed, view=ClosedTicketView(), files=files)
+        await interaction.followup.send("チケットを閉じました。", ephemeral=True)
 
 
 class ReopenTicketButton(discord.ui.Button):
@@ -221,11 +274,11 @@ class ReopenTicketButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel) or not interaction.guild:
-            await interaction.response.send_message("❌ チケットチャンネルで実行してください。", ephemeral=True)
+            await interaction.response.send_message("チケットチャンネルで実行してください。", ephemeral=True)
             return
 
         if not is_ticket_admin(interaction.user):
-            await interaction.response.send_message("❌ 管理者のみ再オープンできます。", ephemeral=True)
+            await interaction.response.send_message("管理者のみ再オープンできます。", ephemeral=True)
             return
 
         owner_id = get_ticket_owner_id(channel)
@@ -254,7 +307,7 @@ class ReopenTicketButton(discord.ui.Button):
             )
 
         embed = discord.Embed(
-            title="🔓 チケットを再オープンしました",
+            title="チケットを再オープンしました",
             description="ユーザーが再びこのチャンネルを閲覧・送信できます。",
             color=0x2ECC71,
         )
