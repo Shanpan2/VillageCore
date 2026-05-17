@@ -29,6 +29,7 @@ PERSISTENT_VIEWS_REGISTERED = False
 async def load_cogs():
     cogs = [
         # cogs/
+        "cogs.backup",
         "cogs.clean",
         "cogs.reminder",
         "cogs.bot_status",

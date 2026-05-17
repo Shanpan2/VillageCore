@@ -14,6 +14,7 @@ CATEGORIES = {
         "emoji": "🛠️",
         "prefixes": (
             "bot_status",
+            "backup",
             "clean",
             "permission_check",
             "role_panel",

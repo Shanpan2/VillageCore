@@ -2,3 +2,11 @@ config.json
 *.json
 __pycache__/
 *.pyc
+.env
+.env.*
+cookies.txt
+*.sqlite
+*.db
+ticket_logs/
+sevens_board.png
+attendance_backup.json
