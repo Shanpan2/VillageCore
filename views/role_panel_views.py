@@ -14,11 +14,27 @@ def role_panel_key(message_id: int) -> str:
     return f"{ROLE_PANEL_KEY_PREFIX}{message_id}"
 
 
+async def get_fresh_member(interaction: discord.Interaction) -> discord.Member | None:
+    if not interaction.guild:
+        return None
+    try:
+        return await interaction.guild.fetch_member(interaction.user.id)
+    except discord.HTTPException:
+        member = interaction.guild.get_member(interaction.user.id)
+        return member if isinstance(member, discord.Member) else None
+
+
 async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list[int]):
-    if not interaction.guild or not isinstance(interaction.user, discord.Member):
+    if not interaction.guild:
         await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
         return
 
+    member = await get_fresh_member(interaction)
+    if member is None:
+        await interaction.response.send_message("メンバー情報を取得できませんでした。", ephemeral=True)
+        return
+
+    bot_member = interaction.guild.me
     added = []
     removed = []
     failed = []
@@ -29,12 +45,16 @@ async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list
             failed.append(f"不明なロール({role_id})")
             continue
 
+        if bot_member and role >= bot_member.top_role:
+            failed.append(f"{role.name}(Botのロール位置が低い)")
+            continue
+
         try:
-            if role in interaction.user.roles:
-                await interaction.user.remove_roles(role, reason="Role panel toggle")
+            if role in member.roles:
+                await member.remove_roles(role, reason="Role panel toggle")
                 removed.append(role.name)
             else:
-                await interaction.user.add_roles(role, reason="Role panel toggle")
+                await member.add_roles(role, reason="Role panel toggle")
                 added.append(role.name)
         except discord.Forbidden:
             failed.append(f"{role.name}(権限不足)")
@@ -72,10 +92,6 @@ class RolePanelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
-            return
-
         raw = await db_get(role_panel_key(interaction.message.id))
         if not raw:
             await interaction.response.send_message(
