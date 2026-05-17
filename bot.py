@@ -154,14 +154,14 @@ async def handle_dashboard(request: web.Request):
     if not DASHBOARD_TOKEN:
         return web.Response(
             text=(
-                "<h1>VillageCore Dashboard</h1>"
-                "<p>Dashboard is disabled. Set <code>DASHBOARD_TOKEN</code> to enable it.</p>"
+                "<h1>VillageCore ダッシュボード</h1>"
+                "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>"
             ),
             content_type="text/html",
         )
 
     if not dashboard_auth_ok(request):
-        return web.Response(status=401, text="Unauthorized")
+        return web.Response(status=401, text="認証に失敗しました")
 
     try:
         config = await db_get_all_config()
@@ -176,7 +176,7 @@ async def handle_dashboard(request: web.Request):
         for guild in bot.guilds
     )
     env_rows = "".join(
-        f"<tr><td>{name}</td><td>{'OK' if os.getenv(name) else 'Not set'}</td></tr>"
+        f"<tr><td>{name}</td><td>{'設定済み' if os.getenv(name) else '未設定'}</td></tr>"
         for name in ("DISCORD_TOKEN", "DATABASE_URL", "GEMINI_API_KEY", "YOUTUBE_API_KEY")
     )
 
@@ -186,7 +186,7 @@ async def handle_dashboard(request: web.Request):
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>VillageCore Dashboard</title>
+      <title>VillageCore ダッシュボード</title>
       <style>
         body {{ font-family: system-ui, sans-serif; margin: 32px; background: #f6f7f9; color: #20242a; }}
         main {{ max-width: 960px; margin: auto; }}
@@ -199,24 +199,24 @@ async def handle_dashboard(request: web.Request):
     </head>
     <body>
       <main>
-        <h1>VillageCore Dashboard</h1>
+        <h1>VillageCore ダッシュボード</h1>
         <section>
-          <h2>Status</h2>
-          <p>Bot: <span class="ok">{escape(str(bot.user)) if bot.user else "Starting"}</span></p>
-          <p>DB: {escape("PostgreSQL" if use_postgres() else "SQLite")} / {escape(db_status)}</p>
-          <p>Guilds: {len(bot.guilds)}</p>
-          <p>Slash commands: {command_count}</p>
-          <p>Stored config keys: {len(config)}</p>
+          <h2>状態</h2>
+          <p>Bot: <span class="ok">{escape(str(bot.user)) if bot.user else "起動中"}</span></p>
+          <p>データベース: {escape("PostgreSQL" if use_postgres() else "SQLite")} / {escape(db_status)}</p>
+          <p>参加サーバー数: {len(bot.guilds)}</p>
+          <p>スラッシュコマンド数: {command_count}</p>
+          <p>保存済み設定キー数: {len(config)}</p>
         </section>
         <section>
-          <h2>Environment</h2>
+          <h2>環境変数</h2>
           <table><tbody>{env_rows}</tbody></table>
         </section>
         <section>
-          <h2>Guilds</h2>
+          <h2>参加サーバー</h2>
           <table>
-            <thead><tr><th>Name</th><th>ID</th><th>Members</th></tr></thead>
-            <tbody>{guild_rows or "<tr><td colspan='3'>No guilds</td></tr>"}</tbody>
+            <thead><tr><th>サーバー名</th><th>ID</th><th>メンバー数</th></tr></thead>
+            <tbody>{guild_rows or "<tr><td colspan='3'>参加サーバーがありません</td></tr>"}</tbody>
           </table>
         </section>
       </main>
