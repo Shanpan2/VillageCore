@@ -40,7 +40,7 @@ CATEGORIES = {
     "utility": {
         "label": "便利機能",
         "emoji": "🔎",
-        "prefixes": ("google_search", "reminder", "vote"),
+        "prefixes": ("google_search", "quick", "reminder", "vote"),
     },
     "ai": {
         "label": "AI",

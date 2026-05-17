@@ -10,6 +10,7 @@ Japanese README: [README.md](README.md)
 
 - Music playback
 - AI mention/reply responses
+- Daily shortcut menu with `/quick`
 - Ticket creation, reopen, transcript export, archive channel, and channel deletion
 - Multi-role role panels
 - Attendance points and history

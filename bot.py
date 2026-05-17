@@ -37,6 +37,7 @@ async def load_cogs():
         "cogs.reminder",
         "cogs.bot_status",
         "cogs.permission_check",
+        "cogs.quick",
         "cogs.server_logs",
         "cogs.setup_guide",
         "cogs.vote",
