@@ -19,6 +19,7 @@ Japanese README: [README.md](README.md)
 - Server logs
 - Bot diagnostics and permission checks
 - Backup export/import
+- Birthday notifications
 - Setup guide for new servers
 - UNO, Sevens, Othello, Janken, Omikuji, and Dice
 
@@ -54,6 +55,7 @@ After starting the bot, run these commands in Discord:
 /youtube_notify_channel
 /youtube_notify_keywords
 /backup_export
+/birthday_channel
 /setup_guide
 ```
 

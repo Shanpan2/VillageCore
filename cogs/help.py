@@ -15,6 +15,7 @@ CATEGORIES = {
         "prefixes": (
             "bot_status",
             "backup",
+            "birthday",
             "clean",
             "permission_check",
             "role_panel",

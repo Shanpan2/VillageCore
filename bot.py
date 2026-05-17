@@ -30,6 +30,7 @@ async def load_cogs():
     cogs = [
         # cogs/
         "cogs.backup",
+        "cogs.birthday",
         "cogs.clean",
         "cogs.reminder",
         "cogs.bot_status",

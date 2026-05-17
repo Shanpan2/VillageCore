@@ -19,6 +19,7 @@ English README: [README_EN.md](README_EN.md)
 - サーバーログ
 - Bot診断、権限チェック
 - バックアップ/復元
+- 誕生日通知
 - 初期設定ガイド
 - UNO、7並べ、オセロ、じゃんけん、おみくじ、ダイス
 
@@ -52,6 +53,7 @@ Bot起動後、Discordサーバー内で以下を実行してください。
 /youtube_notify_channel
 /youtube_notify_keywords
 /backup_export
+/birthday_channel
 /setup_guide
 ```
 
