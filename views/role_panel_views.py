@@ -14,6 +14,13 @@ def role_panel_key(message_id: int) -> str:
     return f"{ROLE_PANEL_KEY_PREFIX}{message_id}"
 
 
+def panel_roles_from_data(data: dict) -> tuple[list[int], dict[int, str]]:
+    role_ids = [int(role_id) for role_id in data.get("role_ids", [])]
+    raw_names = data.get("role_names", {})
+    role_names = {int(role_id): name for role_id, name in raw_names.items()}
+    return role_ids, role_names
+
+
 async def get_fresh_member(interaction: discord.Interaction) -> discord.Member | None:
     if not interaction.guild:
         return None
@@ -24,15 +31,21 @@ async def get_fresh_member(interaction: discord.Interaction) -> discord.Member |
         return member if isinstance(member, discord.Member) else None
 
 
-async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list[int]):
+async def reset_role_panel_message(interaction: discord.Interaction, role_ids: list[int], role_names: dict[int, str]):
+    if interaction.message:
+        try:
+            await interaction.message.edit(view=RolePanelView(role_ids, role_names))
+        except discord.HTTPException:
+            pass
+
+
+async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list[int]) -> str:
     if not interaction.guild:
-        await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
-        return
+        return "サーバー内で実行してください。"
 
     member = await get_fresh_member(interaction)
     if member is None:
-        await interaction.response.send_message("メンバー情報を取得できませんでした。", ephemeral=True)
-        return
+        return "メンバー情報を取得できませんでした。"
 
     bot_member = interaction.guild.me
     added = []
@@ -69,7 +82,7 @@ async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list
     if failed:
         lines.append("失敗: " + ", ".join(failed))
 
-    await interaction.response.send_message("\n".join(lines) or "変更はありませんでした。", ephemeral=True)
+    return "\n".join(lines) or "変更はありませんでした。"
 
 
 class RolePanelSelect(discord.ui.Select):
@@ -101,13 +114,17 @@ class RolePanelSelect(discord.ui.Select):
             return
 
         data = json.loads(raw)
-        allowed_role_ids = {int(role_id) for role_id in data.get("role_ids", [])}
+        role_ids, role_names = panel_roles_from_data(data)
+        allowed_role_ids = set(role_ids)
         selected_role_ids = [int(value) for value in self.values if int(value) in allowed_role_ids]
         if not selected_role_ids:
             await interaction.response.send_message("有効なロールが選択されていません。", ephemeral=True)
+            await reset_role_panel_message(interaction, role_ids, role_names)
             return
 
-        await toggle_roles(interaction, selected_role_ids)
+        result = await toggle_roles(interaction, selected_role_ids)
+        await interaction.response.send_message(result, ephemeral=True)
+        await reset_role_panel_message(interaction, role_ids, role_names)
 
 
 class RolePanelView(discord.ui.View):
@@ -141,12 +158,14 @@ class LegacyRoleToggleButton(discord.ui.Button):
             return
 
         data = json.loads(raw)
-        role_ids = [int(role_id) for role_id in data.get("role_ids", [])]
+        role_ids, role_names = panel_roles_from_data(data)
         if len(role_ids) != 1:
             await interaction.response.send_message(
                 "このパネルは複数ロール設定です。新しい選択メニューからロールを選んでください。",
                 ephemeral=True,
             )
+            await reset_role_panel_message(interaction, role_ids, role_names)
             return
 
-        await toggle_roles(interaction, role_ids)
+        result = await toggle_roles(interaction, role_ids)
+        await interaction.response.send_message(result, ephemeral=True)
