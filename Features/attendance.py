@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
 from pathlib import Path
-from database.config_db import DB_PATH, db_get, db_set
+from database.config_db import DB_PATH, use_postgres, db_get, db_set
 import json
 
 
@@ -24,7 +24,7 @@ ATTEND_STATUSES = [
 
 DB_KEY = "attendance_data"
 LEGACY_ATTEND_PATH = Path("attend_data.json")
-ATTEND_BACKUP_PATH = Path(DB_PATH).with_name("attendance_backup.json")
+ATTEND_BACKUP_PATH = Path("/data/attendance_backup.json") if use_postgres() else Path(DB_PATH).with_name("attendance_backup.json")
 
 
 # ============================================================
