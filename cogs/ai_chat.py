@@ -22,6 +22,34 @@ MENTION_RE = re.compile(r"<@!?\d+>")
 MAX_HISTORY_TURNS = 10
 
 
+def sanitize_error_text(text: str, api_key: str | None = None) -> str:
+    if api_key:
+        text = text.replace(api_key, "***")
+    return text[:700]
+
+
+def user_friendly_ai_error(error: Exception, api_key: str | None = None) -> str:
+    detail = sanitize_error_text(str(error), api_key)
+    status = getattr(error, "code", None) or getattr(error, "status_code", None)
+
+    if status in (401, 403):
+        reason = "APIキー、Gemini APIの有効化、またはプロジェクト権限を確認してください。"
+    elif status == 404:
+        reason = "指定しているGeminiモデル名が使えない可能性があります。`GEMINI_MODEL` を確認してください。"
+    elif status == 429:
+        reason = "Gemini APIの利用制限、短時間の呼び出し過多、または無料枠上限の可能性があります。"
+    elif status and 400 <= int(status) < 500:
+        reason = "Gemini APIへのリクエスト内容、キー、モデル、利用制限のいずれかで拒否されています。"
+    elif status and int(status) >= 500:
+        reason = "Gemini API側の一時的な障害、または通信失敗の可能性があります。"
+    else:
+        reason = "Gemini APIへの接続または応答生成で失敗しています。Railwayログの詳細も確認してください。"
+
+    if detail:
+        return f"{reason}\n詳細: `{detail}`"
+    return reason
+
+
 def memory_key(guild_id: int | None, user_id: int) -> str:
     scope = guild_id if guild_id is not None else "dm"
     return f"ai_memory:{scope}:{user_id}"
@@ -143,8 +171,9 @@ class AIChat(commands.Cog):
                 )
                 await self.save_memory(message.guild.id if message.guild else None, message.author.id, history)
             except Exception as e:
-                print(f"[ai_chat error] {type(e).__name__}: {e}", flush=True)
-                await message.reply(f"AI応答中にエラーが発生しました: {type(e).__name__}")
+                detail = sanitize_error_text(str(e), self.api_key)
+                print(f"[ai_chat error] {type(e).__name__}: {detail}", flush=True)
+                await message.reply(f"AI応答中にエラーが発生しました: {type(e).__name__}\n{user_friendly_ai_error(e, self.api_key)}")
                 return
 
         chunks = split_discord_message(reply)
