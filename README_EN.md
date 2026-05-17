@@ -22,7 +22,7 @@ Japanese README: [README.md](README.md)
 - Backup export/import
 - Birthday notifications
 - Setup guide for new servers
-- UNO, Sevens, Daifugo, Othello, Janken, Omikuji, and Dice
+- UNO, Sevens, Daifugo, Poker, Othello, Janken, Omikuji, and Dice
 
 ## Environment Variables
 

@@ -53,6 +53,7 @@ async def load_cogs():
         "Features.google_search",
         "Features.omikuji",
         "Features.othello",
+        "Features.poker",
         "Features.role_panel",
         "Features.sevens",
         "Features.ticket",

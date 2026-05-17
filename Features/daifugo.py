@@ -1,4 +1,3 @@
-import itertools
 import random
 from io import BytesIO
 
@@ -9,9 +8,17 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 SUITS = ["S", "H", "D", "C"]
-SUIT_SYMBOLS = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
-RANKS = list(range(3, 15)) + [2]
+SUIT_SYMBOLS = {"S": "♠", "H": "♥", "D": "♦", "C": "♣", "J": "★"}
+RANKS = list(range(3, 15)) + [15]
 RANK_LABELS = {11: "J", 12: "Q", 13: "K", 14: "A", 15: "2", 16: "JOKER"}
+DEFAULT_RULES = {
+    "revolution": True,
+    "eight_cut": True,
+    "sequence": True,
+    "suit_lock": True,
+    "capital_fall": True,
+}
+
 daifugo_games: dict[str, dict] = {}
 
 
@@ -56,40 +63,122 @@ def decode_group(value: str, hand: list[dict]) -> list[dict]:
     return result
 
 
-def legal_groups(hand: list[dict], last_play: list[dict] | None) -> list[list[dict]]:
+def suit_key(cards: list[dict]) -> tuple[str, ...]:
+    return tuple(sorted(card["suit"] for card in cards))
+
+
+def beats(new_rank: int, old_rank: int, revolution: bool) -> bool:
+    if old_rank <= 0:
+        return True
+    if new_rank == 16:
+        return old_rank != 16
+    if old_rank == 16:
+        return False
+    return new_rank < old_rank if revolution else new_rank > old_rank
+
+
+def group_info(cards: list[dict]) -> dict | None:
+    if not cards:
+        return None
+    ranks = [card["rank"] for card in cards]
+    if len(cards) == 1:
+        return {"type": "single", "count": 1, "rank": ranks[0], "suits": suit_key(cards)}
+    if 16 not in ranks and len(set(ranks)) == 1:
+        return {"type": "set", "count": len(cards), "rank": ranks[0], "suits": suit_key(cards)}
+    if 16 in ranks:
+        return None
+    suits = {card["suit"] for card in cards}
+    ordered = sorted(ranks)
+    is_sequence = len(suits) == 1 and len(cards) >= 3 and ordered == list(range(ordered[0], ordered[0] + len(cards)))
+    if is_sequence:
+        return {"type": "sequence", "count": len(cards), "rank": ordered[-1], "suits": suit_key(cards)}
+    return None
+
+
+def can_play(group: list[dict], state: dict) -> bool:
+    info = group_info(group)
+    if not info:
+        return False
+    locked_suits = state.get("locked_suits")
+    if locked_suits and info["suits"] != tuple(locked_suits):
+        return False
+    last_info = state.get("last_info")
+    if not last_info:
+        return True
+    if info["type"] != last_info["type"] or info["count"] != last_info["count"]:
+        return False
+    return beats(info["rank"], last_info["rank"], state.get("revolution", False))
+
+
+def sequence_groups(hand: list[dict]) -> list[list[dict]]:
+    groups = []
+    for suit in SUITS:
+        cards = sorted((card for card in hand if card["suit"] == suit and card["rank"] != 16), key=card_sort_key)
+        by_rank = {card["rank"]: card for card in cards}
+        ranks = sorted(by_rank)
+        for start_index, start_rank in enumerate(ranks):
+            current = [by_rank[start_rank]]
+            previous = start_rank
+            for rank in ranks[start_index + 1:]:
+                if rank != previous + 1:
+                    break
+                current.append(by_rank[rank])
+                previous = rank
+                if len(current) >= 3:
+                    groups.append(current.copy())
+    return groups
+
+
+def legal_groups(hand: list[dict], state: dict) -> list[list[dict]]:
     sorted_hand = sorted(hand, key=card_sort_key)
     groups = []
-    required_count = len(last_play) if last_play else None
-    required_rank = max(card["rank"] for card in last_play) if last_play else 0
+
+    for card in sorted_hand:
+        groups.append([card])
 
     by_rank: dict[int, list[dict]] = {}
     for card in sorted_hand:
         by_rank.setdefault(card["rank"], []).append(card)
 
-    for card in sorted_hand:
-        if required_count in (None, 1) and card["rank"] > required_rank:
-            groups.append([card])
-
     for rank, cards in by_rank.items():
         if rank == 16:
             continue
         for count in (2, 3, 4):
-            if required_count not in (None, count):
-                continue
-            if len(cards) >= count and rank > required_rank:
+            if len(cards) >= count:
                 groups.append(cards[:count])
 
-    return groups[:25]
+    if state["rules"].get("sequence", True):
+        groups.extend(sequence_groups(sorted_hand))
+
+    return [group for group in groups if can_play(group, state)][:25]
 
 
 def active_players(state: dict) -> list[int]:
-    return [uid for uid in state["players"] if str(uid) not in state["finished"]]
+    removed = set(state["finished"]) | set(state.get("fallen", []))
+    return [uid for uid in state["players"] if str(uid) not in removed]
+
+
+def rules_text(state: dict) -> str:
+    labels = {
+        "revolution": "革命",
+        "eight_cut": "8切り",
+        "sequence": "階段",
+        "suit_lock": "しばり",
+        "capital_fall": "都落ち",
+    }
+    enabled = [label for key, label in labels.items() if state["rules"].get(key)]
+    return " / ".join(enabled) if enabled else "追加ルールなし"
 
 
 def status_text(state: dict, prefix: str = "") -> str:
     current = state["players"][state["turn_index"]]
     last_play = state.get("last_play")
     last_text = group_label(last_play) if last_play else "なし"
+    revolution_text = "革命中" if state.get("revolution") else "通常"
+    lock_text = ""
+    if state.get("locked_suits"):
+        lock_text = " / しばり: " + " ".join(SUIT_SYMBOLS.get(suit, suit) for suit in state["locked_suits"])
+
     lines = []
     if prefix:
         lines.append(prefix)
@@ -97,11 +186,14 @@ def status_text(state: dict, prefix: str = "") -> str:
         [
             "**大富豪**",
             f"現在のターン: <@{current}>",
-            f"場: {last_text}",
+            f"場: {last_text} ({revolution_text}{lock_text})",
+            f"ルール: {rules_text(state)}",
             "手札: " + " / ".join(f"<@{uid}> {len(state['hands'].get(str(uid), []))}枚" for uid in state["players"]),
             "上がり: " + (", ".join(f"<@{uid}>" for uid in state["finished"]) if state["finished"] else "なし"),
         ]
     )
+    if state.get("fallen"):
+        lines.append("都落ち: " + ", ".join(f"<@{uid}>" for uid in state["fallen"]))
     return "\n".join(lines)
 
 
@@ -140,7 +232,7 @@ def hand_file(member: discord.Member, hand: list[dict]) -> discord.File:
         card_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
 
-    draw.text((30, 22), "Daifugo hand", fill=(255, 255, 255), font=title_font)
+    draw.text((30, 22), f"{member.display_name} の手札", fill=(255, 255, 255), font=title_font)
     for index, card in enumerate(cards):
         x = 34 + (index % cols) * (card_w + gap)
         y = 72 + (index // cols) * (card_h + gap)
@@ -156,21 +248,45 @@ async def send_hand(member: discord.Member, hand: list[dict]):
     await member.send("あなたの大富豪の手札です。", file=hand_file(member, hand))
 
 
+def clear_field(state: dict):
+    state["last_play"] = None
+    state["last_info"] = None
+    state["last_player"] = None
+    state["passed"] = []
+    state["locked_suits"] = None
+
+
 async def advance_turn(state: dict):
     players = state["players"]
+    active = set(active_players(state))
     for _ in range(len(players)):
         state["turn_index"] = (state["turn_index"] + 1) % len(players)
-        if str(players[state["turn_index"]]) not in state["finished"]:
+        if players[state["turn_index"]] in active:
             return
+
+
+def apply_capital_fall(state: dict, winner_id: int) -> str:
+    if not state["rules"].get("capital_fall"):
+        return ""
+    previous = state.get("previous_daifugo_id")
+    if not previous or previous == winner_id:
+        return ""
+    if previous not in state["players"]:
+        return ""
+    if str(previous) in state["finished"] or str(previous) in state.get("fallen", []):
+        return ""
+    state.setdefault("fallen", []).append(str(previous))
+    return f"\n都落ち: 前回大富豪の <@{previous}> は最下位扱いになりました。"
 
 
 async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
     remaining = active_players(state)
     if len(remaining) > 1:
         return False
-    if remaining:
+    if remaining and str(remaining[0]) not in state["finished"]:
         state["finished"].append(str(remaining[0]))
-    ranking = "\n".join(f"{index + 1}. <@{uid}>" for index, uid in enumerate(state["finished"]))
+    ranking_order = state["finished"] + state.get("fallen", [])
+    ranking = "\n".join(f"{index + 1}. <@{uid}>" for index, uid in enumerate(ranking_order))
     daifugo_games.pop(str(interaction.channel_id), None)
     await interaction.response.edit_message(content=f"**大富豪終了**\n{ranking}", view=None)
     return True
@@ -195,7 +311,7 @@ class DaifugoPlayView(discord.ui.View):
         if not state:
             return
         hand = state["hands"].get(str(user_id), [])
-        groups = legal_groups(hand, state.get("last_play"))
+        groups = legal_groups(hand, state)
         if groups:
             self.add_item(DaifugoCardSelect(game_id, user_id, groups))
         self.add_item(DaifugoPassButton(game_id, user_id))
@@ -236,24 +352,48 @@ async def play_cards(interaction: discord.Interaction, game_id: str, user_id: in
 
     hand = state["hands"][str(user_id)]
     cards = decode_group(encoded, hand)
-    if not cards or encode_group(cards) not in [encode_group(group) for group in legal_groups(hand, state.get("last_play"))]:
+    legal_encoded = {encode_group(group) for group in legal_groups(hand, state)}
+    if not cards or encode_group(cards) not in legal_encoded:
         await interaction.response.send_message("そのカードは今出せません。", ephemeral=True)
         return
 
+    previous_info = state.get("last_info")
+    info = group_info(cards)
     for card in cards:
         hand.remove(card)
     state["hands"][str(user_id)] = hand
     state["last_play"] = cards
+    state["last_info"] = info
     state["last_player"] = user_id
     state["passed"] = []
 
+    prefix = f"<@{user_id}> が **{group_label(cards)}** を出しました。"
+    if state["rules"].get("suit_lock") and previous_info and info and info["suits"] == previous_info["suits"]:
+        state["locked_suits"] = info["suits"]
+        prefix += "\nしばりが発生しました。"
+
+    if state["rules"].get("revolution") and len(cards) >= 4:
+        state["revolution"] = not state.get("revolution", False)
+        prefix += "\n革命が発生しました。" if state["revolution"] else "\n革命が解除されました。"
+
+    eight_cut = state["rules"].get("eight_cut") and any(card["rank"] == 8 for card in cards)
+
     if not hand and str(user_id) not in state["finished"]:
         state["finished"].append(str(user_id))
+        prefix += apply_capital_fall(state, user_id)
         if await end_if_needed(interaction, state):
             return
 
-    await advance_turn(state)
-    await update_table(interaction, state, f"<@{user_id}> が **{group_label(cards)}** を出しました。")
+    if eight_cut:
+        clear_field(state)
+        prefix += "\n8切りで場が流れました。"
+        if user_id in active_players(state):
+            state["turn_index"] = state["players"].index(user_id)
+        else:
+            await advance_turn(state)
+    else:
+        await advance_turn(state)
+    await update_table(interaction, state, prefix)
 
 
 async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int):
@@ -264,7 +404,6 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
     if interaction.user.id != state["players"][state["turn_index"]] or interaction.user.id != user_id:
         await interaction.response.send_message("あなたのターンではありません。", ephemeral=True)
         return
-
     if not state.get("last_play"):
         await interaction.response.send_message("場が空なのでパスできません。", ephemeral=True)
         return
@@ -273,10 +412,10 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
     active = [uid for uid in active_players(state) if uid != state.get("last_player")]
     prefix = f"<@{user_id}> がパスしました。"
     if all(uid in state["passed"] for uid in active):
-        state["last_play"] = None
-        state["passed"] = []
-        if state.get("last_player") in active_players(state):
-            state["turn_index"] = state["players"].index(state["last_player"])
+        last_player = state.get("last_player")
+        clear_field(state)
+        if last_player in active_players(state):
+            state["turn_index"] = state["players"].index(last_player)
         prefix += "\n場が流れました。"
     else:
         await advance_turn(state)
@@ -288,20 +427,55 @@ class Daifugo(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="daifugo_start", description="大富豪ゲームを作成します")
-    async def daifugo_start(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        revolution="革命を有効にします",
+        eight_cut="8切りを有効にします",
+        sequence="階段を有効にします",
+        suit_lock="しばりを有効にします",
+        capital_fall="都落ちを有効にします",
+        previous_daifugo="都落ちで前回大富豪として扱うメンバー",
+    )
+    async def daifugo_start(
+        self,
+        interaction: discord.Interaction,
+        revolution: bool = True,
+        eight_cut: bool = True,
+        sequence: bool = True,
+        suit_lock: bool = True,
+        capital_fall: bool = True,
+        previous_daifugo: discord.Member | None = None,
+    ):
         game_id = str(interaction.channel_id)
+        rules = {
+            "revolution": revolution,
+            "eight_cut": eight_cut,
+            "sequence": sequence,
+            "suit_lock": suit_lock,
+            "capital_fall": capital_fall,
+        }
         daifugo_games[game_id] = {
             "players": [interaction.user.id],
             "hands": {},
             "turn_index": 0,
             "started": False,
             "last_play": None,
+            "last_info": None,
             "last_player": None,
             "passed": [],
             "finished": [],
+            "fallen": [],
+            "locked_suits": None,
+            "revolution": False,
+            "rules": rules,
+            "previous_daifugo_id": previous_daifugo.id if previous_daifugo else None,
         }
+        state = daifugo_games[game_id]
+        note = ""
+        if capital_fall and not previous_daifugo:
+            note = "\n都落ちは `previous_daifugo` を指定した場合に発動します。"
         await interaction.response.send_message(
             f"大富豪を作成しました。{interaction.user.mention} は自動参加しました。\n"
+            f"有効ルール: {rules_text(state)}{note}\n"
             "`/daifugo_join` で参加、`/daifugo_begin` で開始します。"
         )
 
@@ -337,13 +511,13 @@ class Daifugo(commands.Cog):
         await interaction.response.defer()
         deck = build_deck()
         random.shuffle(deck)
+        random.shuffle(state["players"])
         hands = {str(uid): [] for uid in state["players"]}
         for index, card in enumerate(deck):
             hands[str(state["players"][index % len(state["players"])])].append(card)
 
         state["hands"] = hands
         state["started"] = True
-        random.shuffle(state["players"])
 
         failed_dm = []
         for uid in state["players"]:

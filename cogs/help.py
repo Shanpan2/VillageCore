@@ -35,7 +35,7 @@ CATEGORIES = {
     "games": {
         "label": "ゲーム",
         "emoji": "🎮",
-        "prefixes": ("janken", "dice", "omikuji", "othello", "uno", "sevens", "daifugo"),
+        "prefixes": ("janken", "dice", "omikuji", "othello", "uno", "sevens", "daifugo", "poker"),
     },
     "utility": {
         "label": "便利機能",
