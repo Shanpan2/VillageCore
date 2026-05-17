@@ -1,3 +1,4 @@
+import asyncio
 import re
 from io import BytesIO
 from pathlib import Path
@@ -99,6 +100,7 @@ class ClosedTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ReopenTicketButton())
+        self.add_item(DeleteTicketChannelButton())
 
 
 class TicketModal(discord.ui.Modal, title="チケットを作成"):
@@ -312,3 +314,31 @@ class ReopenTicketButton(discord.ui.Button):
             color=0x2ECC71,
         )
         await interaction.response.send_message(embed=embed, view=TicketControlView())
+
+
+class DeleteTicketChannelButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="チャンネルを削除",
+            style=discord.ButtonStyle.danger,
+            custom_id="ticket_delete_channel",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel) or not interaction.guild:
+            await interaction.response.send_message("チケットチャンネルで実行してください。", ephemeral=True)
+            return
+
+        if not isinstance(interaction.user, discord.Member) or not is_ticket_admin(interaction.user):
+            await interaction.response.send_message("管理者のみチャンネルを削除できます。", ephemeral=True)
+            return
+
+        me = interaction.guild.me
+        if not me or not channel.permissions_for(me).manage_channels:
+            await interaction.response.send_message("Botにチャンネル管理権限がありません。", ephemeral=True)
+            return
+
+        await interaction.response.send_message("3秒後にこのチケットチャンネルを削除します。", ephemeral=True)
+        await asyncio.sleep(3)
+        await channel.delete(reason=f"Ticket channel deleted by {interaction.user}")
