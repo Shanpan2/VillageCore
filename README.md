@@ -40,6 +40,7 @@ YOUTUBE_NOTIFY_CHANNEL_ID=channel_id
 YOUTUBE_NOTIFY_KEYWORD=#おちゃめ村
 YOUTUBE_CHECK_INTERVAL_MINUTES=10
 PORT=8000
+DASHBOARD_TOKEN=your_dashboard_password
 ```
 
 ## 初期設定
@@ -74,6 +75,16 @@ DBに保存している設定や記録をJSONで出力します。
 ```
 
 復元後、一部機能はBot再起動後に反映されます。
+
+## Webダッシュボード
+
+`DASHBOARD_TOKEN` を設定すると、読み取り専用の簡易ダッシュボードを利用できます。
+
+```text
+https://your-app-url/dashboard?token=your_dashboard_password
+```
+
+Bot状態、DB状態、環境変数の有無、参加サーバー数、登録コマンド数を確認できます。
 
 ## 注意
 

@@ -42,6 +42,7 @@ YOUTUBE_NOTIFY_CHANNEL_ID=channel_id
 YOUTUBE_NOTIFY_KEYWORD=#your-hashtag
 YOUTUBE_CHECK_INTERVAL_MINUTES=10
 PORT=8000
+DASHBOARD_TOKEN=your_dashboard_password
 ```
 
 ## First Setup
@@ -76,6 +77,16 @@ Restore from a backup JSON:
 ```
 
 Some restored settings are cached while the bot is running, so restart the bot after importing a backup.
+
+## Web Dashboard
+
+Set `DASHBOARD_TOKEN` to enable the read-only web dashboard.
+
+```text
+https://your-app-url/dashboard?token=your_dashboard_password
+```
+
+It shows bot status, DB status, environment-variable presence, guild count, and slash-command count.
 
 ## Security
 

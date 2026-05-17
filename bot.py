@@ -3,10 +3,11 @@ import sys
 import discord
 from discord.ext import commands
 import asyncio
+from html import escape
 from aiohttp import web
 
 from bot_instance import bot
-from database.config_db import db_init
+from database.config_db import db_get_all_config, db_init, use_postgres
 
 try:
     from dotenv import load_dotenv
@@ -19,6 +20,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
 LEGACY_GUILD_ID = os.getenv("LEGACY_GUILD_ID", "1405716361933754408")
 PORT = int(os.getenv("PORT", "8000"))
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN")
 COMMANDS_SYNCED = False
 PERSISTENT_VIEWS_REGISTERED = False
 
@@ -144,9 +146,90 @@ async def handle_ping(request):
     return web.Response(text="OK")
 
 
+def dashboard_auth_ok(request: web.Request) -> bool:
+    return bool(DASHBOARD_TOKEN and request.query.get("token") == DASHBOARD_TOKEN)
+
+
+async def handle_dashboard(request: web.Request):
+    if not DASHBOARD_TOKEN:
+        return web.Response(
+            text=(
+                "<h1>VillageCore Dashboard</h1>"
+                "<p>Dashboard is disabled. Set <code>DASHBOARD_TOKEN</code> to enable it.</p>"
+            ),
+            content_type="text/html",
+        )
+
+    if not dashboard_auth_ok(request):
+        return web.Response(status=401, text="Unauthorized")
+
+    try:
+        config = await db_get_all_config()
+        db_status = "OK"
+    except Exception as e:
+        config = {}
+        db_status = f"NG: {type(e).__name__}"
+
+    command_count = len([c for c in bot.tree.walk_commands() if c.parent is None])
+    guild_rows = "".join(
+        f"<tr><td>{escape(guild.name)}</td><td>{guild.id}</td><td>{guild.member_count or '-'}</td></tr>"
+        for guild in bot.guilds
+    )
+    env_rows = "".join(
+        f"<tr><td>{name}</td><td>{'OK' if os.getenv(name) else 'Not set'}</td></tr>"
+        for name in ("DISCORD_TOKEN", "DATABASE_URL", "GEMINI_API_KEY", "YOUTUBE_API_KEY")
+    )
+
+    html = f"""
+    <!doctype html>
+    <html lang="ja">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>VillageCore Dashboard</title>
+      <style>
+        body {{ font-family: system-ui, sans-serif; margin: 32px; background: #f6f7f9; color: #20242a; }}
+        main {{ max-width: 960px; margin: auto; }}
+        section {{ background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; padding: 18px; margin: 16px 0; }}
+        h1, h2 {{ margin-top: 0; }}
+        table {{ width: 100%; border-collapse: collapse; }}
+        th, td {{ text-align: left; border-bottom: 1px solid #edf0f2; padding: 8px; }}
+        .ok {{ color: #16794c; font-weight: 700; }}
+      </style>
+    </head>
+    <body>
+      <main>
+        <h1>VillageCore Dashboard</h1>
+        <section>
+          <h2>Status</h2>
+          <p>Bot: <span class="ok">{escape(str(bot.user)) if bot.user else "Starting"}</span></p>
+          <p>DB: {escape("PostgreSQL" if use_postgres() else "SQLite")} / {escape(db_status)}</p>
+          <p>Guilds: {len(bot.guilds)}</p>
+          <p>Slash commands: {command_count}</p>
+          <p>Stored config keys: {len(config)}</p>
+        </section>
+        <section>
+          <h2>Environment</h2>
+          <table><tbody>{env_rows}</tbody></table>
+        </section>
+        <section>
+          <h2>Guilds</h2>
+          <table>
+            <thead><tr><th>Name</th><th>ID</th><th>Members</th></tr></thead>
+            <tbody>{guild_rows or "<tr><td colspan='3'>No guilds</td></tr>"}</tbody>
+          </table>
+        </section>
+      </main>
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type="text/html")
+
+
 async def start_health_server():
     app = web.Application()
     app.router.add_get("/", handle_ping)
+    app.router.add_get("/dashboard", handle_dashboard)
 
     runner = web.AppRunner(app)
     await runner.setup()
