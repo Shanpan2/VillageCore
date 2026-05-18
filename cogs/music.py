@@ -11,6 +11,7 @@ import yt_dlp
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
+MUSIC_OPUS_BITRATE = int(os.getenv("MUSIC_OPUS_BITRATE", "160"))
 
 
 class QuietYtdlpLogger:
@@ -55,6 +56,7 @@ YDL_OPTIONS = {
     },
 }
 YDL_PLAY_FORMATS = (
+    "251/140/bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
     "bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
     "251/250/249/140/bestaudio[abr>=128]/bestaudio",
     "best[acodec!=none][height<=720]/best[acodec!=none]",
@@ -240,9 +242,10 @@ class MusicPlayer:
                 raise RuntimeError("音声URLを取得できませんでした。")
 
             self.current_info = info
-            source = discord.PCMVolumeTransformer(
-                discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
-                volume=0.8,
+            source = discord.FFmpegOpusAudio(
+                audio_url,
+                bitrate=MUSIC_OPUS_BITRATE,
+                **FFMPEG_OPTIONS,
             )
         except Exception as e:
             if channel:
