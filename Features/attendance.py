@@ -354,14 +354,14 @@ class Attendance(commands.Cog):
         lines = ["**📊 出席ポイント一覧**\n"]
         for uid, entry in sorted_members:
             badge = get_badge(entry["pt"])
-            lines.append(f"{badge} <@{uid}> **{entry['name']}** : **{entry['pt']}pt**")
+            lines.append(f"{badge} <@{uid}>（**{entry['name']}**）: **{entry['pt']}pt**")
         await interaction.response.send_message("\n".join(lines))
 
     @app_commands.command(name="attend_warnings", description="警告対象のメンバーを表示します")
     async def attend_warnings(self, interaction: discord.Interaction):
         data = await load_attend()
         warnings = [
-            f"{get_badge(e['pt'])} <@{uid}> **{e['name']}** : **{e['pt']}pt**"
+            f"{get_badge(e['pt'])} <@{uid}>（**{e['name']}**）: **{e['pt']}pt**"
             for uid, e in sorted(data["members"].items(), key=lambda x: x[1]["pt"])
             if e["pt"] <= 4
         ]
@@ -376,7 +376,7 @@ class Attendance(commands.Cog):
         data = await load_attend()
         ch_id = data.get("notify_channel_id")
         warnings = [
-            f"{get_badge(e['pt'])} <@{uid}> **{e['name']}** : **{e['pt']}pt**"
+            f"{get_badge(e['pt'])} <@{uid}>（**{e['name']}**）: **{e['pt']}pt**"
             for uid, e in data["members"].items()
             if e["pt"] <= 4
         ]
