@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -33,6 +34,10 @@ def guild_keywords_key(guild_id: int) -> str:
 
 def posted_key(guild_id: int, keyword: str) -> str:
     return f"youtube_posted_ids:{guild_id}:{keyword}"
+
+
+def guild_posted_key(guild_id: int) -> str:
+    return f"youtube_posted_ids:{guild_id}:all"
 
 
 def parse_keywords(value: str) -> list[str]:
@@ -74,6 +79,7 @@ class YoutubeNotify(commands.Cog):
         self.settings: dict[int, dict] = {}
         self.quota_backoff_until: datetime | None = None
         self.last_backoff_log_at: datetime | None = None
+        self.check_lock = asyncio.Lock()
 
     async def cog_load(self):
         self.check_youtube.start()
@@ -116,24 +122,35 @@ class YoutubeNotify(commands.Cog):
 
         posted_ids = {}
         skip_first = {}
+        guild_posted_raw = await db_get(guild_posted_key(guild_id))
+        guild_posted_ids = {video_id for video_id in guild_posted_raw.split(",") if video_id} if guild_posted_raw else set()
         for keyword in keywords:
             saved_posted = await db_get(posted_key(guild_id, keyword)) or await db_get(LEGACY_POSTED_KEY)
             ids = {video_id for video_id in saved_posted.split(",") if video_id} if saved_posted else set()
             posted_ids[keyword] = ids
+            guild_posted_ids.update(ids)
             skip_first[keyword] = not bool(ids)
 
         self.settings[guild_id] = {
             "channel_id": channel_id,
             "keywords": keywords,
             "posted_ids": posted_ids,
+            "guild_posted_ids": guild_posted_ids,
             "skip_first": skip_first,
         }
         return self.settings[guild_id]
 
     async def save_posted_ids(self, guild_id: int, keyword: str, posted_ids: set[str]):
-        await db_set(posted_key(guild_id, keyword), ",".join(list(posted_ids)[-500:]))
+        await db_set(posted_key(guild_id, keyword), ",".join(sorted(posted_ids)[-500:]))
+
+    async def save_guild_posted_ids(self, guild_id: int, posted_ids: set[str]):
+        await db_set(guild_posted_key(guild_id), ",".join(sorted(posted_ids)[-1000:]))
 
     async def post_due_videos(self, guild_id: int | None = None) -> int:
+        async with self.check_lock:
+            return await self._post_due_videos_unlocked(guild_id)
+
+    async def _post_due_videos_unlocked(self, guild_id: int | None = None) -> int:
         if not YOUTUBE_API_KEY:
             print("[YoutubeNotify] YOUTUBE_API_KEY is not set.", flush=True)
             return 0
@@ -206,13 +223,14 @@ class YoutubeNotify(commands.Cog):
     ) -> int:
         settings = await self.get_settings(guild_id)
         posted_ids: set[str] = settings["posted_ids"].setdefault(keyword, set())
+        guild_posted_ids: set[str] = settings.setdefault("guild_posted_ids", set())
         settings["skip_first"].setdefault(keyword, not bool(posted_ids))
         now = datetime.now(timezone.utc)
         due_unposted = []
 
         for video in sorted(videos, key=lambda item: item["post_at"] or datetime.min.replace(tzinfo=timezone.utc)):
             video_id = video["id"]
-            if video_id in posted_ids:
+            if video_id in posted_ids or video_id in guild_posted_ids:
                 continue
             post_at = video["post_at"]
             if post_at and post_at > now:
@@ -222,14 +240,18 @@ class YoutubeNotify(commands.Cog):
         if settings["skip_first"][keyword]:
             for video in due_unposted:
                 posted_ids.add(video["id"])
+                guild_posted_ids.add(video["id"])
             settings["skip_first"][keyword] = False
             await self.save_posted_ids(guild_id, keyword, posted_ids)
+            await self.save_guild_posted_ids(guild_id, guild_posted_ids)
             print(f"[YoutubeNotify] Guild {guild_id}: marked {len(due_unposted)} existing videos for {keyword}.", flush=True)
             return 0
 
         posted_count = 0
         for video in due_unposted:
             video_id = video["id"]
+            if video_id in guild_posted_ids:
+                continue
             embed = discord.Embed(
                 title=video["title"],
                 url=f"https://www.youtube.com/watch?v={video_id}",
@@ -242,9 +264,11 @@ class YoutubeNotify(commands.Cog):
             embed.set_footer(text=f"動画投稿者: {video['channel']}")
             await channel.send(content=f"**{keyword}** の動画が公開されました！", embed=embed)
             posted_ids.add(video_id)
+            guild_posted_ids.add(video_id)
             posted_count += 1
 
         await self.save_posted_ids(guild_id, keyword, posted_ids)
+        await self.save_guild_posted_ids(guild_id, guild_posted_ids)
         return posted_count
 
     def _search_videos(self, keyword: str) -> list[dict]:
@@ -375,7 +399,7 @@ class YoutubeNotify(commands.Cog):
         settings = await self.get_settings(interaction.guild_id)
         channel = self.bot.get_channel(settings["channel_id"]) if settings["channel_id"] else None
         channel_text = channel.mention if isinstance(channel, discord.TextChannel) else "未設定"
-        posted_total = sum(len(ids) for ids in settings["posted_ids"].values())
+        posted_total = len(settings.get("guild_posted_ids", set()))
         await interaction.response.send_message(
             f"通知先: {channel_text}\n"
             f"検索キーワード:\n" + "\n".join(f"- {keyword}" for keyword in settings["keywords"]) + "\n"
