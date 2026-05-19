@@ -24,6 +24,7 @@ MAX_HISTORY_TURNS = 10
 DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
 DEFAULT_QUOTA_BACKOFF_SECONDS = 60
+DEFAULT_SERVER_BACKOFF_SECONDS = 60
 
 
 def sanitize_error_text(text: str, api_key: str | None = None) -> str:
@@ -85,6 +86,7 @@ class AIChat(commands.Cog):
         self.user_cooldown_seconds = int(os.getenv("AI_USER_COOLDOWN_SECONDS", str(DEFAULT_USER_COOLDOWN_SECONDS)))
         self.global_cooldown_seconds = int(os.getenv("AI_GLOBAL_COOLDOWN_SECONDS", str(DEFAULT_GLOBAL_COOLDOWN_SECONDS)))
         self.quota_backoff_seconds = int(os.getenv("AI_QUOTA_BACKOFF_SECONDS", str(DEFAULT_QUOTA_BACKOFF_SECONDS)))
+        self.server_backoff_seconds = int(os.getenv("AI_SERVER_BACKOFF_SECONDS", str(DEFAULT_SERVER_BACKOFF_SECONDS)))
         self.user_next_allowed: dict[tuple[int | str, int], float] = {}
         self.global_next_allowed = 0.0
 
@@ -120,6 +122,9 @@ class AIChat(commands.Cog):
 
     def mark_quota_backoff(self):
         self.global_next_allowed = max(self.global_next_allowed, time.monotonic() + self.quota_backoff_seconds)
+
+    def mark_server_backoff(self):
+        self.global_next_allowed = max(self.global_next_allowed, time.monotonic() + self.server_backoff_seconds)
 
     def build_prompt(self, message: discord.Message, question: str, history: list[dict]) -> str:
         display_name = getattr(message.author, "display_name", message.author.name)
@@ -208,6 +213,8 @@ class AIChat(commands.Cog):
                 status = getattr(e, "code", None) or getattr(e, "status_code", None)
                 if status == 429:
                     self.mark_quota_backoff()
+                elif status and int(status) >= 500:
+                    self.mark_server_backoff()
                 await message.reply(f"AI応答中にエラーが発生しました: {type(e).__name__}\n{user_friendly_ai_error(e, self.api_key)}")
                 return
 

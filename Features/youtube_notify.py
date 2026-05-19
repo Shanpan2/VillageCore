@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -16,6 +16,7 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 DEFAULT_NOTIFY_CHANNEL_ID = int(os.getenv("YOUTUBE_NOTIFY_CHANNEL_ID", "0") or "0")
 DEFAULT_CHECK_KEYWORD = os.getenv("YOUTUBE_NOTIFY_KEYWORD", "#おちゃめ村")
 CHECK_INTERVAL_MINUTES = int(os.getenv("YOUTUBE_CHECK_INTERVAL_MINUTES", "10"))
+YOUTUBE_QUOTA_BACKOFF_MINUTES = int(os.getenv("YOUTUBE_QUOTA_BACKOFF_MINUTES", "360"))
 
 LEGACY_CHANNEL_KEY = "youtube_notify_channel_id"
 LEGACY_KEYWORD_KEY = "youtube_notify_keyword"
@@ -62,10 +63,17 @@ def safe_error(error: Exception) -> str:
     return text
 
 
+def is_quota_error(error: Exception) -> bool:
+    text = str(error)
+    return "quotaExceeded" in text or "youtube.quota" in text or "exceeded your" in text
+
+
 class YoutubeNotify(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.settings: dict[int, dict] = {}
+        self.quota_backoff_until: datetime | None = None
+        self.last_backoff_log_at: datetime | None = None
 
     async def cog_load(self):
         self.check_youtube.start()
@@ -129,6 +137,9 @@ class YoutubeNotify(commands.Cog):
         if not YOUTUBE_API_KEY:
             print("[YoutubeNotify] YOUTUBE_API_KEY is not set.", flush=True)
             return 0
+        if self.is_in_quota_backoff():
+            self.log_quota_backoff_skip()
+            return 0
 
         guilds = [self.bot.get_guild(guild_id)] if guild_id else list(self.bot.guilds)
         guilds = [guild for guild in guilds if guild is not None]
@@ -157,6 +168,34 @@ class YoutubeNotify(commands.Cog):
                 posted_total += await self.post_videos_for_channel(guild.id, channel, keyword, search_cache[keyword])
 
         return posted_total
+
+    def is_in_quota_backoff(self) -> bool:
+        return bool(self.quota_backoff_until and datetime.now(timezone.utc) < self.quota_backoff_until)
+
+    def quota_backoff_remaining_minutes(self) -> int:
+        if not self.quota_backoff_until:
+            return 0
+        remaining = self.quota_backoff_until - datetime.now(timezone.utc)
+        return max(0, int(remaining.total_seconds() // 60) + 1)
+
+    def mark_quota_backoff(self):
+        self.quota_backoff_until = datetime.now(timezone.utc) + timedelta(minutes=YOUTUBE_QUOTA_BACKOFF_MINUTES)
+        print(
+            f"[YoutubeNotify] YouTube API quota exceeded. "
+            f"Skipping checks for {YOUTUBE_QUOTA_BACKOFF_MINUTES} minutes.",
+            flush=True,
+        )
+
+    def log_quota_backoff_skip(self):
+        now = datetime.now(timezone.utc)
+        if self.last_backoff_log_at and (now - self.last_backoff_log_at).total_seconds() < 1800:
+            return
+        self.last_backoff_log_at = now
+        print(
+            f"[YoutubeNotify] quota backoff active. "
+            f"Next check in about {self.quota_backoff_remaining_minutes()} minutes.",
+            flush=True,
+        )
 
     async def post_videos_for_channel(
         self,
@@ -218,6 +257,8 @@ class YoutubeNotify(commands.Cog):
             )
         except Exception as e:
             print(f"[YoutubeNotify] search API error: {safe_error(e)}", flush=True)
+            if is_quota_error(e):
+                self.mark_quota_backoff()
             return []
 
         video_ids = [
@@ -236,6 +277,8 @@ class YoutubeNotify(commands.Cog):
             )
         except Exception as e:
             print(f"[YoutubeNotify] videos API error: {safe_error(e)}", flush=True)
+            if is_quota_error(e):
+                self.mark_quota_backoff()
             return []
 
         results = []
@@ -267,6 +310,13 @@ class YoutubeNotify(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def youtube_check(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        if self.is_in_quota_backoff():
+            await interaction.followup.send(
+                f"YouTube APIのクォータ上限に達しているため、現在チェックを停止中です。"
+                f"約 {self.quota_backoff_remaining_minutes()} 分後に再開します。",
+                ephemeral=True,
+            )
+            return
         posted_count = await self.post_due_videos(interaction.guild_id)
         await interaction.followup.send(f"YouTubeチェックを実行しました。投稿件数: {posted_count}", ephemeral=True)
 
