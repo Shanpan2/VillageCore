@@ -7,6 +7,9 @@ import datetime
 from database.config_db import db_get, db_set
 
 
+JST = datetime.timezone(datetime.timedelta(hours=9))
+
+
 class Omikuji(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -18,7 +21,7 @@ class Omikuji(commands.Cog):
             return
         await interaction.response.defer()
 
-        today = datetime.date.today().isoformat()
+        today = datetime.datetime.now(JST).date().isoformat()
         key = f"omikuji_last_{interaction.guild.id}_{interaction.user.id}"
         last_draw = await db_get(key)
 

@@ -13,6 +13,9 @@ from Features.sevens import sevens_games
 from Features.uno import uno_games
 
 
+JST = datetime.timezone(datetime.timedelta(hours=9))
+
+
 def quick_embed() -> discord.Embed:
     embed = discord.Embed(
         title="クイックメニュー",
@@ -43,7 +46,7 @@ async def run_omikuji(interaction: discord.Interaction):
         return
     await interaction.response.defer(thinking=True)
 
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(JST).date().isoformat()
     key = f"omikuji_last_{interaction.guild.id}_{interaction.user.id}"
     last_draw = await db_get(key)
     if last_draw == today:
