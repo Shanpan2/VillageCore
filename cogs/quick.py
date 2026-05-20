@@ -41,12 +41,13 @@ async def run_omikuji(interaction: discord.Interaction):
     if not interaction.guild:
         await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
         return
+    await interaction.response.defer(thinking=True)
 
     today = datetime.date.today().isoformat()
     key = f"omikuji_last_{interaction.guild.id}_{interaction.user.id}"
     last_draw = await db_get(key)
     if last_draw == today:
-        await interaction.response.send_message("今日はすでにおみくじを引いています。また明日引いてください。", ephemeral=True)
+        await interaction.followup.send("今日はすでにおみくじを引いています。また明日引いてください。")
         return
 
     fortunes = [
@@ -61,7 +62,7 @@ async def run_omikuji(interaction: discord.Interaction):
     result, message = random.choice(fortunes)
     await db_set(key, today)
     embed = discord.Embed(title="おみくじ", description=f"**{result}**\n{message}", color=0xE67E22)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 def roll_dice_embed() -> discord.Embed:

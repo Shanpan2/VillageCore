@@ -13,15 +13,17 @@ class Omikuji(commands.Cog):
 
     @app_commands.command(name="omikuji", description="おみくじを引きます")
     async def omikuji(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await interaction.response.defer()
+
         today = datetime.date.today().isoformat()
         key = f"omikuji_last_{interaction.guild.id}_{interaction.user.id}"
         last_draw = await db_get(key)
 
         if last_draw == today:
-            await interaction.response.send_message(
-                "❌ 今日はすでにおみくじを引いています。明日になったらまた引いてください。",
-                ephemeral=True,
-            )
+            await interaction.edit_original_response(content="❌ 今日はすでにおみくじを引いています。明日になったらまた引いてください。")
             return
 
         fortunes = [
@@ -42,7 +44,7 @@ class Omikuji(commands.Cog):
             description=f"**{result}**\n{message}",
             color=0xE67E22,
         )
-        await interaction.response.send_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
 
 
 async def setup(bot: commands.Bot):
