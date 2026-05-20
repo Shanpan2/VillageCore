@@ -24,7 +24,7 @@ MAX_HISTORY_TURNS = 10
 DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
 DEFAULT_QUOTA_BACKOFF_SECONDS = 60
-DEFAULT_SERVER_BACKOFF_SECONDS = 60
+DEFAULT_SERVER_BACKOFF_SECONDS = 300
 
 
 def sanitize_error_text(text: str, api_key: str | None = None) -> str:
@@ -125,6 +125,7 @@ class AIChat(commands.Cog):
 
     def mark_server_backoff(self):
         self.global_next_allowed = max(self.global_next_allowed, time.monotonic() + self.server_backoff_seconds)
+        print(f"[ai_chat] Gemini server backoff active for {self.server_backoff_seconds} seconds.", flush=True)
 
     def build_prompt(self, message: discord.Message, question: str, history: list[dict]) -> str:
         display_name = getattr(message.author, "display_name", message.author.name)
@@ -159,7 +160,20 @@ class AIChat(commands.Cog):
             temperature=0.7,
             max_output_tokens=1000,
         )
-        response = self.client.models.generate_content(model=self.model, contents=prompt, config=config)
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = self.client.models.generate_content(model=self.model, contents=prompt, config=config)
+                break
+            except Exception as e:
+                last_error = e
+                status = getattr(e, "code", None) or getattr(e, "status_code", None)
+                if attempt == 0 and status and int(status) >= 500:
+                    time.sleep(2)
+                    continue
+                raise
+        else:
+            raise last_error
         return (getattr(response, "text", None) or "").strip() or "すみません、うまく回答を生成できませんでした。"
 
     @commands.Cog.listener()
