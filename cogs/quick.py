@@ -22,6 +22,36 @@ GAME_STORES = {
     "poker": ("ポーカー", poker_games),
 }
 
+GAME_BEGIN_COMMANDS = {
+    "uno": ("Uno", "uno_begin"),
+    "sevens": ("Sevens", "sevens_begin"),
+    "daifugo": ("Daifugo", "daifugo_begin"),
+    "poker": ("Poker", "poker_begin"),
+}
+
+GAME_RULES = {
+    "uno": (
+        "UNOは、場のカードと同じ色・数字・記号のカードを出していき、"
+        "先に手札をなくした人が勝ちです。出せない時は山札から引きます。"
+        "残り1枚になったらUNO宣言を忘れないようにしてください。"
+    ),
+    "sevens": (
+        "7並べは、各マークの7を中心に6、8、5、9のように順番につなげて出します。"
+        "出せない時はパスできます。手札を早くなくした人から順位が決まります。"
+    ),
+    "daifugo": (
+        "大富豪は、前の人より強いカード、または同じ枚数の組み合わせを出していき、"
+        "先に手札をなくした人が上がりです。革命、8切り、階段、しばり、都落ちなどは"
+        "募集時の設定で切り替えできます。"
+    ),
+    "poker": (
+        "ポーカーは5枚の手札がDMで届き、交換したいカードを選びます。"
+        "全員の交換が終わると役の強さで勝敗が決まります。"
+        "強い順はストレートフラッシュ、フォーカード、フルハウス、フラッシュ、"
+        "ストレート、スリーカード、ツーペア、ワンペア、ハイカードです。"
+    ),
+}
+
 
 def quick_embed() -> discord.Embed:
     embed = discord.Embed(
@@ -249,6 +279,128 @@ class GuideButton(discord.ui.Button):
         await interaction.response.send_message(self.text, ephemeral=True)
 
 
+def game_status_embed(game: str) -> discord.Embed:
+    label, store = GAME_STORES[game]
+    state = store.get("__none__")
+    embed = discord.Embed(title=f"{label} パネル", color=0x3498DB)
+    embed.description = "下のボタンから募集作成、参加、開始、中止、ルール確認ができます。"
+    return embed
+
+
+def join_game(interaction: discord.Interaction, game: str) -> str:
+    label, store = GAME_STORES[game]
+    state = store.get(str(interaction.channel_id))
+    if not state:
+        return f"このチャンネルに{label}の募集はありません。先に「募集作成」を押してください。"
+    if state.get("started") or state.get("hands"):
+        return f"{label}はすでに開始されています。"
+    if interaction.user.id in state["players"]:
+        return "すでに参加しています。"
+    if game == "poker" and len(state["players"]) >= 8:
+        return "ポーカーに参加できるのは最大8人までです。"
+    state["players"].append(interaction.user.id)
+    return f"{interaction.user.mention} が{label}に参加しました。現在の参加者: {len(state['players'])}人"
+
+
+def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]:
+    label, store = GAME_STORES[game]
+    state = store.get(str(interaction.channel_id))
+    if not state:
+        return False, f"このチャンネルに{label}の募集はありません。"
+
+    is_admin = interaction.user.guild_permissions.manage_guild
+    creator_id = state.get("creator_id") or (state.get("players") or [None])[0]
+    is_creator = interaction.user.id == creator_id
+    already_started = bool(state.get("started") or state.get("hands"))
+    if already_started and not is_admin:
+        return False, "開始済みのゲームを終了できるのは管理者だけです。"
+    if not is_creator and not is_admin:
+        return False, "募集を中止できるのは作成者または管理者です。"
+
+    store.pop(str(interaction.channel_id), None)
+    status = "強制終了" if already_started else "募集を中止"
+    return True, f"{label}を{status}しました。"
+
+
+async def begin_game(interaction: discord.Interaction, game: str):
+    cog_name, command_name = GAME_BEGIN_COMMANDS[game]
+    cog = interaction.client.get_cog(cog_name)
+    command = getattr(cog, command_name, None) if cog else None
+    if not command or not getattr(command, "callback", None):
+        await interaction.response.send_message("開始処理を呼び出せませんでした。個別の開始コマンドを使ってください。", ephemeral=True)
+        return
+    try:
+        await command.callback(cog, interaction)
+    except TypeError:
+        await command.callback(interaction)
+
+
+class GameActionButton(discord.ui.Button):
+    def __init__(self, label: str, game: str, action: str, style: discord.ButtonStyle, row: int):
+        super().__init__(label=label, style=style, row=row)
+        self.game = game
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction):
+        creators = {
+            "uno": create_uno_game,
+            "sevens": create_sevens_game,
+            "daifugo": create_daifugo_game,
+            "poker": create_poker_game,
+        }
+
+        if self.action == "create":
+            await interaction.response.send_message(creators[self.game](interaction))
+        elif self.action == "join":
+            await interaction.response.send_message(join_game(interaction, self.game))
+        elif self.action == "begin":
+            await begin_game(interaction, self.game)
+        elif self.action == "cancel":
+            _, text = cancel_game(interaction, self.game)
+            await interaction.response.send_message(text)
+        elif self.action == "rules":
+            label, _ = GAME_STORES[self.game]
+            embed = discord.Embed(title=f"{label} のルール", description=GAME_RULES[self.game], color=0xF1C40F)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class GameControlView(discord.ui.View):
+    def __init__(self, game: str):
+        super().__init__(timeout=180)
+        self.add_item(GameActionButton("募集作成", game, "create", discord.ButtonStyle.primary, 0))
+        self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
+        self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 0))
+        self.add_item(GameActionButton("中止", game, "cancel", discord.ButtonStyle.danger, 1))
+        self.add_item(GameActionButton("ルール", game, "rules", discord.ButtonStyle.secondary, 1))
+
+
+class GameSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="UNO", value="uno", description="色・数字・記号を合わせて手札をなくすゲーム"),
+            discord.SelectOption(label="7並べ", value="sevens", description="7を中心にカードを順番につなげるゲーム"),
+            discord.SelectOption(label="大富豪", value="daifugo", description="手札を早く出し切る定番トランプゲーム"),
+            discord.SelectOption(label="ポーカー", value="poker", description="5枚の役で勝負するトランプゲーム"),
+        ]
+        super().__init__(placeholder="遊ぶゲームを選んでください", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        game = self.values[0]
+        label, _ = GAME_STORES[game]
+        embed = discord.Embed(
+            title=f"{label} パネル",
+            description="募集作成、参加、開始、中止、ルール確認をボタンで操作できます。",
+            color=0x3498DB,
+        )
+        await interaction.response.send_message(embed=embed, view=GameControlView(game))
+
+
+class GameMenuView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        self.add_item(GameSelect())
+
+
 class QuickView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
@@ -272,6 +424,18 @@ class Quick(commands.Cog):
     @app_commands.command(name="quick", description="日頃よく使う機能をボタンで表示します")
     async def quick(self, interaction: discord.Interaction):
         await interaction.response.send_message(embed=quick_embed(), view=QuickView())
+
+    @app_commands.command(name="game", description="ゲームを選んでボタンで操作します")
+    async def game(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="ゲームパネル",
+            description=(
+                "遊びたいゲームを選んでください。\n"
+                "選択後に、募集作成・参加・開始・中止・ルール確認をボタンで操作できます。"
+            ),
+            color=0x2ECC71,
+        )
+        await interaction.response.send_message(embed=embed, view=GameMenuView())
 
     @app_commands.command(name="game_cancel", description="このチャンネルのゲーム募集を中止します")
     @app_commands.describe(game="中止するゲーム", reason="中止理由")

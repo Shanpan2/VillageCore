@@ -36,9 +36,8 @@ DEFAULT_DISABLED_EXTENSIONS = {
 
 def disabled_extensions() -> set[str]:
     raw = os.getenv("DISABLED_EXTENSIONS")
-    if raw is None:
-        return DEFAULT_DISABLED_EXTENSIONS
-    return {item.strip() for item in raw.split(",") if item.strip()}
+    extra = {item.strip() for item in raw.split(",") if item.strip()} if raw else set()
+    return DEFAULT_DISABLED_EXTENSIONS | extra
 
 
 # ==========================
@@ -359,6 +358,13 @@ async def handle_help_site(request):
         </section>
         <section id="games">
           <h2>ゲーム</h2>
+          <div class="notice">
+            <p><strong>おすすめの使い方</strong><br>
+              ゲームは <code>/game</code> から選ぶのがおすすめです。
+              UNO、7並べ、大富豪、ポーカーの募集作成、参加、開始、中止、ルール確認をボタンで操作できます。
+              今後は個別コマンドより <code>/game</code> をメイン導線にしていきます。
+            </p>
+          </div>
           <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
             <div class="tile"><strong>UNO</strong><code>/uno_start</code> で作成、参加者は <code>/uno_join</code>、準備できたら <code>/uno_begin</code> で開始します。</div>
