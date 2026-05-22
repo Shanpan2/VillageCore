@@ -28,9 +28,23 @@ DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.backup",
     "cogs.bot_status",
     "cogs.clean",
-    "cogs.janken",
     "cogs.permission_check",
     "cogs.setup_guide",
+}
+DEFAULT_HIDDEN_SLASH_COMMANDS = {
+    "uno_start",
+    "uno_join",
+    "uno_begin",
+    "sevens_start",
+    "sevens_join",
+    "sevens_begin",
+    "daifugo_start",
+    "daifugo_join",
+    "daifugo_begin",
+    "poker_start",
+    "poker_join",
+    "poker_begin",
+    "game_cancel",
 }
 
 
@@ -38,6 +52,17 @@ def disabled_extensions() -> set[str]:
     raw = os.getenv("DISABLED_EXTENSIONS")
     extra = {item.strip() for item in raw.split(",") if item.strip()} if raw else set()
     return DEFAULT_DISABLED_EXTENSIONS | extra
+
+
+def hidden_slash_commands() -> set[str]:
+    raw = os.getenv("HIDDEN_SLASH_COMMANDS")
+    extra = {item.strip() for item in raw.split(",") if item.strip()} if raw else set()
+    return DEFAULT_HIDDEN_SLASH_COMMANDS | extra
+
+
+def prune_hidden_slash_commands() -> None:
+    for name in hidden_slash_commands():
+        bot.tree.remove_command(name, guild=None)
 
 
 # ==========================
@@ -85,6 +110,7 @@ async def load_cogs():
             continue
         try:
             await bot.load_extension(cog)
+            prune_hidden_slash_commands()
             print(f"  ✅ loaded: {cog}")
         except Exception as e:
             print(f"  ⚠️  skipped: {cog} → {e}")
