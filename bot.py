@@ -152,21 +152,31 @@ async def handle_ping(request):
 
 
 def command_list(prefixes: tuple[str, ...]) -> str:
-    commands = sorted(
-        command
-        for command in bot.tree.walk_commands()
-        if command.parent is None and command.name.startswith(prefixes)
-    )
+    commands = []
+    try:
+        for command in bot.tree.walk_commands():
+            name = str(getattr(command, "name", ""))
+            parent = getattr(command, "parent", None)
+            if parent is None and name.startswith(prefixes):
+                commands.append(command)
+    except Exception as e:
+        print(f"[help site] command list failed: {type(e).__name__}: {e}", flush=True)
+        return "<p class='muted'>コマンド一覧を読み込めませんでした。Bot起動後にもう一度開いてください。</p>"
+    commands = sorted(commands, key=lambda command: str(getattr(command, "name", "")))
     if not commands:
         return "<p class='muted'>起動後にコマンド一覧が表示されます。</p>"
     return "<ul class='command-list'>" + "".join(
-        f"<li><code>/{escape(command.name)}</code><span>{escape(command.description or '')}</span></li>"
+        f"<li><code>/{escape(str(getattr(command, 'name', '')))}</code><span>{escape(str(getattr(command, 'description', '') or ''))}</span></li>"
         for command in commands
     ) + "</ul>"
 
 
 async def handle_help_site(request):
-    command_count = len([c for c in bot.tree.walk_commands() if c.parent is None])
+    try:
+        command_count = len([c for c in bot.tree.walk_commands() if getattr(c, "parent", None) is None])
+    except Exception as e:
+        print(f"[help site] command count failed: {type(e).__name__}: {e}", flush=True)
+        command_count = 0
     html = f"""
     <!doctype html>
     <html lang="ja">
