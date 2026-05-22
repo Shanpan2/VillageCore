@@ -7,12 +7,13 @@ CATEGORIES = {
     "music": {
         "label": "音楽",
         "emoji": "🎵",
-        "prefixes": ("music", "play", "pause", "resume", "skip", "stop", "queue", "nowplaying", "leave"),
+        "prefixes": ("music",),
     },
     "admin": {
         "label": "管理",
         "emoji": "🛠️",
         "prefixes": (
+            "admin",
             "bot_status",
             "backup",
             "birthday",
@@ -35,22 +36,23 @@ CATEGORIES = {
             "topic_channel",
             "ticket",
             "welcome",
+            "youtube",
             "youtube_notify",
         ),
     },
     "attendance": {
         "label": "出席管理",
         "emoji": "📋",
-        "prefixes": ("attend",),
+        "prefixes": ("attendance", "attend"),
     },
     "games": {
         "label": "ゲーム",
         "emoji": "🎮",
-        "prefixes": ("janken", "dice", "omikuji", "othello", "uno", "sevens", "daifugo", "poker"),
+        "prefixes": ("game", "janken", "dice", "omikuji", "othello", "uno", "sevens", "daifugo", "poker"),
     },
     "utility": {
         "label": "便利機能",
-        "emoji": "🔎",
+        "emoji": "📌",
         "prefixes": ("coin", "event", "faq", "google_search", "profile", "quick", "reminder", "report", "rule", "title", "topic", "vote"),
     },
     "ai": {
@@ -105,7 +107,7 @@ def build_overview_embed(bot: commands.Bot) -> discord.Embed:
 
     embed = discord.Embed(
         title="📘 コマンドヘルプ",
-        description="カテゴリを選ぶと、その種類のコマンドだけ表示します。",
+        description="カテゴリを選ぶと、その種類のコマンドだけ表示します。よく使う機能はパネル系コマンドにまとめています。",
         color=0x00BFFF,
     )
     for category, data in CATEGORIES.items():
