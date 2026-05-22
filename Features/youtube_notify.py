@@ -146,6 +146,10 @@ class YoutubeNotify(commands.Cog):
     async def save_guild_posted_ids(self, guild_id: int, posted_ids: set[str]):
         await db_set(guild_posted_key(guild_id), ",".join(sorted(posted_ids)[-1000:]))
 
+    async def load_guild_posted_ids(self, guild_id: int) -> set[str]:
+        raw = await db_get(guild_posted_key(guild_id))
+        return {video_id for video_id in raw.split(",") if video_id} if raw else set()
+
     async def post_due_videos(self, guild_id: int | None = None) -> int:
         async with self.check_lock:
             return await self._post_due_videos_unlocked(guild_id)
@@ -214,6 +218,19 @@ class YoutubeNotify(commands.Cog):
             flush=True,
         )
 
+    async def channel_already_has_video(self, channel: discord.TextChannel | discord.Thread, video_id: str) -> bool:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            async for message in channel.history(limit=100):
+                if video_id in (message.content or "") or video_url in (message.content or ""):
+                    return True
+                for embed in message.embeds:
+                    if video_id in (embed.url or ""):
+                        return True
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        return False
+
     async def post_videos_for_channel(
         self,
         guild_id: int,
@@ -250,8 +267,22 @@ class YoutubeNotify(commands.Cog):
         posted_count = 0
         for video in due_unposted:
             video_id = video["id"]
+            latest_guild_posted_ids = await self.load_guild_posted_ids(guild_id)
+            guild_posted_ids.update(latest_guild_posted_ids)
             if video_id in guild_posted_ids:
                 continue
+            if await self.channel_already_has_video(channel, video_id):
+                posted_ids.add(video_id)
+                guild_posted_ids.add(video_id)
+                await self.save_posted_ids(guild_id, keyword, posted_ids)
+                await self.save_guild_posted_ids(guild_id, guild_posted_ids)
+                continue
+
+            posted_ids.add(video_id)
+            guild_posted_ids.add(video_id)
+            await self.save_posted_ids(guild_id, keyword, posted_ids)
+            await self.save_guild_posted_ids(guild_id, guild_posted_ids)
+
             embed = discord.Embed(
                 title=video["title"],
                 url=f"https://www.youtube.com/watch?v={video_id}",
@@ -262,9 +293,10 @@ class YoutubeNotify(commands.Cog):
             if video["thumbnail"]:
                 embed.set_thumbnail(url=video["thumbnail"])
             embed.set_footer(text=f"動画投稿者: {video['channel']}")
-            await channel.send(content=f"**{keyword}** の動画が公開されました！", embed=embed)
-            posted_ids.add(video_id)
-            guild_posted_ids.add(video_id)
+            await channel.send(
+                content=f"**{keyword}** の動画が公開されました！\nhttps://www.youtube.com/watch?v={video_id}",
+                embed=embed,
+            )
             posted_count += 1
 
         await self.save_posted_ids(guild_id, keyword, posted_ids)
@@ -285,11 +317,14 @@ class YoutubeNotify(commands.Cog):
                 self.mark_quota_backoff()
             return []
 
-        video_ids = [
-            item.get("id", {}).get("videoId")
-            for item in search_response.get("items", [])
-            if item.get("id", {}).get("videoId")
-        ]
+        video_ids = []
+        seen_video_ids = set()
+        for item in search_response.get("items", []):
+            video_id = item.get("id", {}).get("videoId")
+            if not video_id or video_id in seen_video_ids:
+                continue
+            seen_video_ids.add(video_id)
+            video_ids.append(video_id)
         if not video_ids:
             return []
 

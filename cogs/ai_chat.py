@@ -83,6 +83,8 @@ class AIChat(commands.Cog):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
+        self.ai_bot_name = os.getenv("AI_BOT_NAME", "VillageCore")
+        self.ai_developer_name = os.getenv("AI_DEVELOPER_NAME", "")
         self.user_cooldown_seconds = int(os.getenv("AI_USER_COOLDOWN_SECONDS", str(DEFAULT_USER_COOLDOWN_SECONDS)))
         self.global_cooldown_seconds = int(os.getenv("AI_GLOBAL_COOLDOWN_SECONDS", str(DEFAULT_GLOBAL_COOLDOWN_SECONDS)))
         self.quota_backoff_seconds = int(os.getenv("AI_QUOTA_BACKOFF_SECONDS", str(DEFAULT_QUOTA_BACKOFF_SECONDS)))
@@ -140,8 +142,12 @@ class AIChat(commands.Cog):
                 history_lines.append(f"Assistant: {assistant_text}")
 
         history_text = "\n".join(history_lines) if history_lines else "No previous conversation."
+        bot_identity = self.ai_bot_name or getattr(self.bot.user, "display_name", "VillageCore")
+        developer_identity = self.ai_developer_name or "未設定"
         return (
             f"Discord server: {guild_name}\n"
+            f"Bot name: {bot_identity}\n"
+            f"Developer name: {developer_identity}\n"
             f"User: {display_name}\n\n"
             f"Recent conversation with this user:\n{history_text}\n\n"
             f"Current question:\n{question}"
@@ -154,6 +160,8 @@ class AIChat(commands.Cog):
         config = types.GenerateContentConfig(
             system_instruction=(
                 "あなたはDiscordサーバー内で動く親切な日本語アシスタントです。"
+                f"あなたのBot名は「{self.ai_bot_name}」です。"
+                f"{f'開発者名は「{self.ai_developer_name}」です。' if self.ai_developer_name else ''}"
                 "会話履歴を参考にしつつ、簡潔で自然に答えてください。"
                 "不確かなことは断定せず、確認が必要だと伝えてください。"
             ),
