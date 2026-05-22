@@ -34,6 +34,7 @@ async def load_cogs():
         "cogs.backup",
         "cogs.birthday",
         "cogs.clean",
+        "cogs.community",
         "cogs.reminder",
         "cogs.bot_status",
         "cogs.permission_check",
