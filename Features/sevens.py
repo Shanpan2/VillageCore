@@ -386,6 +386,7 @@ class Sevens(commands.Cog):
     async def sevens_start(self, interaction: discord.Interaction):
         game_id = str(interaction.channel_id)
         sevens_games[game_id] = {
+            "creator_id": interaction.user.id,
             "players": [interaction.user.id],
             "hands": {},
             "board": {suit: [7] for suit in SUITS},

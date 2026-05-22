@@ -349,7 +349,29 @@ async def handle_help_site(request):
             <div class="tile"><strong>募集</strong><code>/event_create</code> で参加/未定/不参加ボタン付き募集を作れます。中止は <code>/event_cancel</code> です。</div>
             <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲーム作成、おみくじ、1d100、じゃんけんを実行できます。</div>
           </div>
-          {command_list(("uno", "sevens", "daifugo", "poker", "othello", "janken", "omikuji", "dice"))}
+          <div class="notice">
+            <p><strong>ゲーム募集の中止</strong><br>
+              UNO、7並べ、大富豪、ポーカーの募集は <code>/game_cancel</code> で中止できます。
+              募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
+            </p>
+            <p><strong>UNOのルール</strong><br>
+              手札を先になくした人が勝ちです。場のカードと同じ色、同じ数字、同じ記号のカードを出せます。
+              出せない時は山札から引きます。残り1枚になったらUNO宣言を忘れないようにしてください。
+            </p>
+            <p><strong>7並べのルール</strong><br>
+              7を中心に、同じマークの6、8、5、9のように順番につなげて出します。
+              出せるカードがない時はパスできます。手札を早くなくした人から順位が決まります。
+            </p>
+            <p><strong>大富豪のルール</strong><br>
+              前の人より強いカード、または同じ枚数の組み合わせを出していきます。
+              先に手札をなくした人が上がりです。革命、8切り、階段、しばり、都落ちは <code>/daifugo_start</code> のオプションで切り替えできます。
+            </p>
+            <p><strong>ポーカーのルール</strong><br>
+              5枚の手札がDMで届きます。交換したいカードを選び、全員の交換が終わると役の強さで勝敗が決まります。
+              強い順は、ストレートフラッシュ、フォーカード、フルハウス、フラッシュ、ストレート、スリーカード、ツーペア、ワンペア、ハイカードです。
+            </p>
+          </div>
+          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "janken", "omikuji", "dice"))}
         </section>
         <section id="admin">
           <h2>管理者向け</h2>

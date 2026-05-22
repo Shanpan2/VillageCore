@@ -454,6 +454,7 @@ class Daifugo(commands.Cog):
             "capital_fall": capital_fall,
         }
         daifugo_games[game_id] = {
+            "creator_id": interaction.user.id,
             "players": [interaction.user.id],
             "hands": {},
             "turn_index": 0,

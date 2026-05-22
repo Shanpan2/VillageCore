@@ -15,6 +15,13 @@ from Features.uno import uno_games
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
+GAME_STORES = {
+    "uno": ("UNO", uno_games),
+    "sevens": ("7並べ", sevens_games),
+    "daifugo": ("大富豪", daifugo_games),
+    "poker": ("ポーカー", poker_games),
+}
+
 
 def quick_embed() -> discord.Embed:
     embed = discord.Embed(
@@ -90,6 +97,7 @@ def create_uno_game(interaction: discord.Interaction) -> str:
     if game_id in uno_games:
         return "このチャンネルにはすでにUNOがあります。"
     uno_games[game_id] = {
+        "creator_id": interaction.user.id,
         "players": [interaction.user.id],
         "hands": {},
         "deck": [],
@@ -108,6 +116,7 @@ def create_sevens_game(interaction: discord.Interaction) -> str:
     if game_id in sevens_games:
         return "このチャンネルにはすでに7並べがあります。"
     sevens_games[game_id] = {
+        "creator_id": interaction.user.id,
         "players": [interaction.user.id],
         "hands": {},
         "board": {suit: [7] for suit in SEVENS_SUITS},
@@ -125,6 +134,7 @@ def create_daifugo_game(interaction: discord.Interaction) -> str:
         return "このチャンネルにはすでに大富豪があります。"
     rules = DEFAULT_RULES.copy()
     daifugo_games[game_id] = {
+        "creator_id": interaction.user.id,
         "players": [interaction.user.id],
         "hands": {},
         "turn_index": 0,
@@ -153,6 +163,7 @@ def create_poker_game(interaction: discord.Interaction) -> str:
     if game_id in poker_games:
         return "このチャンネルにはすでにポーカーがあります。"
     poker_games[game_id] = {
+        "creator_id": interaction.user.id,
         "players": [interaction.user.id],
         "hands": {},
         "deck": [],
@@ -261,6 +272,50 @@ class Quick(commands.Cog):
     @app_commands.command(name="quick", description="日頃よく使う機能をボタンで表示します")
     async def quick(self, interaction: discord.Interaction):
         await interaction.response.send_message(embed=quick_embed(), view=QuickView())
+
+    @app_commands.command(name="game_cancel", description="このチャンネルのゲーム募集を中止します")
+    @app_commands.describe(game="中止するゲーム", reason="中止理由")
+    @app_commands.choices(
+        game=[
+            app_commands.Choice(name="UNO", value="uno"),
+            app_commands.Choice(name="7並べ", value="sevens"),
+            app_commands.Choice(name="大富豪", value="daifugo"),
+            app_commands.Choice(name="ポーカー", value="poker"),
+        ]
+    )
+    async def game_cancel(
+        self,
+        interaction: discord.Interaction,
+        game: app_commands.Choice[str],
+        reason: str = "",
+    ):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+
+        label, store = GAME_STORES[game.value]
+        game_id = str(interaction.channel_id)
+        state = store.get(game_id)
+        if not state:
+            await interaction.response.send_message(f"このチャンネルに{label}の募集はありません。", ephemeral=True)
+            return
+
+        is_admin = interaction.user.guild_permissions.manage_guild
+        creator_id = state.get("creator_id") or (state.get("players") or [None])[0]
+        is_creator = interaction.user.id == creator_id
+        already_started = bool(state.get("started") or state.get("hands"))
+
+        if already_started and not is_admin:
+            await interaction.response.send_message("開始済みのゲームを終了できるのは管理者だけです。", ephemeral=True)
+            return
+        if not is_creator and not is_admin:
+            await interaction.response.send_message("募集を中止できるのは作成者または管理者です。", ephemeral=True)
+            return
+
+        store.pop(game_id, None)
+        suffix = f"\n理由: {reason[:500]}" if reason else ""
+        status = "強制終了" if already_started else "募集を中止"
+        await interaction.response.send_message(f"{label}を{status}しました。{suffix}")
 
 
 async def setup(bot: commands.Bot):

@@ -30,6 +30,7 @@ class Uno(commands.Cog):
         game_id = str(interaction.channel_id)
 
         uno_games[game_id] = {
+            "creator_id": interaction.user.id,
             "players": [interaction.user.id],
             "hands": {},
             "deck": [],

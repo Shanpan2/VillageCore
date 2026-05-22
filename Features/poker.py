@@ -280,6 +280,7 @@ class Poker(commands.Cog):
     async def poker_start(self, interaction: discord.Interaction):
         game_id = str(interaction.channel_id)
         poker_games[game_id] = {
+            "creator_id": interaction.user.id,
             "players": [interaction.user.id],
             "hands": {},
             "deck": [],
