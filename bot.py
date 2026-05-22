@@ -45,6 +45,39 @@ DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "poker_join",
     "poker_begin",
     "game_cancel",
+    "join",
+    "leave",
+    "play",
+    "skip",
+    "stop",
+    "pause",
+    "resume",
+    "queue",
+    "nowplaying",
+    "loop",
+    "shuffle",
+    "remove",
+    "youtube_check",
+    "youtube_notify_channel",
+    "youtube_notify_keyword",
+    "youtube_notify_keywords",
+    "youtube_notify_status",
+    "attend_set_channel",
+    "attend_add_members_bulk",
+    "attend_record",
+    "attend_record_all",
+    "attend_status",
+    "attend_warnings",
+    "attend_notify",
+    "settings_status",
+    "setup_wizard",
+    "error_log_channel",
+    "command_log_channel",
+    "permission_audit",
+    "maintenance_on",
+    "maintenance_off",
+    "maintenance_status",
+    "data_cleanup",
 }
 
 
@@ -102,6 +135,7 @@ async def load_cogs():
         "Features.ticket",
         "Features.uno",
         "Features.youtube_notify",
+        "cogs.panels",
     ]
     disabled = disabled_extensions()
     for cog in cogs:
@@ -377,7 +411,7 @@ async def handle_help_site(request):
           <h2>日常で使う機能</h2>
           <div class="grid">
             <div class="tile"><strong>AI応答</strong>Botにメンション、またはBotの返信にリプライするとAIが答えます。</div>
-            <div class="tile"><strong>音楽</strong><code>/play</code> でYouTube音楽をVC再生できます。</div>
+            <div class="tile"><strong>音楽</strong><code>/music</code> で音楽パネルを開き、再生、停止、スキップ、キュー確認をボタンで操作できます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
             <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、称号はプロフィールに表示されます。</div>
           </div>
@@ -393,16 +427,17 @@ async def handle_help_site(request):
           </div>
           <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
-            <div class="tile"><strong>UNO</strong><code>/uno_start</code> で作成、参加者は <code>/uno_join</code>、準備できたら <code>/uno_begin</code> で開始します。</div>
-            <div class="tile"><strong>7並べ</strong><code>/sevens_start</code>、<code>/sevens_join</code>、<code>/sevens_begin</code> の順で進めます。手札はDM画像で届きます。</div>
-            <div class="tile"><strong>大富豪</strong><code>/daifugo_start</code> でルールを選び、<code>/daifugo_begin</code> で開始します。革命や8切りも設定できます。</div>
-            <div class="tile"><strong>ポーカー</strong><code>/poker_start</code> で募集、<code>/poker_begin</code> 後にDM手札を見て交換します。</div>
+            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカーを選べます。募集作成、参加、開始、中止、ルール確認をボタンで操作できます。</div>
+            <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。場のカードと同じ色、数字、記号を出して、先に手札をなくした人が勝ちです。</div>
+            <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届きます。</div>
+            <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。</div>
+            <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。</div>
             <div class="tile"><strong>募集</strong><code>/event_create</code> で参加/未定/不参加ボタン付き募集を作れます。中止は <code>/event_cancel</code> です。</div>
-            <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲーム作成、おみくじ、1d100、じゃんけんを実行できます。</div>
+            <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲームパネル、おみくじ、1d100、じゃんけんを実行できます。</div>
           </div>
           <div class="notice">
             <p><strong>ゲーム募集の中止</strong><br>
-              UNO、7並べ、大富豪、ポーカーの募集は <code>/game_cancel</code> で中止できます。
+              UNO、7並べ、大富豪、ポーカーの募集中止は <code>/game</code> の「中止」ボタンから行えます。
               募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
             </p>
             <p><strong>UNOのルール</strong><br>
@@ -415,7 +450,7 @@ async def handle_help_site(request):
             </p>
             <p><strong>大富豪のルール</strong><br>
               前の人より強いカード、または同じ枚数の組み合わせを出していきます。
-              先に手札をなくした人が上がりです。革命、8切り、階段、しばり、都落ちは <code>/daifugo_start</code> のオプションで切り替えできます。
+              先に手札をなくした人が上がりです。革命、8切り、階段、しばり、都落ちなどの追加ルールに対応しています。
             </p>
             <p><strong>ポーカーのルール</strong><br>
               5枚の手札がDMで届きます。交換したいカードを選び、全員の交換が終わると役の強さで勝敗が決まります。
@@ -427,12 +462,12 @@ async def handle_help_site(request):
         <section id="admin">
           <h2>管理者向け</h2>
           <div class="grid">
-            <div class="tile"><strong>初期設定</strong><code>/setup_wizard</code> で導入時に必要な設定を確認できます。</div>
+            <div class="tile"><strong>管理パネル</strong><code>/admin</code> で設定確認、権限診断、ログ設定、メンテナンス操作をまとめて実行できます。</div>
             <div class="tile"><strong>チケット</strong><code>/ticket_setup</code> と <code>/ticket_log_channel</code> を設定します。</div>
             <div class="tile"><strong>役職パネル</strong><code>/role_panel_setup</code> で複数ロール対応のパネルを作れます。</div>
-            <div class="tile"><strong>YouTube通知</strong><code>/youtube_notify_channel</code> と <code>/youtube_notify_keywords</code> を設定します。</div>
-            <div class="tile"><strong>ログ</strong><code>/server_log_channel</code>、<code>/error_log_channel</code>、<code>/command_log_channel</code> を設定できます。</div>
-            <div class="tile"><strong>メンテナンス</strong><code>/maintenance_on</code> で一時的に一般利用を止められます。</div>
+            <div class="tile"><strong>YouTube通知</strong><code>/youtube</code> で通知先、キーワード、状態確認、手動チェックを操作できます。</div>
+            <div class="tile"><strong>出席管理</strong><code>/attendance</code> で出席記録、ポイント一覧、警告確認を操作できます。</div>
+            <div class="tile"><strong>ログ/メンテナンス</strong><code>/admin</code> からエラーログ先、利用ログ先、メンテナンス状態を設定できます。</div>
           </div>
         </section>
         <section id="trouble">
@@ -448,9 +483,9 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "play", "profile", "coin", "title", "topic", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "music", "youtube", "attendance", "admin", "profile", "coin", "title", "topic", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
-          {command_list(("settings", "setup", "permission", "maintenance", "data_cleanup", "server_log", "error_log", "command_log", "ticket", "role_panel", "youtube_notify", "birthday", "welcome", "ng_word", "backup"))}
+          {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "birthday", "welcome", "ng_word", "backup"))}
         </section>
       </main>
       <footer>むらびと君 / VillageCore Help</footer>
