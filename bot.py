@@ -151,6 +151,217 @@ async def handle_ping(request):
     return web.Response(text="OK")
 
 
+def command_list(prefixes: tuple[str, ...]) -> str:
+    commands = sorted(
+        command
+        for command in bot.tree.walk_commands()
+        if command.parent is None and command.name.startswith(prefixes)
+    )
+    if not commands:
+        return "<p class='muted'>起動後にコマンド一覧が表示されます。</p>"
+    return "<ul class='command-list'>" + "".join(
+        f"<li><code>/{escape(command.name)}</code><span>{escape(command.description or '')}</span></li>"
+        for command in commands
+    ) + "</ul>"
+
+
+async def handle_help_site(request):
+    command_count = len([c for c in bot.tree.walk_commands() if c.parent is None])
+    html = f"""
+    <!doctype html>
+    <html lang="ja">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>むらびと君 ヘルプ</title>
+      <style>
+        :root {{
+          color-scheme: light;
+          --bg: #f5f7f3;
+          --ink: #1d2b24;
+          --muted: #607065;
+          --line: #d9e2d7;
+          --panel: #ffffff;
+          --accent: #2d7a52;
+          --accent-2: #b66b2d;
+          --soft: #eaf3e6;
+        }}
+        * {{ box-sizing: border-box; }}
+        body {{
+          margin: 0;
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: var(--bg);
+          color: var(--ink);
+          line-height: 1.7;
+        }}
+        header {{
+          background: #274f39;
+          color: #fff;
+          padding: 28px 18px 22px;
+          border-bottom: 5px solid #d99345;
+        }}
+        .wrap {{ max-width: 1080px; margin: 0 auto; }}
+        .brand {{ display: flex; gap: 16px; align-items: center; }}
+        .badge {{
+          width: 62px; height: 62px; border-radius: 8px;
+          display: grid; place-items: center;
+          background: #f7d89e; color: #274f39;
+          font-size: 30px; font-weight: 800;
+          border: 2px solid rgba(255,255,255,.55);
+        }}
+        h1 {{ margin: 0; font-size: clamp(1.75rem, 4vw, 2.7rem); letter-spacing: 0; }}
+        header p {{ margin: 8px 0 0; color: #e7f4ea; max-width: 760px; }}
+        nav {{
+          position: sticky; top: 0; z-index: 2;
+          background: rgba(245,247,243,.96);
+          border-bottom: 1px solid var(--line);
+          backdrop-filter: blur(8px);
+        }}
+        nav .wrap {{
+          display: flex; gap: 10px; overflow-x: auto;
+          padding: 10px 18px;
+        }}
+        nav a {{
+          flex: 0 0 auto;
+          color: var(--ink); text-decoration: none;
+          padding: 8px 10px; border-radius: 6px;
+          font-weight: 650; font-size: .94rem;
+        }}
+        nav a:hover {{ background: var(--soft); }}
+        main {{ padding: 20px 18px 42px; }}
+        section {{
+          margin: 18px 0;
+          padding: 18px;
+          background: var(--panel);
+          border: 1px solid var(--line);
+          border-radius: 8px;
+        }}
+        h2 {{ margin: 0 0 10px; font-size: 1.35rem; }}
+        h3 {{ margin: 16px 0 8px; font-size: 1.05rem; }}
+        .grid {{
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 12px;
+        }}
+        .tile {{
+          padding: 14px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: #fbfcfa;
+        }}
+        .tile strong {{ display: block; margin-bottom: 4px; color: var(--accent); }}
+        code {{
+          background: #edf3eb;
+          color: #18472f;
+          border: 1px solid #d7e4d4;
+          border-radius: 5px;
+          padding: 1px 6px;
+          white-space: nowrap;
+        }}
+        .command-list {{ list-style: none; margin: 0; padding: 0; }}
+        .command-list li {{
+          display: grid;
+          grid-template-columns: minmax(130px, 210px) 1fr;
+          gap: 10px;
+          padding: 9px 0;
+          border-bottom: 1px solid #eef2ec;
+        }}
+        .command-list li:last-child {{ border-bottom: 0; }}
+        .muted {{ color: var(--muted); }}
+        .notice {{
+          border-left: 4px solid var(--accent-2);
+          background: #fff8ed;
+          padding: 12px 14px;
+          border-radius: 6px;
+        }}
+        footer {{ color: var(--muted); padding: 24px 18px 42px; text-align: center; }}
+        @media (max-width: 640px) {{
+          .brand {{ align-items: flex-start; }}
+          .badge {{ width: 52px; height: 52px; font-size: 24px; }}
+          section {{ padding: 14px; }}
+          .command-list li {{ grid-template-columns: 1fr; gap: 3px; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <header>
+        <div class="wrap brand">
+          <div class="badge">村</div>
+          <div>
+            <h1>むらびと君 ヘルプ</h1>
+            <p>Discordサーバーの運営と交流を支える多機能Botです。音楽、チケット、出席、通知、AI、ゲーム、コミュニティ機能をまとめて使えます。</p>
+          </div>
+        </div>
+      </header>
+      <nav>
+        <div class="wrap">
+          <a href="#start">はじめに</a>
+          <a href="#daily">日常</a>
+          <a href="#games">ゲーム</a>
+          <a href="#admin">管理者</a>
+          <a href="#trouble">困った時</a>
+          <a href="#commands">コマンド</a>
+        </div>
+      </nav>
+      <main class="wrap">
+        <section id="start">
+          <h2>はじめに</h2>
+          <div class="grid">
+            <div class="tile"><strong>まず使う</strong><code>/quick</code> で日常用メニューを開けます。</div>
+            <div class="tile"><strong>設定確認</strong><code>/settings_status</code> で通知先やログ先を確認できます。</div>
+            <div class="tile"><strong>権限確認</strong><code>/permission_audit</code> でBot権限を診断できます。</div>
+          </div>
+        </section>
+        <section id="daily">
+          <h2>日常で使う機能</h2>
+          <div class="grid">
+            <div class="tile"><strong>AI応答</strong>Botにメンション、またはBotの返信にリプライするとAIが答えます。</div>
+            <div class="tile"><strong>音楽</strong><code>/play</code> でYouTube音楽をVC再生できます。</div>
+            <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
+            <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、称号はプロフィールに表示されます。</div>
+          </div>
+        </section>
+        <section id="games">
+          <h2>ゲーム</h2>
+          <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
+          {command_list(("uno", "sevens", "daifugo", "poker", "othello", "janken", "omikuji", "dice"))}
+        </section>
+        <section id="admin">
+          <h2>管理者向け</h2>
+          <div class="grid">
+            <div class="tile"><strong>初期設定</strong><code>/setup_wizard</code> で導入時に必要な設定を確認できます。</div>
+            <div class="tile"><strong>チケット</strong><code>/ticket_setup</code> と <code>/ticket_log_channel</code> を設定します。</div>
+            <div class="tile"><strong>役職パネル</strong><code>/role_panel_setup</code> で複数ロール対応のパネルを作れます。</div>
+            <div class="tile"><strong>YouTube通知</strong><code>/youtube_notify_channel</code> と <code>/youtube_notify_keywords</code> を設定します。</div>
+            <div class="tile"><strong>ログ</strong><code>/server_log_channel</code>、<code>/error_log_channel</code>、<code>/command_log_channel</code> を設定できます。</div>
+            <div class="tile"><strong>メンテナンス</strong><code>/maintenance_on</code> で一時的に一般利用を止められます。</div>
+          </div>
+        </section>
+        <section id="trouble">
+          <h2>困った時</h2>
+          <div class="notice">
+            <p><strong>AIが429/503になる</strong><br>Gemini APIの無料枠上限や混雑です。時間を置くか、モデル/クールダウン設定を調整してください。</p>
+            <p><strong>YouTube通知が止まる</strong><br>YouTube Data APIのクォータ上限です。Botは一定時間チェックを休止します。</p>
+            <p><strong>音楽が再生されない</strong><br>cookie、yt-dlp、Deno、動画側の制限を確認してください。</p>
+            <p><strong>ロール付与できない</strong><br>Botのロールを付与対象ロールより上に置いてください。</p>
+          </div>
+        </section>
+        <section id="commands">
+          <h2>コマンド一覧</h2>
+          <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
+          <h3>よく使う</h3>
+          {command_list(("quick", "play", "profile", "coin", "title", "topic", "event", "faq", "rule", "report"))}
+          <h3>管理</h3>
+          {command_list(("settings", "setup", "permission", "maintenance", "data_cleanup", "server_log", "error_log", "command_log", "ticket", "role_panel", "youtube_notify", "birthday", "welcome", "ng_word", "backup"))}
+        </section>
+      </main>
+      <footer>むらびと君 / VillageCore Help</footer>
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type="text/html")
+
+
 def dashboard_auth_ok(request: web.Request) -> bool:
     return bool(DASHBOARD_TOKEN and request.query.get("token") == DASHBOARD_TOKEN)
 
@@ -234,6 +445,7 @@ async def handle_dashboard(request: web.Request):
 async def start_health_server():
     app = web.Application()
     app.router.add_get("/", handle_ping)
+    app.router.add_get("/help", handle_help_site)
     app.router.add_get("/dashboard", handle_dashboard)
 
     runner = web.AppRunner(app)
