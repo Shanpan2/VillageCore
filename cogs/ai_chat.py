@@ -23,7 +23,7 @@ MENTION_RE = re.compile(r"<@!?\d+>")
 MAX_HISTORY_TURNS = 10
 DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
-DEFAULT_QUOTA_BACKOFF_SECONDS = 60
+DEFAULT_QUOTA_BACKOFF_SECONDS = 600
 DEFAULT_SERVER_BACKOFF_SECONDS = 300
 
 
@@ -83,14 +83,15 @@ class AIChat(commands.Cog):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
-        self.ai_bot_name = os.getenv("AI_BOT_NAME", "VillageCore")
-        self.ai_developer_name = os.getenv("AI_DEVELOPER_NAME", "")
+        self.ai_bot_name = os.getenv("AI_BOT_NAME", "むらびとくん")
+        self.ai_developer_name = os.getenv("AI_DEVELOPER_NAME", "シャンパン2号")
         self.user_cooldown_seconds = int(os.getenv("AI_USER_COOLDOWN_SECONDS", str(DEFAULT_USER_COOLDOWN_SECONDS)))
         self.global_cooldown_seconds = int(os.getenv("AI_GLOBAL_COOLDOWN_SECONDS", str(DEFAULT_GLOBAL_COOLDOWN_SECONDS)))
         self.quota_backoff_seconds = int(os.getenv("AI_QUOTA_BACKOFF_SECONDS", str(DEFAULT_QUOTA_BACKOFF_SECONDS)))
         self.server_backoff_seconds = int(os.getenv("AI_SERVER_BACKOFF_SECONDS", str(DEFAULT_SERVER_BACKOFF_SECONDS)))
         self.user_next_allowed: dict[tuple[int | str, int], float] = {}
         self.global_next_allowed = 0.0
+        self.request_lock = asyncio.Lock()
 
     async def cog_load(self):
         if not self.client:
@@ -142,8 +143,8 @@ class AIChat(commands.Cog):
                 history_lines.append(f"Assistant: {assistant_text}")
 
         history_text = "\n".join(history_lines) if history_lines else "No previous conversation."
-        bot_identity = self.ai_bot_name or getattr(self.bot.user, "display_name", "VillageCore")
-        developer_identity = self.ai_developer_name or "未設定"
+        bot_identity = self.ai_bot_name or getattr(self.bot.user, "display_name", "むらびとくん")
+        developer_identity = self.ai_developer_name or "シャンパン2号"
         return (
             f"Discord server: {guild_name}\n"
             f"Bot name: {bot_identity}\n"
@@ -161,7 +162,8 @@ class AIChat(commands.Cog):
             system_instruction=(
                 "あなたはDiscordサーバー内で動く親切な日本語アシスタントです。"
                 f"あなたのBot名は「{self.ai_bot_name}」です。"
-                f"{f'開発者名は「{self.ai_developer_name}」です。' if self.ai_developer_name else ''}"
+                f"開発者名は「{self.ai_developer_name or 'シャンパン2号'}」です。"
+                "Bot名や開発者名を聞かれた場合は、上記の名前をそのまま答えてください。"
                 "会話履歴を参考にしつつ、簡潔で自然に答えてください。"
                 "不確かなことは断定せず、確認が必要だと伝えてください。"
             ),
@@ -220,7 +222,8 @@ class AIChat(commands.Cog):
             try:
                 history = await self.load_memory(guild_id, message.author.id)
                 prompt = self.build_prompt(message, question, history)
-                reply = await asyncio.to_thread(self.generate_reply, prompt)
+                async with self.request_lock:
+                    reply = await asyncio.to_thread(self.generate_reply, prompt)
                 history.append(
                     {
                         "at": datetime.now(timezone.utc).isoformat(),

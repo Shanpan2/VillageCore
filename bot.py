@@ -24,6 +24,21 @@ DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN")
 BOT_ACTIVITY_TEXT = os.getenv("BOT_ACTIVITY_TEXT", "/help | むらびと君")
 COMMANDS_SYNCED = False
 PERSISTENT_VIEWS_REGISTERED = False
+DEFAULT_DISABLED_EXTENSIONS = {
+    "cogs.backup",
+    "cogs.bot_status",
+    "cogs.clean",
+    "cogs.janken",
+    "cogs.permission_check",
+    "cogs.setup_guide",
+}
+
+
+def disabled_extensions() -> set[str]:
+    raw = os.getenv("DISABLED_EXTENSIONS")
+    if raw is None:
+        return DEFAULT_DISABLED_EXTENSIONS
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 # ==========================
@@ -64,7 +79,11 @@ async def load_cogs():
         "Features.uno",
         "Features.youtube_notify",
     ]
+    disabled = disabled_extensions()
     for cog in cogs:
+        if cog in disabled:
+            print(f"  skipped by config: {cog}", flush=True)
+            continue
         try:
             await bot.load_extension(cog)
             print(f"  ✅ loaded: {cog}")
