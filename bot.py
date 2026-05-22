@@ -21,6 +21,7 @@ GUILD_ID = os.getenv("GUILD_ID")
 LEGACY_GUILD_ID = os.getenv("LEGACY_GUILD_ID", "1405716361933754408")
 PORT = int(os.getenv("PORT", "8000"))
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN")
+BOT_ACTIVITY_TEXT = os.getenv("BOT_ACTIVITY_TEXT", "/help | むらびと君")
 COMMANDS_SYNCED = False
 PERSISTENT_VIEWS_REGISTERED = False
 
@@ -114,6 +115,12 @@ async def clear_legacy_guild_commands():
 @bot.event
 async def on_ready():
     global COMMANDS_SYNCED, PERSISTENT_VIEWS_REGISTERED
+
+    if BOT_ACTIVITY_TEXT:
+        try:
+            await bot.change_presence(activity=discord.Game(name=BOT_ACTIVITY_TEXT))
+        except Exception as e:
+            print(f"⚠️ presence update failed: {e}", flush=True)
 
     try:
         if not PERSISTENT_VIEWS_REGISTERED:
@@ -334,6 +341,14 @@ async def handle_help_site(request):
         <section id="games">
           <h2>ゲーム</h2>
           <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
+          <div class="grid">
+            <div class="tile"><strong>UNO</strong><code>/uno_start</code> で作成、参加者は <code>/uno_join</code>、準備できたら <code>/uno_begin</code> で開始します。</div>
+            <div class="tile"><strong>7並べ</strong><code>/sevens_start</code>、<code>/sevens_join</code>、<code>/sevens_begin</code> の順で進めます。手札はDM画像で届きます。</div>
+            <div class="tile"><strong>大富豪</strong><code>/daifugo_start</code> でルールを選び、<code>/daifugo_begin</code> で開始します。革命や8切りも設定できます。</div>
+            <div class="tile"><strong>ポーカー</strong><code>/poker_start</code> で募集、<code>/poker_begin</code> 後にDM手札を見て交換します。</div>
+            <div class="tile"><strong>募集</strong><code>/event_create</code> で参加/未定/不参加ボタン付き募集を作れます。中止は <code>/event_cancel</code> です。</div>
+            <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲーム作成、おみくじ、1d100、じゃんけんを実行できます。</div>
+          </div>
           {command_list(("uno", "sevens", "daifugo", "poker", "othello", "janken", "omikuji", "dice"))}
         </section>
         <section id="admin">

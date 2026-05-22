@@ -164,6 +164,7 @@ class Community(commands.Cog):
             "title": title[:200],
             "description": description[:1000],
             "when": when[:200],
+            "creator_id": interaction.user.id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "responses": {"join": [], "maybe": [], "no": []},
         }
@@ -174,6 +175,46 @@ class Community(commands.Cog):
         if msg.id not in index:
             index.append(msg.id)
             await set_json(event_index_key(interaction.guild_id), index[-200:])
+
+    @app_commands.command(name="event_cancel", description="イベント募集を中止します")
+    @app_commands.describe(message_id="募集メッセージID", reason="中止理由")
+    async def event_cancel(self, interaction: discord.Interaction, message_id: str, reason: str = ""):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        try:
+            event_message_id = int(message_id)
+        except ValueError:
+            await interaction.response.send_message("メッセージIDは数字で入力してください。", ephemeral=True)
+            return
+
+        data = await get_json(event_key(event_message_id), None)
+        if not data:
+            await interaction.response.send_message("そのイベント募集は見つかりませんでした。", ephemeral=True)
+            return
+        is_owner = data.get("creator_id") == interaction.user.id
+        is_manager = interaction.user.guild_permissions.manage_guild
+        if not is_owner and not is_manager:
+            await interaction.response.send_message("募集を中止できるのは作成者または管理者です。", ephemeral=True)
+            return
+
+        data["canceled"] = True
+        data["cancel_reason"] = reason[:500]
+        await set_json(event_key(event_message_id), data)
+
+        channel = self.bot.get_channel(data.get("channel_id", 0))
+        embed = event_embed(data)
+        embed.title = f"【中止】{data['title']}"
+        embed.color = 0xE74C3C
+        if reason:
+            embed.add_field(name="中止理由", value=reason[:1024], inline=False)
+        if isinstance(channel, discord.TextChannel):
+            try:
+                message = await channel.fetch_message(event_message_id)
+                await message.edit(embed=embed, view=None)
+            except discord.HTTPException:
+                pass
+        await interaction.response.send_message("イベント募集を中止しました。", ephemeral=True)
 
     @app_commands.command(name="profile_set", description="自己紹介プロフィールを登録します")
     @app_commands.describe(favorite="好きなもの", active_time="活動時間", comment="ひとこと", sns="SNSやリンク")
