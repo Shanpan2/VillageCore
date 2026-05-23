@@ -12,6 +12,7 @@ import yt_dlp
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 MUSIC_OPUS_BITRATE = int(os.getenv("MUSIC_OPUS_BITRATE", "160"))
+GENERATED_COOKIE_FILE = Path(os.getenv("YTDLP_GENERATED_COOKIE_FILE", "/tmp/ytdlp_cookies.txt"))
 
 
 class QuietYtdlpLogger:
@@ -63,7 +64,17 @@ YDL_PLAY_FORMATS = (
     None,
 )
 
-cookie_file = os.getenv("YTDLP_COOKIE_FILE") or str(DEFAULT_COOKIE_FILE)
+cookies_text = os.getenv("YTDLP_COOKIES_TEXT") or os.getenv("YOUTUBE_COOKIES_TEXT")
+if cookies_text:
+    try:
+        GENERATED_COOKIE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        GENERATED_COOKIE_FILE.write_text(cookies_text.strip() + "\n", encoding="utf-8")
+        os.chmod(GENERATED_COOKIE_FILE, 0o600)
+        print(f"YTDLP cookie file generated from environment: {GENERATED_COOKIE_FILE}", flush=True)
+    except Exception as e:
+        print(f"YTDLP cookie environment write failed: {type(e).__name__}: {e}", flush=True)
+
+cookie_file = os.getenv("YTDLP_COOKIE_FILE") or (str(GENERATED_COOKIE_FILE) if cookies_text else str(DEFAULT_COOKIE_FILE))
 if cookie_file and os.path.exists(cookie_file):
     YDL_OPTIONS["cookiefile"] = cookie_file
     print(f"YTDLP cookie file loaded: {cookie_file}", flush=True)
@@ -72,8 +83,16 @@ elif os.getenv("YTDLP_COOKIE_FILE"):
 
 
 FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn -ar 48000 -ac 2",
+    "before_options": (
+        "-nostdin "
+        "-reconnect 1 "
+        "-reconnect_streamed 1 "
+        "-reconnect_at_eof 1 "
+        "-reconnect_on_network_error 1 "
+        "-reconnect_delay_max 5 "
+        "-rw_timeout 15000000"
+    ),
+    "options": "-vn",
 }
 
 
