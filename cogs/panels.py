@@ -3,6 +3,9 @@ from discord import app_commands
 from discord.ext import commands
 
 
+PANEL_TIMEOUT_SECONDS = 600
+
+
 async def call_command(cog: commands.Cog | None, name: str, interaction: discord.Interaction, *args):
     command = getattr(cog, name, None) if cog else None
     callback = getattr(command, "callback", None)
@@ -64,7 +67,7 @@ class MusicButton(discord.ui.Button):
 
 class MusicPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         for label, action, style, row in [
             ("再生", "play", discord.ButtonStyle.primary, 0),
             ("参加", "join", discord.ButtonStyle.secondary, 0),
@@ -111,7 +114,7 @@ class YoutubeButton(discord.ui.Button):
 
 class YoutubePanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(YoutubeButton("通知先をこのチャンネルに設定", "youtube_notify_channel", discord.ButtonStyle.primary, 0))
         self.add_item(YoutubeButton("キーワード設定", "keywords", discord.ButtonStyle.primary, 0))
         self.add_item(YoutubeButton("状態確認", "youtube_notify_status", discord.ButtonStyle.secondary, 1))
@@ -139,7 +142,7 @@ class AttendanceButton(discord.ui.Button):
 
 class AttendancePanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         for label, action, style, row in [
             ("通知先設定", "attend_set_channel", discord.ButtonStyle.primary, 0),
             ("一括追加", "attend_add_members_bulk", discord.ButtonStyle.primary, 0),
@@ -166,7 +169,7 @@ class AdminButton(discord.ui.Button):
 
 class AdminPanelView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         for label, action, style, row in [
             ("設定確認", "settings_status", discord.ButtonStyle.secondary, 0),
             ("導入ガイド", "setup_wizard", discord.ButtonStyle.secondary, 0),

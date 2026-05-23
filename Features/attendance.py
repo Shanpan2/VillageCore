@@ -111,6 +111,12 @@ class AttendStatusSelect(discord.ui.Select):
         if entry is None:
             await interaction.followup.send("❌ メンバーが見つかりません。", ephemeral=True)
             return
+        if self.date in entry.get("records", {}):
+            await interaction.followup.send(
+                f"⚠️ **{entry['name']}** は **{self.date}** の出席記録がすでにあります。重複記録はできません。",
+                ephemeral=True,
+            )
+            return
         change = calc_point_change(entry["pt"], status)
         new_pt = apply_point(entry["pt"], status)
         entry["pt"] = new_pt
@@ -183,9 +189,13 @@ class BulkAttendView(discord.ui.View):
                 await inter.followup.send("❌ 少なくとも1人の出席状況を選択してください。", ephemeral=True)
                 return
             results = []
+            skipped = []
             for uid, status in self.selections.items():
                 entry = self.attend_data["members"].get(uid)
                 if entry is None:
+                    continue
+                if record_date in entry.get("records", {}):
+                    skipped.append(f"• **{entry['name']}** : すでに記録済み")
                     continue
                 change = calc_point_change(entry["pt"], status)
                 new_pt = apply_point(entry["pt"], status)
@@ -194,10 +204,12 @@ class BulkAttendView(discord.ui.View):
                 sign = f"+{change}" if change >= 0 else str(change)
                 results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
             await save_attend(self.attend_data)
-            await inter.followup.send(
-                f"✅ **{record_date}** の記録が完了しました！\n\n" + "\n".join(results),
-                ephemeral=True,
-            )
+            message = f"✅ **{record_date}** の記録が完了しました！\n\n"
+            if results:
+                message += "\n".join(results)
+            if skipped:
+                message += "\n\n⚠️ 重複のためスキップ:\n" + "\n".join(skipped)
+            await inter.followup.send(message, ephemeral=True)
         save_btn.callback = save_cb
         self.add_item(save_btn)
 

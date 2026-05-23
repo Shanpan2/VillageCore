@@ -14,6 +14,7 @@ from Features.uno import uno_games
 
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
+PANEL_TIMEOUT_SECONDS = 600
 
 GAME_STORES = {
     "uno": ("UNO", uno_games),
@@ -366,7 +367,7 @@ class GameActionButton(discord.ui.Button):
 
 class GameControlView(discord.ui.View):
     def __init__(self, game: str):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(GameActionButton("募集作成", game, "create", discord.ButtonStyle.primary, 0))
         self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
         self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 0))
@@ -397,13 +398,13 @@ class GameSelect(discord.ui.Select):
 
 class GameMenuView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(GameSelect())
 
 
 class QuickView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=180)
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(GameStartButton("UNO作成", "uno", 0))
         self.add_item(GameStartButton("7並べ作成", "sevens", 0))
         self.add_item(GameStartButton("大富豪作成", "daifugo", 0))
