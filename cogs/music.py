@@ -74,7 +74,7 @@ if cookies_text:
     except Exception as e:
         print(f"YTDLP cookie environment write failed: {type(e).__name__}: {e}", flush=True)
 
-cookie_file = os.getenv("YTDLP_COOKIE_FILE") or (str(GENERATED_COOKIE_FILE) if cookies_text else str(DEFAULT_COOKIE_FILE))
+cookie_file = str(GENERATED_COOKIE_FILE) if cookies_text else (os.getenv("YTDLP_COOKIE_FILE") or str(DEFAULT_COOKIE_FILE))
 if cookie_file and os.path.exists(cookie_file):
     YDL_OPTIONS["cookiefile"] = cookie_file
     print(f"YTDLP cookie file loaded: {cookie_file}", flush=True)
