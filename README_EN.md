@@ -25,7 +25,9 @@ Japanese README: [README.md](README.md)
 
 This repository does not include secrets such as tokens, API keys, cookies, or database URLs.
 
-Set required values in your deployment provider's Variables / Secrets page, such as Railway. Detailed environment variable names and real values are intentionally not listed in this public README.
+Set required values in your deployment provider's Variables / Secrets page, such as Railway.
+
+For development and operational security notes, see [SECURITY.md](SECURITY.md).
 
 ## Run
 
@@ -35,20 +37,3 @@ python bot.py
 ```
 
 Docker / Railway deployment is supported.
-
-## Security
-
-Do not publish files or values such as:
-
-- `.env`
-- `cookies.txt`
-- `config.json`
-- `*.db`
-- `*.sqlite`
-- `ticket_logs/`
-- Discord Bot Token
-- API keys
-- Database URL
-- YouTube cookies
-
-If secrets were ever committed or pushed, regenerate the affected tokens, API keys, and cookies.

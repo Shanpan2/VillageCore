@@ -15,7 +15,7 @@ English README: [README_EN.md](README_EN.md)
 
 - `/game`: UNO、7並べ、大富豪、ポーカーをボタンで操作
 - `/music`: 音楽再生、停止、スキップ、キュー確認などをボタンで操作
-- `/youtube`: YouTube 通知の設定と確認
+- `/youtube`: YouTube 通知の設定と状態確認
 - `/attendance`: 出席管理、ポイント一覧、警告確認
 - `/admin`: 設定確認、権限診断、ログ設定、メンテナンス
 - `/quick`: 日常用のショートカット
@@ -25,7 +25,9 @@ English README: [README_EN.md](README_EN.md)
 
 このリポジトリには、Token、API Key、Cookie、データベースURLなどの秘密情報は含めていません。
 
-必要な設定値は、Railway などのデプロイ先の Variables / Secrets に登録してください。公開 README には具体的な環境変数一覧や実値は記載していません。
+必要な設定値は、Railway などのデプロイ先の Variables / Secrets に登録してください。
+
+開発・運用時のセキュリティ注意は [SECURITY.md](SECURITY.md) を確認してください。
 
 ## 起動
 
@@ -35,20 +37,3 @@ python bot.py
 ```
 
 Docker / Railway でのデプロイにも対応しています。
-
-## 注意(フォークする際の注意点)
-
-以下のようなファイルや値は公開しないでください。
-
-- `.env`
-- `cookies.txt`
-- `config.json`
-- `*.db`
-- `*.sqlite`
-- `ticket_logs/`
-- Discord Bot Token
-- API Key
-- Database URL
-- YouTube Cookie
-
-もし秘密情報を誤って commit / push した場合は、該当する Token、API Key、Cookie を再発行してください。
