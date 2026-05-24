@@ -70,6 +70,50 @@ class ServerLogs(commands.Cog):
         await self.send_log(member.guild, embed)
 
     @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        if member.bot:
+            return
+
+        before_channel = before.channel
+        after_channel = after.channel
+        if before_channel == after_channel:
+            changes = []
+            if before.self_mute != after.self_mute:
+                changes.append("セルフミュートON" if after.self_mute else "セルフミュートOFF")
+            if before.self_deaf != after.self_deaf:
+                changes.append("セルフスピーカーミュートON" if after.self_deaf else "セルフスピーカーミュートOFF")
+            if before.mute != after.mute:
+                changes.append("サーバーミュートON" if after.mute else "サーバーミュートOFF")
+            if before.deaf != after.deaf:
+                changes.append("サーバースピーカーミュートON" if after.deaf else "サーバースピーカーミュートOFF")
+            if not changes:
+                return
+            embed = discord.Embed(title="VC状態変更", color=0xF1C40F)
+            embed.add_field(name="メンバー", value=f"{member.mention} ({member.id})", inline=False)
+            embed.add_field(name="チャンネル", value=after_channel.mention if after_channel else "不明", inline=True)
+            embed.add_field(name="変更", value=", ".join(changes), inline=False)
+            await self.send_log(member.guild, embed)
+            return
+
+        if before_channel is None and after_channel is not None:
+            title = "VC入室"
+            color = 0x2ECC71
+            detail = after_channel.mention
+        elif before_channel is not None and after_channel is None:
+            title = "VC退出"
+            color = 0x95A5A6
+            detail = before_channel.mention
+        else:
+            title = "VC移動"
+            color = 0x3498DB
+            detail = f"{before_channel.mention} → {after_channel.mention}"
+
+        embed = discord.Embed(title=title, color=color)
+        embed.add_field(name="メンバー", value=f"{member.mention} ({member.id})", inline=False)
+        embed.add_field(name="チャンネル", value=detail, inline=False)
+        await self.send_log(member.guild, embed)
+
+    @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
         await self.send_log(role.guild, discord.Embed(title="ロール作成", description=role.mention, color=0x3498DB))
 
