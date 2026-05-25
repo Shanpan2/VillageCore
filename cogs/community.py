@@ -276,6 +276,44 @@ class Community(commands.Cog):
         await db_set(key, today)
         await interaction.response.send_message(f"{interaction.user.mention} は **{amount}** コインを受け取りました。現在 **{current + amount}** コインです。")
 
+    @app_commands.command(name="coin_gamble", description="コインを賭けてギャンブルします")
+    @app_commands.describe(amount="賭けるコイン数")
+    async def coin_gamble(self, interaction: discord.Interaction, amount: int):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if amount <= 0:
+            await interaction.response.send_message("賭けるコイン数は1以上にしてください。", ephemeral=True)
+            return
+
+        key = coin_key(interaction.guild_id, interaction.user.id)
+        current = int(await db_get(key) or "0")
+        if current < amount:
+            await interaction.response.send_message(
+                f"コインが足りません。現在の所持コインは **{current}** です。",
+                ephemeral=True,
+            )
+            return
+
+        if random.random() < 0.45:
+            bonus_percent = random.randint(10, 100)
+            profit = max(1, amount * bonus_percent // 100)
+            new_balance = current + profit
+            await db_set(key, str(new_balance))
+            await interaction.response.send_message(
+                f"当たり！ {interaction.user.mention} は **{amount}** コインを賭けて "
+                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。"
+            )
+            return
+
+        loss = amount if random.random() < 0.65 else max(1, amount // 2)
+        new_balance = max(0, current - loss)
+        await db_set(key, str(new_balance))
+        await interaction.response.send_message(
+            f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
+            f"現在 **{new_balance}** コインです。"
+        )
+
     @app_commands.command(name="coin_give", description="【管理者】メンバーにコインを付与します")
     @app_commands.default_permissions(manage_guild=True)
     async def coin_give(self, interaction: discord.Interaction, member: discord.Member, amount: int):

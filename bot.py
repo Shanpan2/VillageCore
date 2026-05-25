@@ -413,7 +413,7 @@ async def handle_help_site(request):
             <div class="tile"><strong>AI応答</strong>Botにメンション、またはBotの返信にリプライするとAIが答えます。</div>
             <div class="tile"><strong>音楽</strong><code>/music</code> で音楽パネルを開き、再生、停止、スキップ、キュー確認をボタンで操作できます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
-            <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、称号はプロフィールに表示されます。</div>
+            <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code> でコインを賭けられます。</div>
           </div>
         </section>
         <section id="games">
