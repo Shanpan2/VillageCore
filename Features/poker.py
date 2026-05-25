@@ -422,6 +422,12 @@ class PokerLobbyView(discord.ui.View):
             await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
             return
         await cog.poker_begin.callback(cog, interaction)
+        state = poker_games.get(self.game_id)
+        if state and state.get("started") and interaction.message:
+            try:
+                await interaction.message.edit(content=lobby_text(state) + "\n\n開始済みです。", view=None)
+            except discord.HTTPException:
+                pass
 
     @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):

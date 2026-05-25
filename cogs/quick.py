@@ -1,4 +1,5 @@
 import datetime
+import inspect
 import random
 
 import discord
@@ -208,6 +209,26 @@ def create_poker_game(interaction: discord.Interaction) -> str:
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
 
+def game_lobby_text(game: str, state: dict | None) -> str:
+    label, _ = GAME_STORES[game]
+    if not state:
+        return f"{label}の募集はありません。"
+    players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
+    lines = [
+        f"**{label}募集**",
+        f"参加者: {players or 'なし'}",
+    ]
+    if game == "poker":
+        bet = int(state.get("bet", 0) or 0)
+        pot = int(state.get("pot", 0) or 0) or bet * len(state.get("players", []))
+        lines.insert(1, f"賭けコイン: {'なし' if bet <= 0 else f'1人 {bet} / ポット {pot}'}")
+    if game == "daifugo":
+        lines.insert(1, f"有効ルール: {rules_text(state)}")
+    lines.append("")
+    lines.append("下のボタンで参加、開始、中止、ルール確認ができます。")
+    return "\n".join(lines)
+
+
 class GameStartButton(discord.ui.Button):
     def __init__(self, label: str, game: str, row: int):
         super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
@@ -221,7 +242,9 @@ class GameStartButton(discord.ui.Button):
             "poker": create_poker_game,
         }
         text = creators[self.game](interaction)
-        await interaction.response.send_message(text, view=GameControlView(self.game))
+        _, store = GAME_STORES[self.game]
+        state = store.get(str(interaction.channel_id))
+        await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=GameControlView(self.game))
 
 
 class OmikujiButton(discord.ui.Button):
@@ -359,10 +382,12 @@ async def begin_game(interaction: discord.Interaction, game: str):
     if not command or not getattr(command, "callback", None):
         await interaction.response.send_message("開始処理を呼び出せませんでした。個別の開始コマンドを使ってください。", ephemeral=True)
         return
-    try:
-        await command.callback(cog, interaction)
-    except TypeError:
-        await command.callback(interaction)
+    callback = command.callback
+    params = list(inspect.signature(callback).parameters)
+    if params and params[0] == "self":
+        await callback(cog, interaction)
+        return
+    await callback(interaction)
 
 
 class GameActionButton(discord.ui.Button):
@@ -380,14 +405,35 @@ class GameActionButton(discord.ui.Button):
         }
 
         if self.action == "create":
-            await interaction.response.send_message(creators[self.game](interaction), view=GameControlView(self.game))
+            text = creators[self.game](interaction)
+            _, store = GAME_STORES[self.game]
+            state = store.get(str(interaction.channel_id))
+            await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=GameControlView(self.game))
         elif self.action == "join":
-            await interaction.response.send_message(join_game(interaction, self.game))
+            _, store = GAME_STORES[self.game]
+            before_state = store.get(str(interaction.channel_id))
+            before_players = list(before_state.get("players", [])) if before_state else []
+            text = join_game(interaction, self.game)
+            state = store.get(str(interaction.channel_id))
+            if state and interaction.message and len(state.get("players", [])) > len(before_players):
+                await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
         elif self.action == "begin":
             await begin_game(interaction, self.game)
+            _, store = GAME_STORES[self.game]
+            state = store.get(str(interaction.channel_id))
+            if state and state.get("started") and interaction.message:
+                try:
+                    await interaction.message.edit(content=game_lobby_text(self.game, state) + "\n\n開始済みです。", view=None)
+                except discord.HTTPException:
+                    pass
         elif self.action == "cancel":
-            _, text = cancel_game(interaction, self.game)
-            await interaction.response.send_message(text)
+            ok, text = cancel_game(interaction, self.game)
+            if ok and interaction.message:
+                await interaction.response.edit_message(content=text, view=None)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
         elif self.action == "rules":
             label, _ = GAME_STORES[self.game]
             embed = discord.Embed(title=f"{label} のルール", description=GAME_RULES[self.game], color=0xF1C40F)

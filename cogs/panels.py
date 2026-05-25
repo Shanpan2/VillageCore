@@ -1,3 +1,5 @@
+import inspect
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,10 +14,11 @@ async def call_command(cog: commands.Cog | None, name: str, interaction: discord
     if not callback:
         await interaction.response.send_message("この操作は現在利用できません。", ephemeral=True)
         return
-    try:
+    params = list(inspect.signature(callback).parameters)
+    if params and params[0] == "self":
         await callback(cog, interaction, *args)
-    except TypeError:
-        await callback(interaction, *args)
+        return
+    await callback(interaction, *args)
 
 
 class MusicPlayModal(discord.ui.Modal, title="音楽を再生"):
