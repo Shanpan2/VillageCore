@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from database.config_db import db_get, db_set
 from Features.daifugo import DEFAULT_RULES, daifugo_games, rules_text
-from Features.poker import poker_games
+from Features.poker import poker_games, set_poker_bet_amount
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import sevens_games
 from Features.uno import uno_games
@@ -201,6 +201,9 @@ def create_poker_game(interaction: discord.Interaction) -> str:
         "turn_index": 0,
         "started": False,
         "exchanged": [],
+        "bet": 0,
+        "pot": 0,
+        "bets_collected": False,
     }
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
@@ -278,6 +281,32 @@ class GuideButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_message(self.text, ephemeral=True)
+
+
+class PokerBetModal(discord.ui.Modal, title="ポーカー賭け額設定"):
+    amount = discord.ui.TextInput(
+        label="1人あたりの賭けコイン数",
+        placeholder="0で賭けなし / 例: 10",
+        required=True,
+        max_length=8,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            bet = int(str(self.amount.value).strip())
+        except ValueError:
+            await interaction.response.send_message("数字で入力してください。", ephemeral=True)
+            return
+        message = await set_poker_bet_amount(interaction, bet)
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class PokerBetButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="賭け額", style=discord.ButtonStyle.secondary, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(PokerBetModal())
 
 
 def game_status_embed(game: str) -> discord.Embed:
@@ -372,6 +401,8 @@ class GameControlView(discord.ui.View):
         self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
         self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 0))
         self.add_item(GameActionButton("中止", game, "cancel", discord.ButtonStyle.danger, 1))
+        if game == "poker":
+            self.add_item(PokerBetButton())
         self.add_item(GameActionButton("ルール", game, "rules", discord.ButtonStyle.secondary, 1))
 
 

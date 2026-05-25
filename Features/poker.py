@@ -7,6 +7,8 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
+from database.config_db import db_get, db_set
+
 
 SUITS = ["S", "H", "D", "C"]
 SUIT_SYMBOLS = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
@@ -25,6 +27,99 @@ HAND_NAMES = {
 }
 
 poker_games: dict[str, dict] = {}
+
+
+def coin_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin:{guild_id}:{user_id}"
+
+
+async def get_coin_balance(guild_id: int, user_id: int) -> int:
+    return int(await db_get(coin_key(guild_id, user_id)) or "0")
+
+
+async def set_coin_balance(guild_id: int, user_id: int, amount: int):
+    await db_set(coin_key(guild_id, user_id), str(max(0, amount)))
+
+
+def bet_line(state: dict) -> str:
+    bet = int(state.get("bet", 0) or 0)
+    if bet <= 0:
+        return "賭けコイン: なし"
+    pot = int(state.get("pot", 0) or 0) or bet * len(state.get("players", []))
+    return f"賭けコイン: 1人 **{bet}** / ポット **{pot}**"
+
+
+async def set_poker_bet_amount(interaction: discord.Interaction, amount: int) -> str:
+    state = poker_games.get(str(interaction.channel_id))
+    if not state:
+        return "まずポーカー募集を作成してください。"
+    if state.get("started"):
+        return "開始後は賭け額を変更できません。"
+
+    creator_id = state.get("creator_id")
+    is_manager = bool(getattr(interaction.user.guild_permissions, "manage_guild", False))
+    if interaction.user.id != creator_id and not is_manager:
+        return "賭け額を設定できるのは作成者または管理者だけです。"
+    if amount < 0:
+        return "賭け額は0以上にしてください。"
+
+    if amount > 0 and interaction.guild_id:
+        shortage = []
+        for uid in state.get("players", []):
+            balance = await get_coin_balance(interaction.guild_id, uid)
+            if balance < amount:
+                shortage.append(f"<@{uid}>({balance})")
+        if shortage:
+            return "コインが足りない参加者がいます: " + " / ".join(shortage)
+
+    state["bet"] = amount
+    state["pot"] = 0
+    state["bets_collected"] = False
+    return f"ポーカーの賭け額を1人 **{amount}** コインに設定しました。" if amount else "ポーカーの賭けをなしにしました。"
+
+
+async def collect_poker_bets(interaction: discord.Interaction, state: dict) -> tuple[bool, str]:
+    bet = int(state.get("bet", 0) or 0)
+    if bet <= 0:
+        state["pot"] = 0
+        state["bets_collected"] = True
+        return True, ""
+    if not interaction.guild_id:
+        return False, "サーバー内で実行してください。"
+    if state.get("bets_collected"):
+        return True, ""
+
+    balances = {}
+    shortage = []
+    for uid in state["players"]:
+        balance = await get_coin_balance(interaction.guild_id, uid)
+        balances[uid] = balance
+        if balance < bet:
+            shortage.append(f"<@{uid}>({balance})")
+    if shortage:
+        return False, "コインが足りない参加者がいます: " + " / ".join(shortage)
+
+    for uid, balance in balances.items():
+        await set_coin_balance(interaction.guild_id, uid, balance - bet)
+    state["pot"] = bet * len(state["players"])
+    state["bets_collected"] = True
+    return True, f"全員から **{bet}** コインを集めました。ポットは **{state['pot']}** コインです。"
+
+
+async def payout_poker_winners(guild_id: int | None, state: dict, winner_ids: list[int]) -> str:
+    pot = int(state.get("pot", 0) or 0)
+    if not guild_id or pot <= 0 or not winner_ids:
+        return ""
+
+    share = pot // len(winner_ids)
+    remainder = pot % len(winner_ids)
+    payout_lines = []
+    for index, uid in enumerate(winner_ids):
+        payout = share + (remainder if index == 0 else 0)
+        balance = await get_coin_balance(guild_id, uid)
+        await set_coin_balance(guild_id, uid, balance + payout)
+        payout_lines.append(f"<@{uid}> +{payout}")
+    return "配当: " + " / ".join(payout_lines)
 
 
 def rank_label(rank: int) -> str:
@@ -101,6 +196,7 @@ def status_text(state: dict, prefix: str = "") -> str:
         [
             "**ポーカー / 5カードドロー**",
             f"現在の交換ターン: <@{current}>",
+            bet_line(state),
             "参加者: " + " / ".join(f"<@{uid}>{' 済' if str(uid) in exchanged else ''}" for uid in state["players"]),
         ]
     )
@@ -174,8 +270,12 @@ async def advance_or_finish(interaction: discord.Interaction, state: dict, prefi
         results.sort(key=lambda item: item[0], reverse=True)
         best_score = results[0][0]
         winners = [item for item in results if item[0] == best_score]
+        payout_text = await payout_poker_winners(interaction.guild_id, state, [uid for _, uid, _ in winners])
         winner_text = " / ".join(f"<@{uid}>" for _, uid, _ in winners)
-        lines = [prefix, "**ポーカー終了**", f"勝者: {winner_text} ({HAND_NAMES[best_score[0]]})", ""]
+        lines = [prefix, "**ポーカー終了**", f"勝者: {winner_text} ({HAND_NAMES[best_score[0]]})"]
+        if payout_text:
+            lines.append(payout_text)
+        lines.append("")
         for index, (score, uid, hand) in enumerate(results, start=1):
             lines.append(f"{index}. <@{uid}> - {HAND_NAMES[score[0]]} / {', '.join(card_label(card) for card in sorted(hand, key=card_sort_key))}")
         poker_games.pop(game_id, None)
@@ -277,8 +377,17 @@ class Poker(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="poker_start", description="ポーカーゲームを作成します")
-    async def poker_start(self, interaction: discord.Interaction):
+    @app_commands.describe(bet="1人あたりの賭けコイン数。0で賭けなし")
+    async def poker_start(self, interaction: discord.Interaction, bet: int = 0):
         game_id = str(interaction.channel_id)
+        if bet < 0:
+            await interaction.response.send_message("賭け額は0以上にしてください。", ephemeral=True)
+            return
+        if bet > 0 and interaction.guild_id:
+            balance = await get_coin_balance(interaction.guild_id, interaction.user.id)
+            if balance < bet:
+                await interaction.response.send_message(f"コインが足りません。現在の所持コインは **{balance}** です。", ephemeral=True)
+                return
         poker_games[game_id] = {
             "creator_id": interaction.user.id,
             "players": [interaction.user.id],
@@ -287,10 +396,15 @@ class Poker(commands.Cog):
             "turn_index": 0,
             "started": False,
             "exchanged": [],
+            "bet": bet,
+            "pot": 0,
+            "bets_collected": False,
         }
+        bet_message = f"\n賭け額: 1人 **{bet}** コイン" if bet else ""
         await interaction.response.send_message(
             f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n"
             "`/poker_join` で参加、`/poker_begin` で開始します。"
+            f"{bet_message}"
         )
 
     @app_commands.command(name="poker_join", description="ポーカーに参加します")
@@ -308,6 +422,12 @@ class Poker(commands.Cog):
         if len(state["players"]) >= 8:
             await interaction.response.send_message("参加できるのは最大8人までです。", ephemeral=True)
             return
+        bet = int(state.get("bet", 0) or 0)
+        if bet > 0 and interaction.guild_id:
+            balance = await get_coin_balance(interaction.guild_id, interaction.user.id)
+            if balance < bet:
+                await interaction.response.send_message(f"参加に **{bet}** コイン必要です。現在の所持コインは **{balance}** です。", ephemeral=True)
+                return
         state["players"].append(interaction.user.id)
         await interaction.response.send_message(f"{interaction.user.mention} が参加しました。")
 
@@ -323,6 +443,11 @@ class Poker(commands.Cog):
             return
         if len(state["players"]) < 2:
             await interaction.response.send_message("2人以上必要です。", ephemeral=True)
+            return
+
+        ok, bet_message = await collect_poker_bets(interaction, state)
+        if not ok:
+            await interaction.response.send_message(bet_message, ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -344,7 +469,10 @@ class Poker(commands.Cog):
                 failed_dm.append(member.mention)
 
         current = state["players"][state["turn_index"]]
-        text = status_text(state, "ポーカーを開始しました。")
+        prefix = "ポーカーを開始しました。"
+        if bet_message:
+            prefix += f"\n{bet_message}"
+        text = status_text(state, prefix)
         if failed_dm:
             text += "\n\nDM送信に失敗: " + " ".join(failed_dm)
         await interaction.followup.send(text, view=PokerDrawView(game_id, current))
