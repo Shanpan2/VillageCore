@@ -221,7 +221,7 @@ class GameStartButton(discord.ui.Button):
             "poker": create_poker_game,
         }
         text = creators[self.game](interaction)
-        await interaction.response.send_message(text)
+        await interaction.response.send_message(text, view=GameControlView(self.game))
 
 
 class OmikujiButton(discord.ui.Button):
@@ -380,7 +380,7 @@ class GameActionButton(discord.ui.Button):
         }
 
         if self.action == "create":
-            await interaction.response.send_message(creators[self.game](interaction))
+            await interaction.response.send_message(creators[self.game](interaction), view=GameControlView(self.game))
         elif self.action == "join":
             await interaction.response.send_message(join_game(interaction, self.game))
         elif self.action == "begin":

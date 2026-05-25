@@ -22,6 +22,62 @@ DEFAULT_RULES = {
 daifugo_games: dict[str, dict] = {}
 
 
+def lobby_text(state: dict) -> str:
+    players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
+    note = ""
+    if state["rules"].get("capital_fall") and not state.get("previous_daifugo_id"):
+        note = "\n都落ちは前回大富豪を指定した場合に発動します。"
+    return (
+        "**大富豪募集**\n"
+        f"有効ルール: {rules_text(state)}{note}\n"
+        f"参加者: {players or 'なし'}\n\n"
+        "下のボタンで参加、開始、中止ができます。"
+    )
+
+
+class DaifugoLobbyView(discord.ui.View):
+    def __init__(self, game_id: str):
+        super().__init__(timeout=600)
+        self.game_id = game_id
+
+    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = daifugo_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("この大富豪募集は終了しています。", ephemeral=True)
+            return
+        if state.get("started"):
+            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
+            return
+        if interaction.user.id in state["players"]:
+            await interaction.response.send_message("すでに参加しています。", ephemeral=True)
+            return
+        state["players"].append(interaction.user.id)
+        await interaction.response.edit_message(content=lobby_text(state), view=self)
+
+    @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
+    async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("Daifugo")
+        if not cog:
+            await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
+            return
+        await cog.daifugo_begin.callback(cog, interaction)
+
+    @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = daifugo_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("この大富豪募集はありません。", ephemeral=True)
+            return
+        is_creator = interaction.user.id == state.get("creator_id")
+        is_admin = bool(getattr(interaction.user.guild_permissions, "manage_guild", False))
+        if not is_creator and not is_admin:
+            await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
+            return
+        daifugo_games.pop(self.game_id, None)
+        await interaction.response.edit_message(content="大富豪募集を中止しました。", view=None)
+
+
 def rank_label(rank: int) -> str:
     return RANK_LABELS.get(rank, str(rank))
 
@@ -446,6 +502,9 @@ class Daifugo(commands.Cog):
         previous_daifugo: discord.Member | None = None,
     ):
         game_id = str(interaction.channel_id)
+        if game_id in daifugo_games:
+            await interaction.response.send_message("このチャンネルにはすでに大富豪募集があります。", ephemeral=True)
+            return
         rules = {
             "revolution": revolution,
             "eight_cut": eight_cut,
@@ -470,15 +529,7 @@ class Daifugo(commands.Cog):
             "rules": rules,
             "previous_daifugo_id": previous_daifugo.id if previous_daifugo else None,
         }
-        state = daifugo_games[game_id]
-        note = ""
-        if capital_fall and not previous_daifugo:
-            note = "\n都落ちは `previous_daifugo` を指定した場合に発動します。"
-        await interaction.response.send_message(
-            f"大富豪を作成しました。{interaction.user.mention} は自動参加しました。\n"
-            f"有効ルール: {rules_text(state)}{note}\n"
-            "`/daifugo_join` で参加、`/daifugo_begin` で開始します。"
-        )
+        await interaction.response.send_message(lobby_text(daifugo_games[game_id]), view=DaifugoLobbyView(game_id))
 
     @app_commands.command(name="daifugo_join", description="大富豪に参加します")
     async def daifugo_join(self, interaction: discord.Interaction):

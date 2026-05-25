@@ -32,18 +32,6 @@ DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.setup_guide",
 }
 DEFAULT_HIDDEN_SLASH_COMMANDS = {
-    "uno_start",
-    "uno_join",
-    "uno_begin",
-    "sevens_start",
-    "sevens_join",
-    "sevens_begin",
-    "daifugo_start",
-    "daifugo_join",
-    "daifugo_begin",
-    "poker_start",
-    "poker_join",
-    "poker_begin",
     "game_cancel",
     "join",
     "leave",

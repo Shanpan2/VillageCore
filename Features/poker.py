@@ -122,6 +122,16 @@ async def payout_poker_winners(guild_id: int | None, state: dict, winner_ids: li
     return "配当: " + " / ".join(payout_lines)
 
 
+def lobby_text(state: dict) -> str:
+    players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
+    return (
+        "**ポーカー募集**\n"
+        f"{bet_line(state)}\n"
+        f"参加者: {players or 'なし'}\n\n"
+        "下のボタンで参加、賭け額設定、開始ができます。"
+    )
+
+
 def rank_label(rank: int) -> str:
     return RANK_LABELS.get(rank, str(rank))
 
@@ -342,6 +352,92 @@ class PokerDrawView(discord.ui.View):
         self.add_item(PokerKeepButton(game_id, user_id))
 
 
+class PokerBetModal(discord.ui.Modal, title="ポーカー賭け額設定"):
+    amount = discord.ui.TextInput(
+        label="1人あたりの賭けコイン数",
+        placeholder="0で賭けなし / 例: 10",
+        required=True,
+        max_length=8,
+    )
+
+    def __init__(self, game_id: str):
+        super().__init__()
+        self.game_id = game_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            bet = int(str(self.amount.value).strip())
+        except ValueError:
+            await interaction.response.send_message("数字で入力してください。", ephemeral=True)
+            return
+        message = await set_poker_bet_amount(interaction, bet)
+        state = poker_games.get(self.game_id)
+        if state and interaction.message:
+            try:
+                await interaction.message.edit(content=lobby_text(state), view=PokerLobbyView(self.game_id))
+            except discord.HTTPException:
+                pass
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class PokerLobbyView(discord.ui.View):
+    def __init__(self, game_id: str):
+        super().__init__(timeout=600)
+        self.game_id = game_id
+
+    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = poker_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("このポーカー募集は終了しています。", ephemeral=True)
+            return
+        if state.get("started"):
+            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
+            return
+        if interaction.user.id in state["players"]:
+            await interaction.response.send_message("すでに参加しています。", ephemeral=True)
+            return
+        if len(state["players"]) >= 8:
+            await interaction.response.send_message("参加できるのは最大8人までです。", ephemeral=True)
+            return
+
+        bet = int(state.get("bet", 0) or 0)
+        if bet > 0 and interaction.guild_id:
+            balance = await get_coin_balance(interaction.guild_id, interaction.user.id)
+            if balance < bet:
+                await interaction.response.send_message(f"参加に **{bet}** コイン必要です。現在の所持コインは **{balance}** です。", ephemeral=True)
+                return
+
+        state["players"].append(interaction.user.id)
+        await interaction.response.edit_message(content=lobby_text(state), view=self)
+
+    @discord.ui.button(label="賭け額", style=discord.ButtonStyle.secondary)
+    async def bet(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PokerBetModal(self.game_id))
+
+    @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
+    async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("Poker")
+        if not cog:
+            await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
+            return
+        await cog.poker_begin.callback(cog, interaction)
+
+    @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = poker_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("このポーカー募集はありません。", ephemeral=True)
+            return
+        is_creator = interaction.user.id == state.get("creator_id")
+        is_admin = bool(getattr(interaction.user.guild_permissions, "manage_guild", False))
+        if not is_creator and not is_admin:
+            await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
+            return
+        poker_games.pop(self.game_id, None)
+        await interaction.response.edit_message(content="ポーカー募集を中止しました。", view=None)
+
+
 async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id: int, selected: list[str]):
     state = poker_games.get(game_id)
     if not state:
@@ -380,6 +476,9 @@ class Poker(commands.Cog):
     @app_commands.describe(bet="1人あたりの賭けコイン数。0で賭けなし")
     async def poker_start(self, interaction: discord.Interaction, bet: int = 0):
         game_id = str(interaction.channel_id)
+        if game_id in poker_games:
+            await interaction.response.send_message("このチャンネルにはすでにポーカー募集があります。", ephemeral=True)
+            return
         if bet < 0:
             await interaction.response.send_message("賭け額は0以上にしてください。", ephemeral=True)
             return
@@ -400,12 +499,7 @@ class Poker(commands.Cog):
             "pot": 0,
             "bets_collected": False,
         }
-        bet_message = f"\n賭け額: 1人 **{bet}** コイン" if bet else ""
-        await interaction.response.send_message(
-            f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n"
-            "`/poker_join` で参加、`/poker_begin` で開始します。"
-            f"{bet_message}"
-        )
+        await interaction.response.send_message(lobby_text(poker_games[game_id]), view=PokerLobbyView(game_id))
 
     @app_commands.command(name="poker_join", description="ポーカーに参加します")
     async def poker_join(self, interaction: discord.Interaction):
