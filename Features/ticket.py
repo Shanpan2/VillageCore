@@ -4,6 +4,7 @@ from discord import app_commands
 
 from database.config_db import db_set
 from views.ticket_views import TicketButtonView
+from views.ticket_views import ticket_counter_key
 from views.ticket_views import ticket_log_channel_key
 
 
@@ -39,6 +40,15 @@ class Ticket(commands.Cog):
             return
         await db_set(ticket_log_channel_key(interaction.guild_id), str(interaction.channel_id))
         await interaction.response.send_message(f"チケットログ送信先を {interaction.channel.mention} に設定しました。", ephemeral=True)
+
+    @app_commands.command(name="ticket_number_reset", description="【管理者】チケット番号をリセットします")
+    @app_commands.default_permissions(manage_channels=True)
+    async def ticket_number_reset(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ticket_counter_key(interaction.guild_id), "0")
+        await interaction.response.send_message("チケット番号をリセットしました。次のチケットは `001` から始まります。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

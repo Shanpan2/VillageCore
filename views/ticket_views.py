@@ -6,7 +6,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from database.config_db import db_get
+from database.config_db import db_get, db_set
 
 
 TICKET_OWNER_PREFIX = "ticket_owner_id="
@@ -17,11 +17,28 @@ def ticket_log_channel_key(guild_id: int) -> str:
     return f"ticket_log_channel:{guild_id}"
 
 
+def ticket_counter_key(guild_id: int) -> str:
+    return f"ticket_counter:{guild_id}"
+
+
 def sanitize_channel_name(value: str) -> str:
     value = value.lower()
     value = re.sub(r"[^a-z0-9ぁ-んァ-ン一-龥ー_-]+", "-", value)
     value = re.sub(r"-+", "-", value).strip("-")
     return value[:40] or "user"
+
+
+def sanitize_category_suffix(value: str) -> str:
+    value = re.sub(r"\s+", "_", value.strip())
+    value = re.sub(r"[^\wぁ-んァ-ン一-龥ー-]+", "", value)
+    return value[:80] or "ticket"
+
+
+async def next_ticket_number(guild_id: int) -> int:
+    current = int(await db_get(ticket_counter_key(guild_id)) or "0")
+    current += 1
+    await db_set(ticket_counter_key(guild_id), str(current))
+    return current
 
 
 def is_ticket_admin(member: discord.Member) -> bool:
@@ -40,8 +57,9 @@ def get_ticket_owner_id(channel: discord.TextChannel) -> int | None:
     return None
 
 
-async def get_or_create_ticket_category(guild: discord.Guild) -> discord.CategoryChannel | None:
-    category = discord.utils.get(guild.categories, name="Tickets")
+async def get_or_create_ticket_category(guild: discord.Guild, panel_title: str) -> discord.CategoryChannel | None:
+    category_name = f"Tickets_{sanitize_category_suffix(panel_title)}"[:100]
+    category = discord.utils.get(guild.categories, name=category_name)
     if category:
         return category
 
@@ -49,7 +67,7 @@ async def get_or_create_ticket_category(guild: discord.Guild) -> discord.Categor
     if not me or not me.guild_permissions.manage_channels:
         return None
 
-    return await guild.create_category("Tickets", reason="Ticket category setup")
+    return await guild.create_category(category_name, reason="Ticket category setup")
 
 
 async def create_ticket_log(channel: discord.TextChannel, closed_by: discord.abc.User) -> tuple[discord.File, Path]:
@@ -147,9 +165,10 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
         placeholder="チケットの内容を詳しく入力してください",
     )
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot, panel_title: str):
         super().__init__()
         self.bot = bot
+        self.panel_title = panel_title
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -165,9 +184,10 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
             )
             return
 
-        category = await get_or_create_ticket_category(guild)
-        base_name = sanitize_channel_name(interaction.user.display_name)
-        channel_name = f"ticket-{base_name}"
+        category = await get_or_create_ticket_category(guild, self.panel_title)
+        title_slug = sanitize_channel_name(self.panel_title)
+        ticket_number = await next_ticket_number(guild.id)
+        channel_name = f"{title_slug}_ticket-{ticket_number:03d}"[:100]
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -197,7 +217,10 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
             channel_name,
             category=category,
             overwrites=overwrites,
-            topic=f"{TICKET_OWNER_PREFIX}{interaction.user.id} status=open",
+            topic=(
+                f"{TICKET_OWNER_PREFIX}{interaction.user.id} "
+                f"status=open ticket_number={ticket_number:03d} ticket_title={title_slug}"
+            ),
             reason=f"Ticket created by {interaction.user}",
         )
 
@@ -207,6 +230,8 @@ class TicketModal(discord.ui.Modal, title="チケットを作成"):
             color=0x534AB7,
         )
         embed.add_field(name="送信者", value=interaction.user.mention, inline=True)
+        embed.add_field(name="チケット番号", value=f"{ticket_number:03d}", inline=True)
+        embed.add_field(name="タイトル", value=self.panel_title[:1024], inline=False)
         embed.add_field(name="件名", value=self.subject.value, inline=False)
         embed.set_footer(text="対応が完了したら「チケットを閉じる」を押してください。")
 
@@ -230,7 +255,10 @@ class TicketButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(TicketModal(self.view.bot))
+        panel_title = "ticket"
+        if interaction.message and interaction.message.embeds:
+            panel_title = interaction.message.embeds[0].title or panel_title
+        await interaction.response.send_modal(TicketModal(self.view.bot, panel_title))
 
 
 class CloseTicketButton(discord.ui.Button):
