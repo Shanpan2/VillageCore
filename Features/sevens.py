@@ -22,7 +22,7 @@ def lobby_text(state: dict) -> str:
     return (
         "**7並べ募集**\n"
         f"参加者: {players or 'なし'}\n\n"
-        "下のボタンで参加、開始、中止ができます。"
+        "下のボタンで参加、抜ける、開始、中止ができます。"
     )
 
 
@@ -44,6 +44,27 @@ class SevensLobbyView(discord.ui.View):
             await interaction.response.send_message("すでに参加しています。", ephemeral=True)
             return
         state["players"].append(interaction.user.id)
+        await interaction.response.edit_message(content=lobby_text(state), view=self)
+
+    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = sevens_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("この7並べ募集は終了しています。", ephemeral=True)
+            return
+        if state.get("started"):
+            await interaction.response.send_message("すでに開始しています。開始後は抜けられません。", ephemeral=True)
+            return
+        if interaction.user.id not in state["players"]:
+            await interaction.response.send_message("まだ参加していません。", ephemeral=True)
+            return
+        state["players"].remove(interaction.user.id)
+        if not state["players"]:
+            sevens_games.pop(self.game_id, None)
+            await interaction.response.edit_message(content="参加者がいなくなったため、7並べ募集を終了しました。", view=None)
+            return
+        if state.get("creator_id") == interaction.user.id:
+            state["creator_id"] = state["players"][0]
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)

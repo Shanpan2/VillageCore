@@ -128,7 +128,7 @@ def lobby_text(state: dict) -> str:
         "**ポーカー募集**\n"
         f"{bet_line(state)}\n"
         f"参加者: {players or 'なし'}\n\n"
-        "下のボタンで参加、賭け額設定、開始ができます。"
+        "下のボタンで参加、抜ける、賭け額設定、開始ができます。"
     )
 
 
@@ -409,6 +409,27 @@ class PokerLobbyView(discord.ui.View):
                 return
 
         state["players"].append(interaction.user.id)
+        await interaction.response.edit_message(content=lobby_text(state), view=self)
+
+    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = poker_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("このポーカー募集は終了しています。", ephemeral=True)
+            return
+        if state.get("started"):
+            await interaction.response.send_message("すでに開始しています。開始後は抜けられません。", ephemeral=True)
+            return
+        if interaction.user.id not in state["players"]:
+            await interaction.response.send_message("まだ参加していません。", ephemeral=True)
+            return
+        state["players"].remove(interaction.user.id)
+        if not state["players"]:
+            poker_games.pop(self.game_id, None)
+            await interaction.response.edit_message(content="参加者がいなくなったため、ポーカー募集を終了しました。", view=None)
+            return
+        if state.get("creator_id") == interaction.user.id:
+            state["creator_id"] = state["players"][0]
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="賭け額", style=discord.ButtonStyle.secondary)

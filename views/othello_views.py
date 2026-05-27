@@ -186,7 +186,7 @@ class SurrenderButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            from Features.othello import othello_games, settle_ai_coins
+            from Features.othello import othello_games, player_name, settle_ai_coins
 
             game = othello_games.get(self.game_id)
             if not game:
@@ -200,11 +200,10 @@ class SurrenderButton(discord.ui.Button):
 
             # 決着: 押した人が降参 -> 相手の勝利
             if user_id == game.get("black_id"):
-                winner = "白"
                 winner_color = 2
             else:
-                winner = "黒"
                 winner_color = 1
+            winner = player_name(game, winner_color)
 
             coin_text = await settle_ai_coins(game, interaction.guild_id, winner_color)
 

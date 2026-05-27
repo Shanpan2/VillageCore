@@ -295,6 +295,13 @@ def player_line(game: dict) -> str:
     return f"黒: {black}\n白: {white}\n"
 
 
+def player_name(game: dict, color: int | None) -> str:
+    if color is None:
+        return "引き分け"
+    user_id = game.get("black_id") if color == 1 else game.get("white_id")
+    return "AI" if user_id == AI_PLAYER_ID else f"<@{user_id}>"
+
+
 async def run_ai_turns(game: dict, prefix: str = "") -> str:
     notes = [prefix] if prefix else []
     while game.get("ai") and game["turn"] == game.get("ai_color"):
@@ -377,7 +384,7 @@ async def finish_othello_game(interaction, game_id: str, prefix: str = ""):
     black_count = sum(cell == 1 for row in board for cell in row)
     white_count = sum(cell == 2 for row in board for cell in row)
     winner_color = 1 if black_count > white_count else 2 if white_count > black_count else None
-    winner = "黒" if winner_color == 1 else "白" if winner_color == 2 else "引き分け"
+    winner = player_name(game, winner_color)
     coin_text = await settle_ai_coins(game, getattr(interaction, "guild_id", None), winner_color)
     othello_games.pop(game_id, None)
 
@@ -388,7 +395,7 @@ async def finish_othello_game(interaction, game_id: str, prefix: str = ""):
         description=(
             f"{prefix + chr(10) if prefix else ''}"
             f"ゲーム終了！\n黒 {black_count} - 白 {white_count}\n"
-            f"結果: **{winner}**\n"
+            f"勝者: **{winner}**\n"
             f"{coin_text}"
         ),
         color=0x2ECC71,
@@ -413,9 +420,9 @@ def generate_othello_image(board, valid_moves=None):
     draw = ImageDraw.Draw(board_img)
     try:
         from PIL import ImageFont
-        font = ImageFont.load_default()
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
     except Exception:
-        font = None
+        font = ImageFont.load_default()
 
     # グリッド線
     for i in range(9):
@@ -469,18 +476,22 @@ def generate_othello_image(board, valid_moves=None):
     for x in range(8):
         label = chr(65 + x)
         lx = x * cell_size + cell_size // 2
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         # 上に描画
-        draw.text((lx - 6, 2), label, fill=(255, 255, 255), font=font)
+        draw.text((lx - tw / 2, 4), label, fill=(255, 255, 255), font=font)
         # 下にも描画
-        draw.text((lx - 6, board_size - 14), label, fill=(255, 255, 255), font=font)
+        draw.text((lx - tw / 2, board_size - th - 4), label, fill=(255, 255, 255), font=font)
 
     for y in range(8):
         label = str(y + 1)
         ly = y * cell_size + cell_size // 2
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         # 左に描画
-        draw.text((2, ly - 6), label, fill=(255, 255, 255), font=font)
+        draw.text((4, ly - th / 2), label, fill=(255, 255, 255), font=font)
         # 右にも描画
-        draw.text((board_size - 12, ly - 6), label, fill=(255, 255, 255), font=font)
+        draw.text((board_size - tw - 4, ly - th / 2), label, fill=(255, 255, 255), font=font)
 
     buffer = io.BytesIO()
     board_img.save(buffer, format="PNG")

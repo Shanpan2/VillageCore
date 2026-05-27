@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from database.config_db import db_get, db_set
 from Features.daifugo import DEFAULT_RULES, daifugo_games, rules_text
+from Features.othello import generate_othello_image, get_valid_moves, new_board, othello_games
 from Features.poker import poker_games, set_poker_bet_amount
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import sevens_games
@@ -22,6 +23,7 @@ GAME_STORES = {
     "sevens": ("7並べ", sevens_games),
     "daifugo": ("大富豪", daifugo_games),
     "poker": ("ポーカー", poker_games),
+    "othello": ("オセロ", othello_games),
 }
 
 GAME_BEGIN_COMMANDS = {
@@ -52,6 +54,11 @@ GAME_RULES = {
         "強い順はストレートフラッシュ、フォーカード、フルハウス、フラッシュ、"
         "ストレート、スリーカード、ツーペア、ワンペア、ハイカードです。"
     ),
+    "othello": (
+        "オセロは黒と白の石で相手の石を挟んで裏返すゲームです。"
+        "置ける場所がない時は自動でパスされ、両方が置けなくなると終了します。"
+        "最後に石が多いプレイヤーの勝ちです。"
+    ),
 }
 
 
@@ -63,7 +70,7 @@ def quick_embed() -> discord.Embed:
     )
     embed.add_field(
         name="ゲーム作成",
-        value="UNO / 7並べ / 大富豪 / ポーカー",
+        value="UNO / 7並べ / 大富豪 / ポーカー / オセロ",
         inline=False,
     )
     embed.add_field(
@@ -209,6 +216,48 @@ def create_poker_game(interaction: discord.Interaction) -> str:
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
 
+def create_othello_game(interaction: discord.Interaction) -> tuple[str, discord.Embed | None, discord.File | None]:
+    game_id = str(interaction.channel_id)
+    if game_id in othello_games:
+        return "このチャンネルにはすでにオセロがあります。", None, None
+    board = new_board()
+    othello_games[game_id] = {
+        "board": board,
+        "turn": 1,
+        "black_id": interaction.user.id,
+        "white_id": None,
+        "creator_id": interaction.user.id,
+    }
+    valid_moves = get_valid_moves(board, 1)
+    file = discord.File(generate_othello_image(board, valid_moves), filename="othello.png")
+    embed = discord.Embed(
+        title="🎮 オセロ開始！",
+        description=(
+            f"黒番（先手）：{interaction.user.mention}\n"
+            "白番（後手）：まだ参加していません。\n"
+            "参加後、置ける場所を選択してください。"
+        ),
+        color=0x2ECC71,
+    )
+    return "オセロを作成しました。", embed, file
+
+
+async def send_othello_lobby(interaction: discord.Interaction, text_on_error: bool = False):
+    from views.othello_views import OthelloView
+
+    text, embed, file = create_othello_game(interaction)
+    state = othello_games.get(str(interaction.channel_id))
+    if embed and file and state:
+        valid_moves = get_valid_moves(state["board"], state["turn"])
+        await interaction.response.send_message(
+            embed=embed,
+            file=file,
+            view=OthelloView(str(interaction.channel_id), valid_moves, show_join=True),
+        )
+        return
+    await interaction.response.send_message(text, ephemeral=text_on_error)
+
+
 def game_lobby_text(game: str, state: dict | None) -> str:
     label, _ = GAME_STORES[game]
     if not state:
@@ -225,7 +274,7 @@ def game_lobby_text(game: str, state: dict | None) -> str:
     if game == "daifugo":
         lines.insert(1, f"有効ルール: {rules_text(state)}")
     lines.append("")
-    lines.append("下のボタンで参加、開始、中止、ルール確認ができます。")
+    lines.append("下のボタンで参加、抜ける、開始、中止、ルール確認ができます。")
     return "\n".join(lines)
 
 
@@ -241,6 +290,9 @@ class GameStartButton(discord.ui.Button):
             "daifugo": create_daifugo_game,
             "poker": create_poker_game,
         }
+        if self.game == "othello":
+            await send_othello_lobby(interaction, text_on_error=True)
+            return
         text = creators[self.game](interaction)
         _, store = GAME_STORES[self.game]
         state = store.get(str(interaction.channel_id))
@@ -336,7 +388,7 @@ def game_status_embed(game: str) -> discord.Embed:
     label, store = GAME_STORES[game]
     state = store.get("__none__")
     embed = discord.Embed(title=f"{label} パネル", color=0x3498DB)
-    embed.description = "下のボタンから募集作成、参加、開始、中止、ルール確認ができます。"
+    embed.description = "下のボタンから募集作成、参加、抜ける、開始、中止、ルール確認ができます。"
     return embed
 
 
@@ -353,6 +405,25 @@ def join_game(interaction: discord.Interaction, game: str) -> str:
         return "ポーカーに参加できるのは最大8人までです。"
     state["players"].append(interaction.user.id)
     return f"{interaction.user.mention} が{label}に参加しました。現在の参加者: {len(state['players'])}人"
+
+
+def leave_game(interaction: discord.Interaction, game: str) -> str:
+    label, store = GAME_STORES[game]
+    state = store.get(str(interaction.channel_id))
+    if not state:
+        return f"このチャンネルに{label}の募集はありません。"
+    if state.get("started") or state.get("hands"):
+        return f"{label}はすでに開始されています。開始後は降参ボタンを使ってください。"
+    players = state.get("players", [])
+    if interaction.user.id not in players:
+        return "まだ参加していません。"
+    players.remove(interaction.user.id)
+    if not players:
+        store.pop(str(interaction.channel_id), None)
+        return f"{interaction.user.mention} が抜けたため、{label}募集を終了しました。"
+    if state.get("creator_id") == interaction.user.id:
+        state["creator_id"] = players[0]
+    return f"{interaction.user.mention} が{label}から抜けました。現在の参加者: {len(players)}人"
 
 
 def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]:
@@ -405,17 +476,34 @@ class GameActionButton(discord.ui.Button):
         }
 
         if self.action == "create":
+            if self.game == "othello":
+                await send_othello_lobby(interaction, text_on_error=True)
+                return
             text = creators[self.game](interaction)
             _, store = GAME_STORES[self.game]
             state = store.get(str(interaction.channel_id))
             await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=GameControlView(self.game))
         elif self.action == "join":
+            if self.game == "othello":
+                await interaction.response.send_message("オセロは作成された盤面の「参加する」ボタンから参加してください。", ephemeral=True)
+                return
             _, store = GAME_STORES[self.game]
             before_state = store.get(str(interaction.channel_id))
             before_players = list(before_state.get("players", [])) if before_state else []
             text = join_game(interaction, self.game)
             state = store.get(str(interaction.channel_id))
             if state and interaction.message and len(state.get("players", [])) > len(before_players):
+                await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        elif self.action == "leave":
+            _, store = GAME_STORES[self.game]
+            before_state = store.get(str(interaction.channel_id))
+            text = leave_game(interaction, self.game)
+            state = store.get(str(interaction.channel_id))
+            if before_state and not state and interaction.message:
+                await interaction.response.edit_message(content=text, view=None)
+            elif state and interaction.message:
                 await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
             else:
                 await interaction.response.send_message(text, ephemeral=True)
@@ -444,8 +532,10 @@ class GameControlView(discord.ui.View):
     def __init__(self, game: str):
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(GameActionButton("募集作成", game, "create", discord.ButtonStyle.primary, 0))
-        self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
-        self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 0))
+        if game != "othello":
+            self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
+            self.add_item(GameActionButton("抜ける", game, "leave", discord.ButtonStyle.secondary, 0))
+            self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 1))
         self.add_item(GameActionButton("中止", game, "cancel", discord.ButtonStyle.danger, 1))
         if game == "poker":
             self.add_item(PokerBetButton())
@@ -459,6 +549,7 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label="7並べ", value="sevens", description="7を中心にカードを順番につなげるゲーム"),
             discord.SelectOption(label="大富豪", value="daifugo", description="手札を早く出し切る定番トランプゲーム"),
             discord.SelectOption(label="ポーカー", value="poker", description="5枚の役で勝負するトランプゲーム"),
+            discord.SelectOption(label="オセロ", value="othello", description="盤面に石を置いて相手の石を裏返すゲーム"),
         ]
         super().__init__(placeholder="遊ぶゲームを選んでください", options=options)
 
@@ -467,7 +558,7 @@ class GameSelect(discord.ui.Select):
         label, _ = GAME_STORES[game]
         embed = discord.Embed(
             title=f"{label} パネル",
-            description="募集作成、参加、開始、中止、ルール確認をボタンで操作できます。",
+            description="募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。",
             color=0x3498DB,
         )
         await interaction.response.send_message(embed=embed, view=GameControlView(game))
@@ -486,6 +577,7 @@ class QuickView(discord.ui.View):
         self.add_item(GameStartButton("7並べ作成", "sevens", 0))
         self.add_item(GameStartButton("大富豪作成", "daifugo", 0))
         self.add_item(GameStartButton("ポーカー作成", "poker", 0))
+        self.add_item(GameStartButton("オセロ作成", "othello", 1))
         self.add_item(OmikujiButton())
         self.add_item(DiceButton())
         self.add_item(JankenButton())
@@ -509,7 +601,7 @@ class Quick(commands.Cog):
             title="ゲームパネル",
             description=(
                 "遊びたいゲームを選んでください。\n"
-                "選択後に、募集作成・参加・開始・中止・ルール確認をボタンで操作できます。"
+                "選択後に、募集作成・参加・抜ける・開始・中止・ルール確認をボタンで操作できます。"
             ),
             color=0x2ECC71,
         )
@@ -523,6 +615,7 @@ class Quick(commands.Cog):
             app_commands.Choice(name="7並べ", value="sevens"),
             app_commands.Choice(name="大富豪", value="daifugo"),
             app_commands.Choice(name="ポーカー", value="poker"),
+            app_commands.Choice(name="オセロ", value="othello"),
         ]
     )
     async def game_cancel(

@@ -33,6 +33,28 @@ def validate_month_day(month: int, day: int):
         raise ValueError(f"{month}月は1から{max_day}日までです。")
 
 
+def zodiac_sign(month: int, day: int) -> str:
+    signs = [
+        ((1, 20), (2, 18), "水瓶座"),
+        ((2, 19), (3, 20), "魚座"),
+        ((3, 21), (4, 19), "牡羊座"),
+        ((4, 20), (5, 20), "牡牛座"),
+        ((5, 21), (6, 21), "双子座"),
+        ((6, 22), (7, 22), "蟹座"),
+        ((7, 23), (8, 22), "獅子座"),
+        ((8, 23), (9, 22), "乙女座"),
+        ((9, 23), (10, 23), "天秤座"),
+        ((10, 24), (11, 22), "蠍座"),
+        ((11, 23), (12, 21), "射手座"),
+        ((12, 22), (12, 31), "山羊座"),
+        ((1, 1), (1, 19), "山羊座"),
+    ]
+    for start, end, sign in signs:
+        if (month, day) >= start and (month, day) <= end:
+            return sign
+    return "不明"
+
+
 class Birthday(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -95,7 +117,7 @@ class Birthday(commands.Cog):
             name = member.display_name if member else entry.get("name", "member")
             embed = discord.Embed(
                 title="誕生日おめでとうございます！",
-                description=f"{mention} さん、素敵な一年になりますように。",
+                description=f"{mention} さん、素敵な一年になりますように。\n星座: **{zodiac_sign(now.month, now.day)}**",
                 color=0xF7B731,
             )
             embed.set_footer(text=f"{name} / {now.month}月{now.day}日")
@@ -137,10 +159,11 @@ class Birthday(commands.Cog):
             "month": month,
             "day": day,
             "name": member.display_name,
+            "zodiac": zodiac_sign(month, day),
         }
         await self.save_settings(interaction.guild_id, settings)
         await interaction.response.send_message(
-            f"{member.mention} の誕生日を **{month}月{day}日** に登録しました。",
+            f"{member.mention} の誕生日を **{month}月{day}日** に登録しました。\n星座: **{zodiac_sign(month, day)}**",
             ephemeral=True,
         )
 
@@ -173,7 +196,8 @@ class Birthday(commands.Cog):
         for user_id, entry in sorted(birthdays.items(), key=lambda item: (item[1]["month"], item[1]["day"])):
             member = interaction.guild.get_member(int(user_id))
             name = member.display_name if member else entry.get("name", user_id)
-            rows.append(f"{entry['month']:02d}/{entry['day']:02d} - {name}")
+            sign = entry.get("zodiac") or zodiac_sign(int(entry["month"]), int(entry["day"]))
+            rows.append(f"{entry['month']:02d}/{entry['day']:02d} - {name}（{sign}）")
 
         embed = discord.Embed(title="誕生日一覧", description="\n".join(rows[:60]), color=0xF7B731)
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -187,6 +211,16 @@ class Birthday(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         count = await self.notify_for_guild(interaction.guild, datetime.now(JST), manual=True)
         await interaction.followup.send(f"誕生日通知を確認しました。送信件数: {count}", ephemeral=True)
+
+    @app_commands.command(name="birthday_zodiac", description="誕生日から星座を計算します")
+    @app_commands.describe(month="月", day="日")
+    async def birthday_zodiac(self, interaction: discord.Interaction, month: int, day: int):
+        try:
+            validate_month_day(month, day)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+        await interaction.response.send_message(f"**{month}月{day}日** の星座は **{zodiac_sign(month, day)}** です。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
