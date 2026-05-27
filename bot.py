@@ -417,23 +417,24 @@ async def handle_help_site(request):
           <div class="notice">
             <p><strong>おすすめの使い方</strong><br>
               ゲームは <code>/game</code> から選ぶのがおすすめです。
-              UNO、7並べ、大富豪、ポーカーの募集作成、参加、開始、中止、ルール確認をボタンで操作できます。
+              UNO、7並べ、大富豪、ポーカー、オセロの募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。
               今後は個別コマンドより <code>/game</code> をメイン導線にしていきます。
             </p>
           </div>
           <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
-            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカーを選べます。募集作成、参加、開始、中止、ルール確認をボタンで操作できます。</div>
+            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロを選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
             <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。場のカードと同じ色、数字、記号を出して、先に手札をなくした人が勝ちです。</div>
             <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届きます。</div>
             <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。</div>
             <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。</div>
+            <div class="tile"><strong>オセロ</strong><code>/game</code> でオセロを選びます。対人戦またはAI対戦の難易度を選んで開始できます。</div>
             <div class="tile"><strong>募集</strong><code>/event_create</code> で参加/未定/不参加ボタン付き募集を作れます。中止は <code>/event_cancel</code> です。</div>
             <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲームパネル、おみくじ、1d100、じゃんけんを実行できます。</div>
           </div>
           <div class="notice">
             <p><strong>ゲーム募集の中止</strong><br>
-              UNO、7並べ、大富豪、ポーカーの募集中止は <code>/game</code> の「中止」ボタンから行えます。
+              UNO、7並べ、大富豪、ポーカー、オセロの募集中止は <code>/game</code> の「中止」ボタンから行えます。
               募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
             </p>
             <p><strong>UNOのルール</strong><br>

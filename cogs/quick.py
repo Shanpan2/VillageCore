@@ -8,7 +8,16 @@ from discord.ext import commands
 
 from database.config_db import db_get, db_set
 from Features.daifugo import DEFAULT_RULES, daifugo_games, rules_text
-from Features.othello import generate_othello_image, get_valid_moves, new_board, othello_games
+from Features.othello import (
+    AI_DIFFICULTIES,
+    AI_PLAYER_ID,
+    generate_othello_image,
+    get_valid_moves,
+    new_board,
+    othello_games,
+    run_ai_turns,
+    send_othello_state,
+)
 from Features.poker import poker_games, set_poker_bet_amount
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import sevens_games
@@ -258,6 +267,43 @@ async def send_othello_lobby(interaction: discord.Interaction, text_on_error: bo
     await interaction.response.send_message(text, ephemeral=text_on_error)
 
 
+async def send_othello_ai_lobby(interaction: discord.Interaction, difficulty: str):
+    game_id = str(interaction.channel_id)
+    if game_id in othello_games:
+        await interaction.response.send_message("このチャンネルにはすでにオセロがあります。", ephemeral=True)
+        return
+
+    board = new_board()
+    othello_games[game_id] = {
+        "board": board,
+        "turn": 1,
+        "black_id": interaction.user.id,
+        "white_id": AI_PLAYER_ID,
+        "creator_id": interaction.user.id,
+        "ai": True,
+        "human_id": interaction.user.id,
+        "human_color": 1,
+        "ai_color": 2,
+        "difficulty": difficulty,
+        "bet": 0,
+        "coin_settled": False,
+    }
+    prefix = f"AI対戦を開始しました。難易度: **{AI_DIFFICULTIES[difficulty]['label']}**"
+    prefix = await run_ai_turns(othello_games[game_id], prefix)
+    await send_othello_state(interaction, game_id, prefix, initial=True)
+
+
+def othello_mode_embed() -> discord.Embed:
+    return discord.Embed(
+        title="オセロ パネル",
+        description=(
+            "遊び方を選んでください。\n"
+            "対人戦は参加ボタンで後手が入ります。AI戦はあなたが先手、賭けなしで開始します。"
+        ),
+        color=0x3498DB,
+    )
+
+
 def game_lobby_text(game: str, state: dict | None) -> str:
     label, _ = GAME_STORES[game]
     if not state:
@@ -291,7 +337,7 @@ class GameStartButton(discord.ui.Button):
             "poker": create_poker_game,
         }
         if self.game == "othello":
-            await send_othello_lobby(interaction, text_on_error=True)
+            await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
             return
         text = creators[self.game](interaction)
         _, store = GAME_STORES[self.game]
@@ -528,6 +574,31 @@ class GameActionButton(discord.ui.Button):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+class OthelloModeButton(discord.ui.Button):
+    def __init__(self, label: str, mode: str, difficulty: str | None = None, row: int = 0):
+        style = discord.ButtonStyle.primary if mode == "pvp" else discord.ButtonStyle.success
+        super().__init__(label=label, style=style, row=row)
+        self.mode = mode
+        self.difficulty = difficulty
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.mode == "pvp":
+            await send_othello_lobby(interaction, text_on_error=True)
+            return
+        await send_othello_ai_lobby(interaction, self.difficulty or "normal")
+
+
+class OthelloModeView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
+        self.add_item(OthelloModeButton("対人作成", "pvp", row=0))
+        self.add_item(OthelloModeButton("AI: 易", "ai", "easy", row=0))
+        self.add_item(OthelloModeButton("AI: 普通", "ai", "normal", row=0))
+        self.add_item(OthelloModeButton("AI: 難", "ai", "hard", row=1))
+        self.add_item(OthelloModeButton("AI: 達人", "ai", "master", row=1))
+        self.add_item(GameActionButton("ルール", "othello", "rules", discord.ButtonStyle.secondary, 1))
+
+
 class GameControlView(discord.ui.View):
     def __init__(self, game: str):
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
@@ -556,6 +627,9 @@ class GameSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         game = self.values[0]
         label, _ = GAME_STORES[game]
+        if game == "othello":
+            await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
+            return
         embed = discord.Embed(
             title=f"{label} パネル",
             description="募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。",

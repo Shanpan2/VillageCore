@@ -72,6 +72,27 @@ def command_category(command: app_commands.Command) -> str:
 
 def build_category_embed(bot: commands.Bot, category: str) -> discord.Embed:
     data = CATEGORIES[category]
+    if category == "games":
+        embed = discord.Embed(
+            title="🎮 ゲーム",
+            description=(
+                "ゲームは **`/game`** から遊ぶのがおすすめです。\n"
+                "ゲームを選ぶと、募集作成・参加・抜ける・開始・中止・ルール確認をボタンで操作できます。\n\n"
+                "**対応ゲーム**\n"
+                "UNO / 7並べ / 大富豪 / ポーカー / オセロ\n\n"
+                "**オセロ**\n"
+                "`/game` からオセロを選ぶと、対人戦またはAI対戦の難易度を選べます。\n\n"
+                "**すぐ遊ぶ**\n"
+                "`/quick` からゲーム作成、おみくじ、1d100、じゃんけんをすぐ実行できます。\n\n"
+                "**補助コマンド**\n"
+                "`/game_cancel` は募集を中止する予備コマンドです。\n"
+                "個別のゲーム開始コマンドは、パネルが使えない時の予備として残しています。"
+            ),
+            color=0x00BFFF,
+        )
+        embed.set_footer(text="普段は /game と /quick を使えば大丈夫です。")
+        return embed
+
     commands_list = sorted(
         [
             command
