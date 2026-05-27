@@ -186,7 +186,7 @@ class SurrenderButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            from Features.othello import othello_games
+            from Features.othello import othello_games, settle_ai_coins
 
             game = othello_games.get(self.game_id)
             if not game:
@@ -201,8 +201,12 @@ class SurrenderButton(discord.ui.Button):
             # 決着: 押した人が降参 -> 相手の勝利
             if user_id == game.get("black_id"):
                 winner = "白"
+                winner_color = 2
             else:
                 winner = "黒"
+                winner_color = 1
+
+            coin_text = await settle_ai_coins(game, interaction.guild_id, winner_color)
 
             # ゲームデータを削除
             try:
@@ -216,7 +220,7 @@ class SurrenderButton(discord.ui.Button):
                 await interaction.message.edit(
                     embed=discord.Embed(
                         title="🎮 オセロ 終了",
-                        description=f"降参により {winner} の勝利です。",
+                        description=f"降参により {winner} の勝利です。\n{coin_text}",
                         color=0x2ECC71,
                     ),
                     view=None,

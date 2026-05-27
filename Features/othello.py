@@ -1,12 +1,37 @@
 import io
+import random
 import traceback
 import discord
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw
+from database.config_db import db_get, db_set
 from views.othello_views import OthelloView
 
 othello_games = {}
+
+AI_PLAYER_ID = 0
+AI_DIFFICULTIES = {
+    "easy": {"label": "易", "depth": 1, "mistake": 0.45, "profit": 0.10},
+    "normal": {"label": "普通", "depth": 2, "mistake": 0.20, "profit": 0.30},
+    "hard": {"label": "難", "depth": 3, "mistake": 0.08, "profit": 0.70},
+    "master": {"label": "達人", "depth": 4, "mistake": 0.0, "profit": 1.00},
+}
+CORNER_SCORE = 120
+EDGE_SCORE = 18
+MOBILITY_SCORE = 8
+
+
+def coin_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin:{guild_id}:{user_id}"
+
+
+async def get_coin_balance(guild_id: int, user_id: int) -> int:
+    return int(await db_get(coin_key(guild_id, user_id)) or "0")
+
+
+async def set_coin_balance(guild_id: int, user_id: int, amount: int):
+    await db_set(coin_key(guild_id, user_id), str(max(0, amount)))
 
 class Othello(commands.Cog):
     def __init__(self, bot):
@@ -59,6 +84,84 @@ class Othello(commands.Cog):
                 )
             except Exception:
                 pass
+
+    @app_commands.command(name="othello_ai", description="AIとオセロで対戦します")
+    @app_commands.describe(
+        first="先攻/後攻を選びます",
+        difficulty="AIの難易度",
+        bet="賭けるコイン数。0で賭けなし",
+    )
+    @app_commands.choices(
+        first=[
+            app_commands.Choice(name="先攻（黒）", value="black"),
+            app_commands.Choice(name="後攻（白）", value="white"),
+            app_commands.Choice(name="ランダム", value="random"),
+        ],
+        difficulty=[
+            app_commands.Choice(name="易", value="easy"),
+            app_commands.Choice(name="普通", value="normal"),
+            app_commands.Choice(name="難", value="hard"),
+            app_commands.Choice(name="達人", value="master"),
+        ],
+    )
+    async def othello_ai(
+        self,
+        interaction: discord.Interaction,
+        first: app_commands.Choice[str],
+        difficulty: app_commands.Choice[str],
+        bet: int = 0,
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if bet < 0:
+            await interaction.response.send_message("賭けるコイン数は0以上にしてください。", ephemeral=True)
+            return
+        if bet > 0:
+            balance = await get_coin_balance(interaction.guild_id, interaction.user.id)
+            if balance < bet:
+                await interaction.response.send_message(f"コインが足りません。現在の所持コインは **{balance}** です。", ephemeral=True)
+                return
+            await set_coin_balance(interaction.guild_id, interaction.user.id, balance - bet)
+        await interaction.response.defer()
+
+        player_first = first.value
+        if player_first == "random":
+            player_first = random.choice(["black", "white"])
+
+        human_color = 1 if player_first == "black" else 2
+        ai_color = 2 if human_color == 1 else 1
+        game_id = str(interaction.id)
+
+        board = new_board()
+        othello_games[game_id] = {
+            "board": board,
+            "turn": 1,
+            "black_id": interaction.user.id if human_color == 1 else AI_PLAYER_ID,
+            "white_id": interaction.user.id if human_color == 2 else AI_PLAYER_ID,
+            "ai": True,
+            "human_id": interaction.user.id,
+            "human_color": human_color,
+            "ai_color": ai_color,
+            "difficulty": difficulty.value,
+            "bet": bet,
+            "coin_settled": False,
+        }
+
+        prefix = f"AI対戦を開始しました。難易度: **{AI_DIFFICULTIES[difficulty.value]['label']}**"
+        if bet > 0:
+            prefix += f"\n賭けコイン: **{bet}**"
+        prefix = await run_ai_turns(othello_games[game_id], prefix)
+        await send_othello_state(interaction, game_id, prefix, initial=True)
+
+
+def new_board() -> list[list[int]]:
+    board = [[0] * 8 for _ in range(8)]
+    board[3][3] = 2
+    board[4][4] = 2
+    board[3][4] = 1
+    board[4][3] = 1
+    return board
 def get_flipped(board, x, y, turn):
     enemy = 2 if turn == 1 else 1
     flipped = []
@@ -90,6 +193,213 @@ def get_valid_moves(board, turn):
             if get_flipped(board, x, y, turn):
                 moves.append((x, y))
     return moves
+
+
+def clone_board(board):
+    return [row.copy() for row in board]
+
+
+def apply_move(board, x, y, turn):
+    flipped = get_flipped(board, x, y, turn)
+    if not flipped:
+        return False
+    board[y][x] = turn
+    for fx, fy in flipped:
+        board[fy][fx] = turn
+    return True
+
+
+def opponent(turn: int) -> int:
+    return 2 if turn == 1 else 1
+
+
+def evaluate_board(board, ai_color: int) -> int:
+    human_color = opponent(ai_color)
+    ai_count = sum(cell == ai_color for row in board for cell in row)
+    human_count = sum(cell == human_color for row in board for cell in row)
+    score = (ai_count - human_count) * 3
+
+    for x, y in [(0, 0), (7, 0), (0, 7), (7, 7)]:
+        if board[y][x] == ai_color:
+            score += CORNER_SCORE
+        elif board[y][x] == human_color:
+            score -= CORNER_SCORE
+
+    for i in range(8):
+        for x, y in [(i, 0), (i, 7), (0, i), (7, i)]:
+            if board[y][x] == ai_color:
+                score += EDGE_SCORE
+            elif board[y][x] == human_color:
+                score -= EDGE_SCORE
+
+    score += (len(get_valid_moves(board, ai_color)) - len(get_valid_moves(board, human_color))) * MOBILITY_SCORE
+    return score
+
+
+def minimax(board, turn: int, ai_color: int, depth: int, maximizing: bool) -> int:
+    moves = get_valid_moves(board, turn)
+    if depth <= 0 or not moves:
+        return evaluate_board(board, ai_color)
+
+    values = []
+    for x, y in moves:
+        next_board = clone_board(board)
+        apply_move(next_board, x, y, turn)
+        values.append(minimax(next_board, opponent(turn), ai_color, depth - 1, not maximizing))
+    return max(values) if maximizing else min(values)
+
+
+def choose_ai_move(board, ai_color: int, difficulty: str) -> tuple[int, int] | None:
+    moves = get_valid_moves(board, ai_color)
+    if not moves:
+        return None
+    config = AI_DIFFICULTIES.get(difficulty, AI_DIFFICULTIES["normal"])
+    if config["mistake"] and random.random() < config["mistake"]:
+        return random.choice(moves)
+
+    depth = config["depth"]
+    scored = []
+    for x, y in moves:
+        next_board = clone_board(board)
+        apply_move(next_board, x, y, ai_color)
+        score = minimax(next_board, opponent(ai_color), ai_color, depth - 1, False)
+        scored.append((score, x, y))
+    scored.sort(reverse=True)
+    return scored[0][1], scored[0][2]
+
+
+async def settle_ai_coins(game: dict, guild_id: int | None, winner_color: int | None) -> str:
+    bet = int(game.get("bet", 0) or 0)
+    if game.get("coin_settled") or not guild_id or bet <= 0:
+        return ""
+    game["coin_settled"] = True
+
+    human_id = game.get("human_id")
+    human_color = game.get("human_color")
+    balance = await get_coin_balance(guild_id, human_id)
+    if winner_color is None:
+        await set_coin_balance(guild_id, human_id, balance + bet)
+        return f"引き分けのため **{bet}** コインを返却しました。"
+    if winner_color == human_color:
+        profit_rate = AI_DIFFICULTIES.get(game.get("difficulty"), AI_DIFFICULTIES["normal"])["profit"]
+        payout = bet + max(1, int(bet * profit_rate))
+        await set_coin_balance(guild_id, human_id, balance + payout)
+        return f"勝利報酬として **{payout}** コインを受け取りました。"
+    return f"敗北したため **{bet}** コインを失いました。"
+
+
+def player_line(game: dict) -> str:
+    black = "AI" if game.get("black_id") == AI_PLAYER_ID else f"<@{game.get('black_id')}>"
+    white_id = game.get("white_id")
+    white = "AI" if white_id == AI_PLAYER_ID else (f"<@{white_id}>" if white_id else "まだ参加していません。")
+    return f"黒: {black}\n白: {white}\n"
+
+
+async def run_ai_turns(game: dict, prefix: str = "") -> str:
+    notes = [prefix] if prefix else []
+    while game.get("ai") and game["turn"] == game.get("ai_color"):
+        board = game["board"]
+        ai_color = game["ai_color"]
+        move = choose_ai_move(board, ai_color, game.get("difficulty", "normal"))
+        if move is None:
+            next_turn = opponent(ai_color)
+            if get_valid_moves(board, next_turn):
+                game["turn"] = next_turn
+                notes.append("AIは置ける場所がないためパスしました。")
+                break
+            break
+        x, y = move
+        apply_move(board, x, y, ai_color)
+        notes.append(f"AIが {chr(65 + x)}{y + 1} に置きました。")
+        game["turn"] = opponent(ai_color)
+
+        human_moves = get_valid_moves(board, game["turn"])
+        if human_moves:
+            break
+        ai_moves = get_valid_moves(board, ai_color)
+        if ai_moves:
+            notes.append("あなたは置ける場所がないためパスしました。")
+            game["turn"] = ai_color
+            continue
+        break
+    return "\n".join(notes)
+
+
+async def send_othello_state(interaction, game_id: str, prefix: str = "", initial: bool = False):
+    game = othello_games.get(game_id)
+    if not game:
+        return
+    board = game["board"]
+    valid_moves = get_valid_moves(board, game["turn"])
+
+    if not valid_moves:
+        other = opponent(game["turn"])
+        other_moves = get_valid_moves(board, other)
+        if other_moves:
+            game["turn"] = other
+            valid_moves = other_moves
+            prefix = (prefix + "\n" if prefix else "") + "置ける場所がないためターンをスキップしました。"
+        else:
+            await finish_othello_game(interaction, game_id, prefix)
+            return
+
+    img = generate_othello_image(board, valid_moves)
+    file = discord.File(img, filename="othello.png")
+    difficulty = game.get("difficulty")
+    diff_text = f"\n難易度: **{AI_DIFFICULTIES[difficulty]['label']}**" if difficulty in AI_DIFFICULTIES else ""
+    bet_text = f"\n賭けコイン: **{game.get('bet', 0)}**" if game.get("bet", 0) else ""
+    embed = discord.Embed(
+        title="🎮 オセロ",
+        description=(
+            f"{prefix + chr(10) if prefix else ''}"
+            f"{player_line(game)}"
+            f"{'黒' if game['turn'] == 1 else '白'}番です。"
+            f"{diff_text}{bet_text}\n"
+            "置ける場所を選択してください。"
+        ),
+        color=0x2ECC71,
+    )
+    view = OthelloView(game_id, valid_moves, show_join=(game.get("white_id") is None))
+    if initial:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, file=file, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, file=file, view=view)
+    else:
+        await interaction.message.edit(embed=embed, attachments=[file], view=view)
+
+
+async def finish_othello_game(interaction, game_id: str, prefix: str = ""):
+    game = othello_games.get(game_id)
+    if not game:
+        return
+    board = game["board"]
+    black_count = sum(cell == 1 for row in board for cell in row)
+    white_count = sum(cell == 2 for row in board for cell in row)
+    winner_color = 1 if black_count > white_count else 2 if white_count > black_count else None
+    winner = "黒" if winner_color == 1 else "白" if winner_color == 2 else "引き分け"
+    coin_text = await settle_ai_coins(game, getattr(interaction, "guild_id", None), winner_color)
+    othello_games.pop(game_id, None)
+
+    img = generate_othello_image(board, [])
+    file = discord.File(img, filename="othello.png")
+    embed = discord.Embed(
+        title="🎮 オセロ 終了",
+        description=(
+            f"{prefix + chr(10) if prefix else ''}"
+            f"ゲーム終了！\n黒 {black_count} - 白 {white_count}\n"
+            f"結果: **{winner}**\n"
+            f"{coin_text}"
+        ),
+        color=0x2ECC71,
+    )
+    try:
+        await interaction.message.edit(embed=embed, attachments=[file], view=None)
+    except Exception:
+        if getattr(interaction, "response", None) and not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, file=file)
+        else:
+            await interaction.followup.send(embed=embed, file=file)
 
 
 def generate_othello_image(board, valid_moves=None):
@@ -225,84 +535,13 @@ async def handle_othello_move(interaction, game_id, x, y):
             await interaction.followup.send("❌ そこには置けません。", ephemeral=True)
             return
 
-        # 石を置く
-        board[y][x] = turn
-        for fx, fy in flipped:
-            board[fy][fx] = turn
+        apply_move(board, x, y, turn)
+        game["turn"] = opponent(turn)
 
-        # ターン交代
-        game["turn"] = 2 if turn == 1 else 1
-
-        valid_moves = get_valid_moves(board, game["turn"])
-        if not valid_moves:
-            next_turn = 2 if game["turn"] == 1 else 1
-            other_moves = get_valid_moves(board, next_turn)
-            if other_moves:
-                game["turn"] = next_turn
-                valid_moves = other_moves
-                status_text = "置ける場所がないためターンをスキップしました。"
-            else:
-                black_count = sum(cell == 1 for row in board for cell in row)
-                white_count = sum(cell == 2 for row in board for cell in row)
-                if black_count > white_count:
-                    winner = "黒"
-                elif white_count > black_count:
-                    winner = "白"
-                else:
-                    winner = "引き分け"
-                img = generate_othello_image(board, [])
-                file = discord.File(img, filename="othello.png")
-                try:
-                    await interaction.message.edit(
-                        embed=discord.Embed(
-                            title="🎮 オセロ 終了",
-                            description=(
-                                f"ゲーム終了！\n"
-                                f"黒 {black_count} - 白 {white_count} で {winner} の勝利です。"
-                            ),
-                            color=0x2ECC71,
-                        ),
-                        attachments=[file],
-                        view=None,
-                    )
-                except Exception:
-                    # 編集できなければフォローアップで送る
-                    await interaction.followup.send(
-                        f"ゲーム終了！ 黒 {black_count} - 白 {white_count} で {winner} の勝利です。",
-                        ephemeral=False,
-                    )
-                return
-        else:
-            status_text = "置ける場所を選択してください。"
-
-        img = generate_othello_image(board, valid_moves)
-        file = discord.File(img, filename="othello.png")
-
-        player_text = (
-            f"黒: <@{game['black_id']}>\n"
-            f"白: <@{game['white_id']}>\n"
-            if game["white_id"]
-            else f"黒: <@{game['black_id']}>\n白: まだ参加していません。\n"
-        )
-
-        embed = discord.Embed(
-            title="🎮 オセロ",
-            description=(
-                f"{player_text}"
-                f"{'黒' if game['turn'] == 1 else '白'}番です。\n"
-                f"{status_text}"
-            ),
-            color=0x2ECC71,
-        )
-        try:
-            await interaction.message.edit(
-                embed=embed,
-                attachments=[file],
-                view=OthelloView(game_id, valid_moves, show_join=(game.get("white_id") is None)),
-            )
-        except Exception:
-            # 編集に失敗したらフォローアップで代替表示
-            await interaction.followup.send(embed=embed, attachments=[file], ephemeral=False)
+        prefix = f"<@{interaction.user.id}> が {chr(65 + x)}{y + 1} に置きました。"
+        if game.get("ai"):
+            prefix = await run_ai_turns(game, prefix)
+        await send_othello_state(interaction, game_id, prefix)
     except Exception as e:
         print(f"[Othello] move error: {type(e).__name__}: {e}")
         traceback.print_exc()
@@ -317,4 +556,3 @@ async def handle_othello_move(interaction, game_id, x, y):
 
 async def setup(bot):
     await bot.add_cog(Othello(bot))
-
