@@ -63,6 +63,59 @@ def titles_key(guild_id: int, user_id: int) -> str:
     return f"community_titles:{guild_id}:{user_id}"
 
 
+def badges_key(guild_id: int, user_id: int) -> str:
+    return f"community_badges:{guild_id}:{user_id}"
+
+
+COIN_MILESTONES = [
+    {"coins": 50, "kind": "badge", "name": "小銭持ち"},
+    {"coins": 100, "kind": "title", "name": "村の財布"},
+    {"coins": 250, "kind": "badge", "name": "コツコツ村民"},
+    {"coins": 500, "kind": "title", "name": "堅実な貯金家"},
+    {"coins": 1000, "kind": "title_role", "name": "村の富豪"},
+    {"coins": 2000, "kind": "badge", "name": "伝説の資産家"},
+]
+
+
+async def add_unique_json_value(key: str, value: str, limit: int = 30) -> bool:
+    values = await get_json(key, [])
+    if value in values:
+        return False
+    values.append(value)
+    await set_json(key, values[:limit])
+    return True
+
+
+async def apply_coin_rewards(guild: discord.Guild | None, member: discord.Member | None, coins: int) -> list[str]:
+    if not guild or not member:
+        return []
+
+    messages = []
+    for milestone in COIN_MILESTONES:
+        if coins < milestone["coins"]:
+            continue
+        name = milestone["name"]
+        kind = milestone["kind"]
+        if kind in ("title", "title_role"):
+            added = await add_unique_json_value(titles_key(guild.id, member.id), name)
+            if added:
+                messages.append(f"称号「{name}」を獲得")
+        if kind == "badge":
+            added = await add_unique_json_value(badges_key(guild.id, member.id), name)
+            if added:
+                messages.append(f"バッジ「{name}」を獲得")
+        if kind == "title_role":
+            role = discord.utils.get(guild.roles, name=name)
+            bot_member = guild.me
+            if role and bot_member and role not in member.roles and role < bot_member.top_role:
+                try:
+                    await member.add_roles(role, reason="Coin milestone reward")
+                    messages.append(f"記念ロール「{name}」を付与")
+                except discord.HTTPException:
+                    pass
+    return messages
+
+
 def event_key(message_id: int) -> str:
     return f"community_event:{message_id}"
 
@@ -240,9 +293,16 @@ class Community(commands.Cog):
         member = member or interaction.user
         data = await get_json(profile_key(interaction.guild_id, member.id), {})
         titles = await get_json(titles_key(interaction.guild_id, member.id), [])
+        badges = await get_json(badges_key(interaction.guild_id, member.id), [])
         coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
+        if isinstance(member, discord.Member):
+            reward_messages = await apply_coin_rewards(interaction.guild, member, coins)
+            if reward_messages:
+                titles = await get_json(titles_key(interaction.guild_id, member.id), [])
+                badges = await get_json(badges_key(interaction.guild_id, member.id), [])
         embed = discord.Embed(title=f"{member.display_name} のプロフィール", color=0x00BFFF)
         embed.add_field(name="称号", value=", ".join(titles) if titles else "なし", inline=False)
+        embed.add_field(name="バッジ", value=", ".join(badges) if badges else "なし", inline=False)
         embed.add_field(name="コイン", value=f"{coins}", inline=True)
         embed.add_field(name="好きなもの", value=data.get("favorite") or "未設定", inline=False)
         embed.add_field(name="活動時間", value=data.get("active_time") or "未設定", inline=False)
@@ -259,6 +319,42 @@ class Community(commands.Cog):
         coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
         await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
 
+    @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")
+    async def coin_ranking(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        all_config = await db_get_all_config()
+        prefix = f"community_coin:{interaction.guild_id}:"
+        ranking = []
+        for key, value in all_config.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                user_id = int(key.removeprefix(prefix))
+                coins = int(value or "0")
+            except ValueError:
+                continue
+            member = interaction.guild.get_member(user_id) if interaction.guild else None
+            if member and member.bot:
+                continue
+            ranking.append((coins, user_id, member))
+
+        ranking.sort(reverse=True, key=lambda item: item[0])
+        if not ranking:
+            await interaction.response.send_message("まだコインランキングに表示できるデータがありません。", ephemeral=True)
+            return
+
+        lines = []
+        for index, (coins, user_id, member) in enumerate(ranking[:10], start=1):
+            name = member.mention if member else f"<@{user_id}>"
+            lines.append(f"{index}. {name} - **{coins}** コイン")
+        own_rank = next((index for index, (_, user_id, _) in enumerate(ranking, start=1) if user_id == interaction.user.id), None)
+        footer = f"あなたの順位: {own_rank}位" if own_rank else "あなたはまだランキングに入っていません。"
+        embed = discord.Embed(title="コインランキング", description="\n".join(lines), color=0xF1C40F)
+        embed.set_footer(text=footer)
+        await interaction.response.send_message(embed=embed)
+
     @app_commands.command(name="coin_daily", description="1日1回コインを受け取ります")
     async def coin_daily(self, interaction: discord.Interaction):
         if not interaction.guild_id:
@@ -272,9 +368,12 @@ class Community(commands.Cog):
         amount = random.randint(5, 15)
         balance_key = coin_key(interaction.guild_id, interaction.user.id)
         current = int(await db_get(balance_key) or "0")
-        await db_set(balance_key, str(current + amount))
+        new_balance = current + amount
+        await db_set(balance_key, str(new_balance))
         await db_set(key, today)
-        await interaction.response.send_message(f"{interaction.user.mention} は **{amount}** コインを受け取りました。現在 **{current + amount}** コインです。")
+        rewards = await apply_coin_rewards(interaction.guild, interaction.user, new_balance)
+        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+        await interaction.response.send_message(f"{interaction.user.mention} は **{amount}** コインを受け取りました。現在 **{new_balance}** コインです。{reward_text}")
 
     @app_commands.command(name="coin_gamble", description="コインを賭けてギャンブルします")
     @app_commands.describe(amount="賭けるコイン数")
@@ -300,9 +399,11 @@ class Community(commands.Cog):
             profit = max(1, amount * bonus_percent // 100)
             new_balance = current + profit
             await db_set(key, str(new_balance))
+            rewards = await apply_coin_rewards(interaction.guild, interaction.user, new_balance)
+            reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
             await interaction.response.send_message(
                 f"当たり！ {interaction.user.mention} は **{amount}** コインを賭けて "
-                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。"
+                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
             )
             return
 
@@ -322,8 +423,11 @@ class Community(commands.Cog):
             return
         key = coin_key(interaction.guild_id, member.id)
         current = int(await db_get(key) or "0")
-        await db_set(key, str(max(0, current + amount)))
-        await interaction.response.send_message(f"{member.mention} のコインを **{max(0, current + amount)}** に更新しました。", ephemeral=True)
+        new_balance = max(0, current + amount)
+        await db_set(key, str(new_balance))
+        rewards = await apply_coin_rewards(interaction.guild, member, new_balance)
+        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+        await interaction.response.send_message(f"{member.mention} のコインを **{new_balance}** に更新しました。{reward_text}", ephemeral=True)
 
     @app_commands.command(name="title_give", description="【管理者】メンバーに称号を付与します")
     @app_commands.default_permissions(manage_guild=True)

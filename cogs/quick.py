@@ -1,4 +1,3 @@
-import datetime
 import inspect
 import random
 
@@ -6,8 +5,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database.config_db import db_get, db_set
 from Features.daifugo import DEFAULT_RULES, daifugo_games, rules_text
+from Features.omikuji import run_omikuji
 from Features.othello import (
     AI_DIFFICULTIES,
     AI_PLAYER_ID,
@@ -24,7 +23,6 @@ from Features.sevens import sevens_games
 from Features.uno import uno_games
 
 
-JST = datetime.timezone(datetime.timedelta(hours=9))
 PANEL_TIMEOUT_SECONDS = 600
 
 GAME_STORES = {
@@ -93,34 +91,6 @@ def quick_embed() -> discord.Embed:
         inline=False,
     )
     return embed
-
-
-async def run_omikuji(interaction: discord.Interaction):
-    if not interaction.guild:
-        await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
-        return
-    await interaction.response.defer(thinking=True)
-
-    today = datetime.datetime.now(JST).date().isoformat()
-    key = f"omikuji_last_{interaction.guild.id}_{interaction.user.id}"
-    last_draw = await db_get(key)
-    if last_draw == today:
-        await interaction.followup.send("今日はすでにおみくじを引いています。また明日引いてください。")
-        return
-
-    fortunes = [
-        ("大吉", "今日は勢いがあります。やりたいことを一つ進めると良さそうです。"),
-        ("中吉", "いい流れです。焦らず丁寧にいきましょう。"),
-        ("小吉", "小さな良いことが見つかりそうです。"),
-        ("吉", "安定した一日になりそうです。"),
-        ("末吉", "ゆっくり整える日に向いています。"),
-        ("凶", "無理は禁物です。慎重に動くと回避できます。"),
-        ("大凶", "今日は安全第一で。大事な判断は少し置いてもよさそうです。"),
-    ]
-    result, message = random.choice(fortunes)
-    await db_set(key, today)
-    embed = discord.Embed(title="おみくじ", description=f"**{result}**\n{message}", color=0xE67E22)
-    await interaction.followup.send(embed=embed)
 
 
 def roll_dice_embed() -> discord.Embed:
