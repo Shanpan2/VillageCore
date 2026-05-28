@@ -28,7 +28,7 @@ def lobby_text(state: dict) -> str:
 
 class SevensLobbyView(discord.ui.View):
     def __init__(self, game_id: str):
-        super().__init__(timeout=600)
+        super().__init__(timeout=None)
         self.game_id = game_id
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
@@ -69,17 +69,24 @@ class SevensLobbyView(discord.ui.View):
 
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
     async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = interaction.client.get_cog("Sevens")
-        if not cog:
-            await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
-            return
-        await cog.sevens_begin.callback(cog, interaction)
-        state = sevens_games.get(self.game_id)
-        if state and state.get("started") and interaction.message:
-            try:
-                await interaction.message.edit(content=lobby_text(state) + "\n\n開始済みです。", view=None)
-            except discord.HTTPException:
-                pass
+        try:
+            cog = interaction.client.get_cog("Sevens")
+            if not cog:
+                await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
+                return
+            await cog.sevens_begin.callback(cog, interaction)
+            state = sevens_games.get(self.game_id)
+            if state and state.get("started") and interaction.message:
+                try:
+                    await interaction.message.edit(content=lobby_text(state) + "\n\n開始済みです。", view=None)
+                except discord.HTTPException:
+                    pass
+        except Exception as e:
+            print(f"[SevensLobbyView.begin] error: {type(e).__name__}: {e}", flush=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("開始処理中にエラーが発生しました。`/sevens_begin` でもう一度試してください。", ephemeral=True)
+            else:
+                await interaction.response.send_message("開始処理中にエラーが発生しました。`/sevens_begin` でもう一度試してください。", ephemeral=True)
 
     @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):

@@ -23,7 +23,7 @@ from Features.sevens import sevens_games
 from Features.uno import uno_games
 
 
-PANEL_TIMEOUT_SECONDS = 600
+PANEL_TIMEOUT_SECONDS = None
 
 GAME_STORES = {
     "uno": ("UNO", uno_games),
@@ -471,10 +471,18 @@ async def begin_game(interaction: discord.Interaction, game: str):
         return
     callback = command.callback
     params = list(inspect.signature(callback).parameters)
-    if params and params[0] == "self":
-        await callback(cog, interaction)
-        return
-    await callback(interaction)
+    try:
+        if params and params[0] == "self":
+            await callback(cog, interaction)
+            return
+        await callback(interaction)
+    except Exception as e:
+        print(f"[quick.begin_game] {game} error: {type(e).__name__}: {e}", flush=True)
+        message = "開始処理中にエラーが発生しました。個別の開始コマンドでもう一度試してください。"
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 class GameActionButton(discord.ui.Button):
