@@ -47,6 +47,30 @@ async def set_json(key: str, value):
     await db_set(key, json.dumps(value, ensure_ascii=False))
 
 
+def parse_profile_items(raw: str) -> list[dict]:
+    items = []
+    if not raw:
+        return items
+    parts = []
+    for line in raw.replace("；", ";").split(";"):
+        parts.extend(line.splitlines())
+    for part in parts:
+        text = part.strip()
+        if not text:
+            continue
+        separator = next((sep for sep in ("=", "：", ":") if sep in text), None)
+        if not separator:
+            continue
+        name, value = text.split(separator, 1)
+        name = name.strip()[:50]
+        value = value.strip()[:300]
+        if name and value:
+            items.append({"name": name, "value": value})
+        if len(items) >= 10:
+            break
+    return items
+
+
 def profile_key(guild_id: int, user_id: int) -> str:
     return f"community_profile:{guild_id}:{user_id}"
 
@@ -270,8 +294,22 @@ class Community(commands.Cog):
         await interaction.response.send_message("イベント募集を中止しました。", ephemeral=True)
 
     @app_commands.command(name="profile_set", description="自己紹介プロフィールを登録します")
-    @app_commands.describe(favorite="好きなもの", active_time="活動時間", comment="ひとこと", sns="SNSやリンク")
-    async def profile_set(self, interaction: discord.Interaction, favorite: str = "", active_time: str = "", comment: str = "", sns: str = ""):
+    @app_commands.describe(
+        favorite="好きなもの",
+        active_time="活動時間",
+        comment="ひとこと",
+        sns="SNSやリンク",
+        items="追加項目。例: 好きなゲーム=Among Us; 推し=むらびと君",
+    )
+    async def profile_set(
+        self,
+        interaction: discord.Interaction,
+        favorite: str = "",
+        active_time: str = "",
+        comment: str = "",
+        sns: str = "",
+        items: str = "",
+    ):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
@@ -280,10 +318,12 @@ class Community(commands.Cog):
             "active_time": active_time[:200],
             "comment": comment[:500],
             "sns": sns[:300],
+            "items": parse_profile_items(items),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         await set_json(profile_key(interaction.guild_id, interaction.user.id), data)
-        await interaction.response.send_message("プロフィールを保存しました。", ephemeral=True)
+        extra = f"\n追加項目: {len(data['items'])}件" if data["items"] else ""
+        await interaction.response.send_message(f"プロフィールを保存しました。{extra}", ephemeral=True)
 
     @app_commands.command(name="profile", description="プロフィールを表示します")
     async def profile(self, interaction: discord.Interaction, member: discord.Member | None = None):
@@ -308,6 +348,8 @@ class Community(commands.Cog):
         embed.add_field(name="活動時間", value=data.get("active_time") or "未設定", inline=False)
         embed.add_field(name="ひとこと", value=data.get("comment") or "未設定", inline=False)
         embed.add_field(name="SNS/リンク", value=data.get("sns") or "未設定", inline=False)
+        for item in data.get("items", [])[:10]:
+            embed.add_field(name=str(item.get("name", "項目"))[:256], value=str(item.get("value", "未設定"))[:1024], inline=False)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="coin_balance", description="サーバー内通貨の残高を表示します")
