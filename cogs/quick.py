@@ -5,6 +5,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from Features.codenames import (
+    CodenamesLobbyView,
+    begin_codenames,
+    codenames_games,
+    delete_codenames_game,
+    lobby_text as codenames_lobby_text,
+    save_codenames_game,
+)
 from Features.daifugo import (
     DEFAULT_RULES,
     DaifugoLobbyView,
@@ -13,6 +21,7 @@ from Features.daifugo import (
     rules_text,
     save_daifugo_game,
 )
+from Features.ito import ItoLobbyView, DEFAULT_TOPICS, begin_ito, delete_ito_game, ito_games, lobby_text as ito_lobby_text, save_ito_game
 from Features.omikuji import run_omikuji
 from Features.othello import (
     AI_DIFFICULTIES,
@@ -29,6 +38,14 @@ from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games
 from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games
+from Features.werewolf import (
+    WerewolfLobbyView,
+    delete_werewolf_game,
+    lobby_text as werewolf_lobby_text,
+    save_werewolf_game,
+    start_match,
+    werewolf_games,
+)
 
 
 PANEL_TIMEOUT_SECONDS = None
@@ -39,6 +56,9 @@ GAME_STORES = {
     "daifugo": ("大富豪", daifugo_games),
     "poker": ("ポーカー", poker_games),
     "othello": ("オセロ", othello_games),
+    "ito": ("Ito", ito_games),
+    "codenames": ("コードネーム", codenames_games),
+    "werewolf": ("人狼", werewolf_games),
 }
 
 GAME_BEGIN_COMMANDS = {
@@ -73,6 +93,22 @@ GAME_RULES = {
         "オセロは黒と白の石で相手の石を挟んで裏返すゲームです。"
         "置ける場所がない時は自動でパスされ、両方が置けなくなると終了します。"
         "最後に石が多いプレイヤーの勝ちです。"
+    ),
+    "ito": (
+        "Itoは、配られた数字を直接言わずに例えで表現する協力ゲームです。"
+        "お題に沿って自分の数字の大きさを表現し、最後に全員を小さい順に並べます。"
+        "数字の順番が正しければ成功です。例え提出と順番提出は `/ito` から行います。"
+    ),
+    "codenames": (
+        "コードネームは赤青チームに分かれて単語を当てるゲームです。"
+        "スパイマスターは正解盤面を見て、1語のヒントと枚数を出します。"
+        "推理側は味方の単語を選びます。暗殺者を選ぶと即敗北です。"
+    ),
+    "werewolf": (
+        "人狼は村人陣営と人狼陣営に分かれて正体を探る会話ゲームです。"
+        "夜は人狼が襲撃し、占い師や騎士が能力を使います。"
+        "昼は話し合いで怪しい人に投票します。"
+        "村人陣営は人狼を全員追放すれば勝ち、人狼陣営は人狼の数が村人陣営以上になれば勝ちです。"
     ),
 }
 
@@ -208,6 +244,59 @@ def create_poker_game(interaction: discord.Interaction) -> str:
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
 
+def create_ito_game(interaction: discord.Interaction) -> str:
+    game_id = str(interaction.channel_id)
+    if game_id in ito_games:
+        return "このチャンネルにはすでにItoがあります。"
+    topic = random.choice(DEFAULT_TOPICS)
+    ito_games[game_id] = {
+        "guild_id": interaction.guild_id,
+        "channel_id": interaction.channel_id,
+        "creator_id": interaction.user.id,
+        "phase": "lobby",
+        "topic": topic,
+        "players": [interaction.user.id],
+        "numbers": {},
+        "clues": {},
+    }
+    return f"Itoを作成しました。お題: **{topic}**\n{interaction.user.mention} は自動参加しました。"
+
+
+def create_codenames_game(interaction: discord.Interaction) -> str:
+    game_id = str(interaction.channel_id)
+    if game_id in codenames_games:
+        return "このチャンネルにはすでにコードネームがあります。"
+    codenames_games[game_id] = {
+        "guild_id": interaction.guild_id,
+        "channel_id": interaction.channel_id,
+        "creator_id": interaction.user.id,
+        "phase": "lobby",
+        "teams": {"red": [], "blue": []},
+        "spymasters": {},
+        "board": [],
+    }
+    return "コードネームを作成しました。赤/青チームに参加し、各チームのスパイマスターを設定してください。"
+
+
+def create_werewolf_game(interaction: discord.Interaction) -> str:
+    game_id = str(interaction.channel_id)
+    if game_id in werewolf_games:
+        return "このチャンネルにはすでに人狼ゲームがあります。"
+    werewolf_games[game_id] = {
+        "guild_id": interaction.guild_id,
+        "channel_id": interaction.channel_id,
+        "creator_id": interaction.user.id,
+        "phase": "lobby",
+        "players": [interaction.user.id],
+        "roles": {},
+        "alive": [],
+        "day": 0,
+        "night_actions": {},
+        "votes": {},
+    }
+    return f"人狼ゲームを作成しました。{interaction.user.mention} は自動参加しました。"
+
+
 def create_othello_game(interaction: discord.Interaction) -> tuple[str, discord.Embed | None, discord.File | None]:
     game_id = str(interaction.channel_id)
     if game_id in othello_games:
@@ -291,6 +380,12 @@ def othello_mode_embed() -> discord.Embed:
 
 
 def game_lobby_text(game: str, state: dict | None) -> str:
+    if game == "ito" and state:
+        return ito_lobby_text(state)
+    if game == "codenames" and state:
+        return codenames_lobby_text(state)
+    if game == "werewolf" and state:
+        return werewolf_lobby_text(state)
     label, _ = GAME_STORES[game]
     if not state:
         return f"{label}の募集はありません。"
@@ -321,6 +416,9 @@ class GameStartButton(discord.ui.Button):
             "sevens": create_sevens_game,
             "daifugo": create_daifugo_game,
             "poker": create_poker_game,
+            "ito": create_ito_game,
+            "codenames": create_codenames_game,
+            "werewolf": create_werewolf_game,
         }
         if self.game == "othello":
             await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
@@ -336,6 +434,12 @@ class GameStartButton(discord.ui.Button):
             await save_daifugo_game(interaction.guild_id, str(interaction.channel_id), state)
         if self.game == "uno" and state:
             await save_uno_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "ito" and state:
+            await save_ito_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "codenames" and state:
+            await save_codenames_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "werewolf" and state:
+            await save_werewolf_game(interaction.guild_id, str(interaction.channel_id), state)
         if self.game == "poker" and state:
             view = PokerLobbyView(str(interaction.channel_id))
         elif self.game == "uno" and state:
@@ -344,6 +448,12 @@ class GameStartButton(discord.ui.Button):
             view = SevensLobbyView(str(interaction.channel_id))
         elif self.game == "daifugo" and state:
             view = DaifugoLobbyView(str(interaction.channel_id))
+        elif self.game == "ito" and state:
+            view = ItoLobbyView(str(interaction.channel_id))
+        elif self.game == "codenames" and state:
+            view = CodenamesLobbyView(str(interaction.channel_id))
+        elif self.game == "werewolf" and state:
+            view = WerewolfLobbyView(str(interaction.channel_id))
         else:
             view = GameControlView(self.game)
         await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
@@ -497,6 +607,16 @@ def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]
 
 
 async def begin_game(interaction: discord.Interaction, game: str):
+    if game == "ito":
+        await begin_ito(interaction, str(interaction.channel_id))
+        return
+    if game == "codenames":
+        await begin_codenames(interaction, str(interaction.channel_id))
+        return
+    if game == "werewolf":
+        state = werewolf_games.get(str(interaction.channel_id))
+        await start_match(interaction, str(interaction.channel_id), state or {})
+        return
     cog_name, command_name = GAME_BEGIN_COMMANDS[game]
     cog = interaction.client.get_cog(cog_name)
     command = getattr(cog, command_name, None) if cog else None
@@ -531,6 +651,9 @@ class GameActionButton(discord.ui.Button):
             "sevens": create_sevens_game,
             "daifugo": create_daifugo_game,
             "poker": create_poker_game,
+            "ito": create_ito_game,
+            "codenames": create_codenames_game,
+            "werewolf": create_werewolf_game,
         }
 
         if self.action == "create":
@@ -548,6 +671,12 @@ class GameActionButton(discord.ui.Button):
                 await save_daifugo_game(interaction.guild_id, str(interaction.channel_id), state)
             if self.game == "uno" and state:
                 await save_uno_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "ito" and state:
+                await save_ito_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "codenames" and state:
+                await save_codenames_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "werewolf" and state:
+                await save_werewolf_game(interaction.guild_id, str(interaction.channel_id), state)
             if self.game == "poker" and state:
                 view = PokerLobbyView(str(interaction.channel_id))
             elif self.game == "uno" and state:
@@ -556,6 +685,12 @@ class GameActionButton(discord.ui.Button):
                 view = SevensLobbyView(str(interaction.channel_id))
             elif self.game == "daifugo" and state:
                 view = DaifugoLobbyView(str(interaction.channel_id))
+            elif self.game == "ito" and state:
+                view = ItoLobbyView(str(interaction.channel_id))
+            elif self.game == "codenames" and state:
+                view = CodenamesLobbyView(str(interaction.channel_id))
+            elif self.game == "werewolf" and state:
+                view = WerewolfLobbyView(str(interaction.channel_id))
             else:
                 view = GameControlView(self.game)
             await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
@@ -576,6 +711,10 @@ class GameActionButton(discord.ui.Button):
                 await save_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
             if self.game == "uno" and state and len(state.get("players", [])) > len(before_players):
                 await save_uno_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+            if self.game == "ito" and state and len(state.get("players", [])) > len(before_players):
+                await save_ito_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+            if self.game == "werewolf" and state and len(state.get("players", [])) > len(before_players):
+                await save_werewolf_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
             if state and interaction.message and len(state.get("players", [])) > len(before_players):
                 await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
             else:
@@ -605,6 +744,16 @@ class GameActionButton(discord.ui.Button):
                     await save_uno_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
                 elif before_state:
                     await delete_uno_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "ito":
+                if state:
+                    await save_ito_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_ito_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "werewolf":
+                if state:
+                    await save_werewolf_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_werewolf_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if before_state and not state and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             elif state and interaction.message:
@@ -632,6 +781,12 @@ class GameActionButton(discord.ui.Button):
                 await delete_daifugo_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if self.game == "uno" and ok and before_state:
                 await delete_uno_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "ito" and ok and before_state:
+                await delete_ito_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "codenames" and ok and before_state:
+                await delete_codenames_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "werewolf" and ok and before_state:
+                await delete_werewolf_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if ok and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             else:
@@ -671,7 +826,7 @@ class GameControlView(discord.ui.View):
     def __init__(self, game: str):
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.add_item(GameActionButton("募集作成", game, "create", discord.ButtonStyle.primary, 0))
-        if game != "othello":
+        if game not in ("othello", "codenames"):
             self.add_item(GameActionButton("参加", game, "join", discord.ButtonStyle.success, 0))
             self.add_item(GameActionButton("抜ける", game, "leave", discord.ButtonStyle.secondary, 0))
             self.add_item(GameActionButton("開始", game, "begin", discord.ButtonStyle.primary, 1))
@@ -689,6 +844,9 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label="大富豪", value="daifugo", description="手札を早く出し切る定番トランプゲーム"),
             discord.SelectOption(label="ポーカー", value="poker", description="5枚の役で勝負するトランプゲーム"),
             discord.SelectOption(label="オセロ", value="othello", description="盤面に石を置いて相手の石を裏返すゲーム"),
+            discord.SelectOption(label="Ito", value="ito", description="数字を言わずに例えで順番を当てる協力ゲーム"),
+            discord.SelectOption(label="コードネーム", value="codenames", description="ヒントから味方チームの単語を当てるチームゲーム"),
+            discord.SelectOption(label="人狼", value="werewolf", description="会話と投票で人狼を探す正体隠匿ゲーム"),
         ]
         super().__init__(placeholder="遊ぶゲームを選んでください", options=options)
 
@@ -758,6 +916,9 @@ class Quick(commands.Cog):
             app_commands.Choice(name="大富豪", value="daifugo"),
             app_commands.Choice(name="ポーカー", value="poker"),
             app_commands.Choice(name="オセロ", value="othello"),
+            app_commands.Choice(name="Ito", value="ito"),
+            app_commands.Choice(name="コードネーム", value="codenames"),
+            app_commands.Choice(name="人狼", value="werewolf"),
         ]
     )
     async def game_cancel(
@@ -798,6 +959,12 @@ class Quick(commands.Cog):
             await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), game_id)
         if game.value == "uno":
             await delete_uno_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "ito":
+            await delete_ito_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "codenames":
+            await delete_codenames_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "werewolf":
+            await delete_werewolf_game(interaction.guild_id or state.get("guild_id"), game_id)
         suffix = f"\n理由: {reason[:500]}" if reason else ""
         status = "強制終了" if already_started else "募集を中止"
         await interaction.response.send_message(f"{label}を{status}しました。{suffix}")

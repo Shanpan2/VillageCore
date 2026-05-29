@@ -295,7 +295,7 @@ class WerewolfLobbyView(discord.ui.View):
     def __init__(self, game_id: str):
         super().__init__(timeout=None)
         self.game_id = game_id
-        for action, child in zip(("join", "leave", "begin", "cancel"), self.children):
+        for action, child in zip(("join", "leave", "begin", "cancel", "rules"), self.children):
             child.custom_id = f"werewolf_lobby_{action}_{game_id}"
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
@@ -347,6 +347,25 @@ class WerewolfLobbyView(discord.ui.View):
         await delete_werewolf_game(interaction.guild_id, self.game_id)
         werewolf_games.pop(self.game_id, None)
         await interaction.response.edit_message(content="人狼ゲームの募集を中止しました。", view=None)
+
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary, row=1)
+    async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="人狼ゲーム のルール",
+            description=(
+                "参加者には開始時に役職がDMで送られます。\n"
+                "村人陣営は人狼を全員追放すれば勝ち、人狼陣営は人狼の数が村人陣営以上になれば勝ちです。\n\n"
+                "**夜フェーズ**\n"
+                "人狼: `/werewolf action:襲撃 target:@相手`\n"
+                "占い師: `/werewolf action:占う target:@相手`\n"
+                "騎士: `/werewolf action:守る target:@相手`\n\n"
+                "**昼フェーズ**\n"
+                "話し合い後、全員が `/werewolf action:投票 target:@相手` で追放先を投票します。\n"
+                "自分の役職は `/werewolf action:自分の役職` で確認できます。"
+            ),
+            color=0xF1C40F,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class Werewolf(commands.Cog):
