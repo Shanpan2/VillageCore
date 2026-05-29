@@ -125,7 +125,7 @@ class JoinButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            from Features.othello import othello_games, get_valid_moves, generate_othello_image
+            from Features.othello import othello_games, get_valid_moves, generate_othello_image, save_othello_game
 
             game = othello_games.get(self.game_id)
             if not game:
@@ -142,6 +142,7 @@ class JoinButton(discord.ui.Button):
 
             # 参加登録
             game["white_id"] = interaction.user.id
+            await save_othello_game(interaction.guild_id, self.game_id, game)
 
             # 盤面更新
             board = game["board"]
@@ -186,7 +187,7 @@ class SurrenderButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            from Features.othello import othello_games, player_name, settle_ai_coins
+            from Features.othello import othello_games, player_name, settle_ai_coins, delete_othello_game
 
             game = othello_games.get(self.game_id)
             if not game:
@@ -208,6 +209,7 @@ class SurrenderButton(discord.ui.Button):
             coin_text = await settle_ai_coins(game, interaction.guild_id, winner_color)
 
             # ゲームデータを削除
+            await delete_othello_game(interaction.guild_id or game.get("guild_id"), self.game_id)
             try:
                 othello_games.pop(self.game_id, None)
             except Exception:

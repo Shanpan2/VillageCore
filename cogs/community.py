@@ -100,6 +100,25 @@ COIN_MILESTONES = [
     {"coins": 2000, "kind": "badge", "name": "伝説の資産家"},
 ]
 
+COIN_SHOP_ITEMS = {
+    "red": {"label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
+    "blue": {"label": "青カラー", "role_name": "カラー: 青", "cost": 300, "days": 7, "color": 0x3498DB},
+    "green": {"label": "緑カラー", "role_name": "カラー: 緑", "cost": 300, "days": 7, "color": 0x2ECC71},
+    "purple": {"label": "紫カラー", "role_name": "カラー: 紫", "cost": 300, "days": 7, "color": 0x9B59B6},
+    "gold": {"label": "金カラー", "role_name": "カラー: 金", "cost": 500, "days": 7, "color": 0xF1C40F},
+}
+
+
+def coin_shop_expirations_key(guild_id: int) -> str:
+    return f"community_coin_shop_expirations:{guild_id}"
+
+
+def parse_utc(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
 
 async def add_unique_json_value(key: str, value: str, limit: int = 30) -> bool:
     values = await get_json(key, [])
@@ -138,6 +157,41 @@ async def apply_coin_rewards(guild: discord.Guild | None, member: discord.Member
                 except discord.HTTPException:
                     pass
     return messages
+
+
+async def get_or_create_shop_role(guild: discord.Guild, item: dict) -> discord.Role | None:
+    role = discord.utils.get(guild.roles, name=item["role_name"])
+    if role:
+        return role
+    bot_member = guild.me
+    if not bot_member or not bot_member.guild_permissions.manage_roles:
+        return None
+    try:
+        return await guild.create_role(
+            name=item["role_name"],
+            color=discord.Color(item["color"]),
+            reason="Coin shop color role",
+        )
+    except discord.HTTPException:
+        return None
+
+
+async def save_shop_expiration(guild_id: int, user_id: int, role_id: int, item_key: str, expires_at: datetime):
+    records = await get_json(coin_shop_expirations_key(guild_id), [])
+    records = [
+        record
+        for record in records
+        if not (int(record.get("user_id", 0)) == user_id and int(record.get("role_id", 0)) == role_id)
+    ]
+    records.append(
+        {
+            "user_id": user_id,
+            "role_id": role_id,
+            "item": item_key,
+            "expires_at": expires_at.isoformat(),
+        }
+    )
+    await set_json(coin_shop_expirations_key(guild_id), records[-500:])
 
 
 def event_key(message_id: int) -> str:
@@ -225,9 +279,11 @@ class Community(commands.Cog):
     async def cog_load(self):
         self.bot.add_view(EventRsvpView())
         self.daily_topic_loop.start()
+        self.coin_shop_cleanup_loop.start()
 
     def cog_unload(self):
         self.daily_topic_loop.cancel()
+        self.coin_shop_cleanup_loop.cancel()
 
     @app_commands.command(name="event_create", description="参加/未定/不参加ボタン付きイベントを作成します")
     @app_commands.describe(title="イベント名", description="内容", when="日時や集合時間")
@@ -360,6 +416,83 @@ class Community(commands.Cog):
         member = member or interaction.user
         coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
         await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
+
+    @app_commands.command(name="coin_shop", description="コインで期間限定カラー役職を交換します")
+    @app_commands.describe(item="交換するカラー。未指定なら一覧を表示します")
+    @app_commands.choices(
+        item=[
+            app_commands.Choice(name="赤カラー 300コイン / 7日", value="red"),
+            app_commands.Choice(name="青カラー 300コイン / 7日", value="blue"),
+            app_commands.Choice(name="緑カラー 300コイン / 7日", value="green"),
+            app_commands.Choice(name="紫カラー 300コイン / 7日", value="purple"),
+            app_commands.Choice(name="金カラー 500コイン / 7日", value="gold"),
+        ]
+    )
+    async def coin_shop(self, interaction: discord.Interaction, item: app_commands.Choice[str] | None = None):
+        if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+
+        if item is None:
+            lines = [
+                f"- **{data['label']}**: {data['cost']}コイン / {data['days']}日"
+                for data in COIN_SHOP_ITEMS.values()
+            ]
+            embed = discord.Embed(
+                title="コインショップ",
+                description="期間限定カラー役職を交換できます。\n\n" + "\n".join(lines),
+                color=0xF1C40F,
+            )
+            embed.set_footer(text="/coin_shop item:カラー名 で交換できます。")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        item_key = item.value
+        data = COIN_SHOP_ITEMS.get(item_key)
+        if not data:
+            await interaction.response.send_message("その商品は見つかりませんでした。", ephemeral=True)
+            return
+
+        balance_key = coin_key(interaction.guild_id, interaction.user.id)
+        balance = int(await db_get(balance_key) or "0")
+        if balance < data["cost"]:
+            await interaction.response.send_message(
+                f"コインが足りません。必要: **{data['cost']}** / 現在: **{balance}**",
+                ephemeral=True,
+            )
+            return
+
+        role = await get_or_create_shop_role(interaction.guild, data)
+        bot_member = interaction.guild.me
+        if not role or not bot_member or role >= bot_member.top_role:
+            await interaction.response.send_message(
+                "カラー役職を作成/付与できませんでした。Botに「ロールの管理」権限があるか、Botのロール位置を確認してください。",
+                ephemeral=True,
+            )
+            return
+
+        shop_role_names = {shop_item["role_name"] for shop_item in COIN_SHOP_ITEMS.values()}
+        removable_roles = [
+            member_role
+            for member_role in interaction.user.roles
+            if member_role.name in shop_role_names and member_role != role and member_role < bot_member.top_role
+        ]
+        if removable_roles:
+            try:
+                await interaction.user.remove_roles(*removable_roles, reason="Coin shop color role replaced")
+            except discord.HTTPException:
+                pass
+
+        await db_set(balance_key, str(balance - data["cost"]))
+        await interaction.user.add_roles(role, reason="Coin shop purchase")
+        expires_at = datetime.now(timezone.utc) + timedelta(days=data["days"])
+        await save_shop_expiration(interaction.guild_id, interaction.user.id, role.id, item_key, expires_at)
+
+        await interaction.response.send_message(
+            f"{interaction.user.mention} が **{data['label']}** を交換しました。\n"
+            f"消費: **{data['cost']}** コイン / 残高: **{balance - data['cost']}** コイン\n"
+            f"期限: **{data['days']}日間**",
+        )
 
     @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")
     async def coin_ranking(self, interaction: discord.Interaction):
@@ -522,6 +655,33 @@ class Community(commands.Cog):
             await channel.send(f"**今日のお題**\n{random.choice(TOPICS)}")
             settings["last_date"] = now.date().isoformat()
             await set_json(topic_settings_key(guild.id), settings)
+
+    @tasks.loop(hours=1)
+    async def coin_shop_cleanup_loop(self):
+        await self.bot.wait_until_ready()
+        now = datetime.now(timezone.utc)
+        for guild in self.bot.guilds:
+            records = await get_json(coin_shop_expirations_key(guild.id), [])
+            if not records:
+                continue
+            remaining = []
+            changed = False
+            for record in records:
+                expires_at = parse_utc(record.get("expires_at", ""))
+                if not expires_at or expires_at > now:
+                    remaining.append(record)
+                    continue
+                changed = True
+                member = guild.get_member(int(record.get("user_id", 0)))
+                role = guild.get_role(int(record.get("role_id", 0)))
+                bot_member = guild.me
+                if member and role and bot_member and role in member.roles and role < bot_member.top_role:
+                    try:
+                        await member.remove_roles(role, reason="Coin shop color role expired")
+                    except discord.HTTPException:
+                        pass
+            if changed:
+                await set_json(coin_shop_expirations_key(guild.id), remaining)
 
     @app_commands.command(name="faq_set", description="【管理者】FAQを登録します")
     @app_commands.default_permissions(manage_guild=True)

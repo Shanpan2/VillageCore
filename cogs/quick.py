@@ -15,6 +15,7 @@ from Features.othello import (
     new_board,
     othello_games,
     run_ai_turns,
+    save_othello_game,
     send_othello_state,
 )
 from Features.poker import poker_games, set_poker_bet_amount
@@ -206,6 +207,7 @@ def create_othello_game(interaction: discord.Interaction) -> tuple[str, discord.
         "black_id": interaction.user.id,
         "white_id": None,
         "creator_id": interaction.user.id,
+        "guild_id": interaction.guild_id,
     }
     valid_moves = get_valid_moves(board, 1)
     file = discord.File(generate_othello_image(board, valid_moves), filename="othello.png")
@@ -228,6 +230,7 @@ async def send_othello_lobby(interaction: discord.Interaction, text_on_error: bo
     state = othello_games.get(str(interaction.channel_id))
     if embed and file and state:
         valid_moves = get_valid_moves(state["board"], state["turn"])
+        await save_othello_game(interaction.guild_id, str(interaction.channel_id), state)
         await interaction.response.send_message(
             embed=embed,
             file=file,
@@ -250,6 +253,7 @@ async def send_othello_ai_lobby(interaction: discord.Interaction, difficulty: st
         "black_id": interaction.user.id,
         "white_id": AI_PLAYER_ID,
         "creator_id": interaction.user.id,
+        "guild_id": interaction.guild_id,
         "ai": True,
         "human_id": interaction.user.id,
         "human_color": 1,
