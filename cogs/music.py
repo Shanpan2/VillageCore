@@ -16,6 +16,31 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 MUSIC_OPUS_BITRATE = int(os.getenv("MUSIC_OPUS_BITRATE", "160"))
 GENERATED_COOKIE_FILE = Path(os.getenv("YTDLP_GENERATED_COOKIE_FILE", "/tmp/ytdlp_cookies.txt"))
+YTDLP_COOKIE_FILE_ACTIVE = None
+COOKIE_WARNING_COOLDOWN_SECONDS = 3600
+COOKIE_WARNING_TIMES: dict[int, float] = {}
+COOKIE_RETRY_KEYWORDS = [
+    "sign in to confirm",
+    "confirm your age",
+    "not a bot",
+    "cookies-from-browser",
+    "cookies for the authentication",
+    "use --cookies",
+    "requested format is not available",
+    "only images are available",
+    "no video formats found",
+    "no formats found",
+    "signature solving failed",
+    "n challenge solving failed",
+]
+COOKIE_INVALID_KEYWORDS = [
+    "cookies are no longer valid",
+    "cookie file is invalid",
+    "invalid cookies",
+    "unable to read cookies",
+    "cookie environment write failed",
+    "extractors#exporting-youtube-cookies",
+]
 
 
 class QuietYtdlpLogger:
@@ -79,7 +104,7 @@ if cookies_text:
 
 cookie_file = str(GENERATED_COOKIE_FILE) if cookies_text else (os.getenv("YTDLP_COOKIE_FILE") or str(DEFAULT_COOKIE_FILE))
 if cookie_file and os.path.exists(cookie_file):
-    YDL_OPTIONS["cookiefile"] = cookie_file
+    YTDLP_COOKIE_FILE_ACTIVE = cookie_file
     print(f"YTDLP cookie file loaded: {cookie_file}", flush=True)
 elif os.getenv("YTDLP_COOKIE_FILE"):
     print(f"YTDLP cookie file path set but not found: {cookie_file}", flush=True)
@@ -130,6 +155,7 @@ def format_yt_dlp_error(error: Exception, prefix: str = "エラー") -> str:
     raw_lower = raw.lower()
 
     cookie_keywords = [
+        "ytdlp_cookie_invalid",
         "sign in to confirm you",
         "cookies-from-browser",
         "cookies for the authentication",
@@ -141,21 +167,80 @@ def format_yt_dlp_error(error: Exception, prefix: str = "エラー") -> str:
     if any(keyword in raw_lower for keyword in cookie_keywords):
         return (
             "❌ この動画は YouTube 側の制限で再生できませんでした。\n"
-            "リポジトリ直下の `cookies.txt`、または `YTDLP_COOKIE_FILE` に設定したcookieを確認してください。"
+            "`YTDLP_COOKIES_TEXT`、または `YTDLP_COOKIE_FILE` に設定したcookieを確認してください。"
         )
 
     return f"❌ {prefix}: {raw[:1500]}"
 
 
-def _extract_info(query: str):
+async def send_music_cookie_warning(bot: commands.Bot, guild: discord.Guild, error: Exception):
+    now = bot.loop.time()
+    last = COOKIE_WARNING_TIMES.get(guild.id, 0)
+    if now - last < COOKIE_WARNING_COOLDOWN_SECONDS:
+        return
+    COOKIE_WARNING_TIMES[guild.id] = now
+
+    raw = await db_get(f"ops_error_channel:{guild.id}")
+    if not raw or not str(raw).isdigit():
+        return
+    channel = guild.get_channel(int(raw))
+    if not isinstance(channel, discord.TextChannel):
+        return
+
+    embed = discord.Embed(
+        title="音楽Cookieの更新が必要です",
+        description=(
+            "YouTube用Cookieが無効になっている可能性があります。\n"
+            "Railway の `YTDLP_COOKIES_TEXT` を新しい cookies.txt の内容に差し替えて、再デプロイしてください。\n\n"
+            "通常動画はCookieなしで再生を試すため、Cookieが必要な動画でだけこの通知が出ます。"
+        ),
+        color=0xE67E22,
+    )
+    embed.add_field(name="詳細", value=f"`{str(error)[:900]}`", inline=False)
+    try:
+        await channel.send(embed=embed)
+    except discord.HTTPException:
+        pass
+
+
+def _error_text(error: Exception) -> str:
+    return str(error).lower()
+
+
+def _should_retry_with_cookies(error: Exception) -> bool:
+    raw = _error_text(error)
+    return any(keyword in raw for keyword in COOKIE_RETRY_KEYWORDS)
+
+
+def _is_cookie_invalid_error(error: Exception) -> bool:
+    raw = _error_text(error)
+    return any(keyword in raw for keyword in COOKIE_INVALID_KEYWORDS)
+
+
+def _make_ydl_options(use_cookies: bool, requested_format=None, metadata: bool = False) -> dict:
+    options = YDL_OPTIONS.copy()
+    if use_cookies and YTDLP_COOKIE_FILE_ACTIVE:
+        options["cookiefile"] = YTDLP_COOKIE_FILE_ACTIVE
+    else:
+        options.pop("cookiefile", None)
+
+    if metadata:
+        options.pop("format", None)
+        options["extract_flat"] = "in_playlist"
+        return options
+
+    if requested_format:
+        options["format"] = requested_format
+    else:
+        options.pop("format", None)
+        options["ignore_no_formats_error"] = True
+    return options
+
+
+def _extract_info_attempt(query: str, use_cookies: bool):
     last_error = None
     for requested_format in YDL_PLAY_FORMATS:
-        options = YDL_OPTIONS.copy()
-        if requested_format:
-            options["format"] = requested_format
-        else:
-            options.pop("format", None)
-            options["ignore_no_formats_error"] = True
+        options = _make_ydl_options(use_cookies, requested_format=requested_format)
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 return ydl.extract_info(query, download=False)
@@ -167,12 +252,40 @@ def _extract_info(query: str):
     raise last_error
 
 
-def _extract_metadata(query: str):
-    options = YDL_OPTIONS.copy()
-    options.pop("format", None)
-    options["extract_flat"] = "in_playlist"
+def _extract_info(query: str):
+    try:
+        return _extract_info_attempt(query, use_cookies=False)
+    except Exception as first_error:
+        if not YTDLP_COOKIE_FILE_ACTIVE or not _should_retry_with_cookies(first_error):
+            raise
+        try:
+            print("[music] retrying extraction with cookies", flush=True)
+            return _extract_info_attempt(query, use_cookies=True)
+        except Exception as cookie_error:
+            if _is_cookie_invalid_error(cookie_error):
+                raise RuntimeError(f"YTDLP_COOKIE_INVALID: {cookie_error}") from cookie_error
+            raise
+
+
+def _extract_metadata_attempt(query: str, use_cookies: bool):
+    options = _make_ydl_options(use_cookies, metadata=True)
     with yt_dlp.YoutubeDL(options) as ydl:
         return ydl.extract_info(query, download=False, process=False)
+
+
+def _extract_metadata(query: str):
+    try:
+        return _extract_metadata_attempt(query, use_cookies=False)
+    except Exception as first_error:
+        if not YTDLP_COOKIE_FILE_ACTIVE or not _should_retry_with_cookies(first_error):
+            raise
+        try:
+            print("[music] retrying metadata extraction with cookies", flush=True)
+            return _extract_metadata_attempt(query, use_cookies=True)
+        except Exception as cookie_error:
+            if _is_cookie_invalid_error(cookie_error):
+                raise RuntimeError(f"YTDLP_COOKIE_INVALID: {cookie_error}") from cookie_error
+            raise
 
 
 def _youtube_url_from_entry(entry: dict) -> str | None:
@@ -320,6 +433,8 @@ class MusicPlayer:
                 **FFMPEG_OPTIONS,
             )
         except Exception as e:
+            if "YTDLP_COOKIE_INVALID" in str(e):
+                await send_music_cookie_warning(self.bot, self.guild, e)
             if channel:
                 await channel.send(format_yt_dlp_error(e, prefix="再生エラー"))
             await self.play_next(channel)
@@ -379,6 +494,8 @@ class MusicPlayer:
                 await channel.send("❌ 再生用URLを取得できませんでした。")
                 return
         except Exception as e:
+            if "YTDLP_COOKIE_INVALID" in str(e):
+                await send_music_cookie_warning(self.bot, self.guild, e)
             await channel.send(format_yt_dlp_error(e, prefix="取得エラー"))
             return
 

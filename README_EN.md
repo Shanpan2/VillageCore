@@ -36,6 +36,8 @@ This repository does not include secrets such as tokens, API keys, cookies, or d
 
 Set required values in your deployment provider's Variables / Secrets page, such as Railway.
 
+For YouTube music cookies, prefer storing the cookies.txt content in `YTDLP_COOKIES_TEXT` instead of committing or deploying a cookie file. The bot first tries normal playback without cookies and only retries with cookies when needed.
+
 For development and operational security notes, see [SECURITY.md](SECURITY.md).
 
 ## Run

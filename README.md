@@ -36,6 +36,8 @@ English README: [README_EN.md](README_EN.md)
 
 必要な設定値は、Railway などのデプロイ先の Variables / Secrets に登録してください。
 
+音楽再生でYouTube Cookieが必要な場合は、ファイルを配置するより `YTDLP_COOKIES_TEXT` に cookies.txt の内容を登録する運用を推奨します。Botは通常動画をCookieなしで取得し、必要な時だけCookieありで再試行します。
+
 開発・運用時のセキュリティ注意は [SECURITY.md](SECURITY.md) を確認してください。
 
 ## 起動
