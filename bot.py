@@ -27,7 +27,6 @@ PERSISTENT_VIEWS_REGISTERED = False
 DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.backup",
     "cogs.bot_status",
-    "cogs.clean",
     "cogs.permission_check",
     "cogs.setup_guide",
 }
@@ -130,6 +129,7 @@ async def load_cogs():
         "Features.sevens",
         "Features.ticket",
         "Features.uno",
+        "Features.werewolf",
         "Features.youtube_notify",
         "cogs.panels",
     ]
