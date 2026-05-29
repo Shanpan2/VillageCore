@@ -158,12 +158,17 @@ async def load_cogs():
 def register_persistent_views():
     from views.ticket_views import ClosedTicketView, TicketButtonView, TicketControlView
     from views.role_panel_views import LegacyRolePanelView, RolePanelView
+    from cogs.quick import GameControlView, GameMenuView, OthelloModeView
     # ★ AttendanceView は attendance.py に統合したため削除
     bot.add_view(TicketButtonView(bot))
     bot.add_view(TicketControlView())
     bot.add_view(ClosedTicketView())
     bot.add_view(RolePanelView())
     bot.add_view(LegacyRolePanelView())
+    bot.add_view(GameMenuView())
+    bot.add_view(OthelloModeView())
+    for game in ("uno", "sevens", "daifugo", "poker", "othello", "ito", "codenames", "werewolf"):
+        bot.add_view(GameControlView(game))
 
 
 async def clear_global_commands():
@@ -423,24 +428,27 @@ async def handle_help_site(request):
           <div class="notice">
             <p><strong>おすすめの使い方</strong><br>
               ゲームは <code>/game</code> から選ぶのがおすすめです。
-              UNO、7並べ、大富豪、ポーカー、オセロの募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。
+              UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼の募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。
               今後は個別コマンドより <code>/game</code> をメイン導線にしていきます。
             </p>
           </div>
-          <p>UNO、7並べ、大富豪、ポーカー、オセロ、じゃんけん、おみくじ、ダイスに対応しています。</p>
+          <p>UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
-            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロを選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
+            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
             <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。場のカードと同じ色、数字、記号を出して、先に手札をなくした人が勝ちです。</div>
             <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届きます。</div>
             <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。</div>
             <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。</div>
             <div class="tile"><strong>オセロ</strong><code>/game</code> でオセロを選びます。対人戦またはAI対戦の難易度を選んで開始できます。</div>
+            <div class="tile"><strong>Ito</strong><code>/game</code> でItoを選びます。主催者がお題を入力でき、空欄ならランダムお題で始められます。</div>
+            <div class="tile"><strong>コードネーム</strong><code>/game</code> でコードネームを選びます。赤/青チーム参加とスパイマスター設定をボタンで行えます。</div>
+            <div class="tile"><strong>人狼</strong><code>/game</code> で人狼を選びます。募集、参加、開始、ルール確認をボタンで行い、夜行動や投票は対象指定コマンドで進めます。</div>
             <div class="tile"><strong>募集</strong><code>/event_create</code> で参加/未定/不参加ボタン付き募集を作れます。中止は <code>/event_cancel</code> です。</div>
             <div class="tile"><strong>すぐ遊ぶ</strong><code>/quick</code> からゲームパネル、おみくじ、1d100、じゃんけんを実行できます。</div>
           </div>
           <div class="notice">
             <p><strong>ゲーム募集の中止</strong><br>
-              UNO、7並べ、大富豪、ポーカー、オセロの募集中止は <code>/game</code> の「中止」ボタンから行えます。
+              UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼の募集中止は <code>/game</code> の「中止」ボタンから行えます。
               募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
             </p>
             <p><strong>UNOのルール</strong><br>
@@ -459,8 +467,17 @@ async def handle_help_site(request):
               5枚の手札がDMで届きます。交換したいカードを選び、全員の交換が終わると役の強さで勝敗が決まります。
               強い順は、ストレートフラッシュ、フォーカード、フルハウス、フラッシュ、ストレート、スリーカード、ツーペア、ワンペア、ハイカードです。
             </p>
+            <p><strong>Itoのルール</strong><br>
+              1から100の数字がDMで配られます。数字を直接言わず、お題に沿った例えで表現し、最後に小さい順へ並べます。
+            </p>
+            <p><strong>コードネームのルール</strong><br>
+              赤青チームに分かれ、スパイマスターのヒントから味方の単語を当てます。暗殺者を選ぶと即敗北です。
+            </p>
+            <p><strong>人狼のルール</strong><br>
+              村人陣営は人狼を全員追放すれば勝ち、人狼陣営は人狼の数が村人陣営以上になれば勝ちです。
+            </p>
           </div>
-          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "janken", "omikuji", "dice"))}
+          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "ito", "codenames", "werewolf", "janken", "omikuji", "dice"))}
         </section>
         <section id="admin">
           <h2>管理者向け</h2>

@@ -13,13 +13,22 @@ Japanese README: [README.md](README.md)
 
 ## Features
 
-- `/game`: button-based game panel for UNO, Sevens, Daifugo, and Poker
+- `/game`: button-based game panel for UNO, Sevens, Daifugo, Poker, Othello, Ito, Codenames, and Werewolf
 - `/music`: button-based music controls
 - `/youtube`: YouTube notification settings and status
 - `/attendance`: attendance tracking and warning checks
 - `/admin`: settings, permission checks, logs, and maintenance tools
 - `/quick`: daily shortcuts
 - Tickets, role panels, polls, birthdays, NG words, search, and AI replies
+
+## Games
+
+Use `/game` as the main entry point. It supports lobby creation, joining, leaving, starting, canceling, and rule checks through buttons.
+
+- Ito lets the host enter a custom topic. If left blank, a random topic is used.
+- Codenames supports red/blue team joining and spymaster selection from the panel.
+- Werewolf supports lobby creation, joining, leaving, starting, canceling, and rule checks from the panel. Night actions and votes still use `/werewolf` because they require a target member.
+- Created game state is stored in the database and can survive redeploys.
 
 ## Setup
 

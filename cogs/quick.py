@@ -244,11 +244,11 @@ def create_poker_game(interaction: discord.Interaction) -> str:
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
 
-def create_ito_game(interaction: discord.Interaction) -> str:
+def create_ito_game(interaction: discord.Interaction, topic_text: str | None = None) -> str:
     game_id = str(interaction.channel_id)
     if game_id in ito_games:
         return "このチャンネルにはすでにItoがあります。"
-    topic = random.choice(DEFAULT_TOPICS)
+    topic = (topic_text or "").strip() or random.choice(DEFAULT_TOPICS)
     ito_games[game_id] = {
         "guild_id": interaction.guild_id,
         "channel_id": interaction.channel_id,
@@ -538,7 +538,7 @@ class PokerBetModal(discord.ui.Modal, title="ポーカー賭け額設定"):
 
 class PokerBetButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="賭け額", style=discord.ButtonStyle.secondary, row=1)
+        super().__init__(label="賭け額", style=discord.ButtonStyle.secondary, row=1, custom_id="game_action_poker_bet")
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(PokerBetModal())
@@ -639,9 +639,28 @@ async def begin_game(interaction: discord.Interaction, game: str):
             await interaction.response.send_message(message, ephemeral=True)
 
 
+class ItoTopicModal(discord.ui.Modal, title="Itoのお題"):
+    topic = discord.ui.TextInput(
+        label="お題",
+        placeholder="空欄ならランダムお題で作成します",
+        required=False,
+        max_length=80,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = create_ito_game(interaction, str(self.topic.value))
+        state = ito_games.get(str(interaction.channel_id))
+        if state:
+            await save_ito_game(interaction.guild_id, str(interaction.channel_id), state)
+        await interaction.response.send_message(
+            game_lobby_text("ito", state) if state else text,
+            view=ItoLobbyView(str(interaction.channel_id)) if state else None,
+        )
+
+
 class GameActionButton(discord.ui.Button):
     def __init__(self, label: str, game: str, action: str, style: discord.ButtonStyle, row: int):
-        super().__init__(label=label, style=style, row=row)
+        super().__init__(label=label, style=style, row=row, custom_id=f"game_action_{game}_{action}")
         self.game = game
         self.action = action
 
@@ -659,6 +678,9 @@ class GameActionButton(discord.ui.Button):
         if self.action == "create":
             if self.game == "othello":
                 await send_othello_lobby(interaction, text_on_error=True)
+                return
+            if self.game == "ito":
+                await interaction.response.send_modal(ItoTopicModal())
                 return
             text = creators[self.game](interaction)
             _, store = GAME_STORES[self.game]
@@ -800,7 +822,8 @@ class GameActionButton(discord.ui.Button):
 class OthelloModeButton(discord.ui.Button):
     def __init__(self, label: str, mode: str, difficulty: str | None = None, row: int = 0):
         style = discord.ButtonStyle.primary if mode == "pvp" else discord.ButtonStyle.success
-        super().__init__(label=label, style=style, row=row)
+        custom_id = f"game_othello_mode_{mode}_{difficulty or 'pvp'}"
+        super().__init__(label=label, style=style, row=row, custom_id=custom_id)
         self.mode = mode
         self.difficulty = difficulty
 
@@ -848,7 +871,7 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label="コードネーム", value="codenames", description="ヒントから味方チームの単語を当てるチームゲーム"),
             discord.SelectOption(label="人狼", value="werewolf", description="会話と投票で人狼を探す正体隠匿ゲーム"),
         ]
-        super().__init__(placeholder="遊ぶゲームを選んでください", options=options)
+        super().__init__(placeholder="遊ぶゲームを選んでください", options=options, custom_id="game_select_menu")
 
     async def callback(self, interaction: discord.Interaction):
         game = self.values[0]
