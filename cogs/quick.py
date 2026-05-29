@@ -5,7 +5,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from Features.daifugo import DEFAULT_RULES, daifugo_games, rules_text
+from Features.daifugo import (
+    DEFAULT_RULES,
+    DaifugoLobbyView,
+    daifugo_games,
+    delete_daifugo_game,
+    rules_text,
+    save_daifugo_game,
+)
 from Features.omikuji import run_omikuji
 from Features.othello import (
     AI_DIFFICULTIES,
@@ -20,8 +27,8 @@ from Features.othello import (
 )
 from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount
 from Features.sevens import SUITS as SEVENS_SUITS
-from Features.sevens import sevens_games
-from Features.uno import uno_games
+from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games
+from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games
 
 
 PANEL_TIMEOUT_SECONDS = None
@@ -126,6 +133,8 @@ def create_uno_game(interaction: discord.Interaction) -> str:
         "top": None,
         "uno_declared": False,
         "challenge_mode": True,
+        "pending": None,
+        "guild_id": interaction.guild_id,
     }
     return f"UNOを作成しました。{interaction.user.mention} は自動参加しました。\n`/uno_join` で参加、`/uno_begin` で開始します。"
 
@@ -143,6 +152,7 @@ def create_sevens_game(interaction: discord.Interaction) -> str:
         "passes": {},
         "finished": [],
         "started": False,
+        "guild_id": interaction.guild_id,
     }
     return f"7並べを作成しました。{interaction.user.mention} は自動参加しました。\n`/sevens_join` で参加、`/sevens_begin` で開始します。"
 
@@ -168,6 +178,7 @@ def create_daifugo_game(interaction: discord.Interaction) -> str:
         "revolution": False,
         "rules": rules,
         "previous_daifugo_id": None,
+        "guild_id": interaction.guild_id,
     }
     state = daifugo_games[game_id]
     return (
@@ -319,7 +330,22 @@ class GameStartButton(discord.ui.Button):
         state = store.get(str(interaction.channel_id))
         if self.game == "poker" and state:
             await save_poker_game(interaction.guild_id, str(interaction.channel_id), state)
-        view = PokerLobbyView(str(interaction.channel_id)) if self.game == "poker" and state else GameControlView(self.game)
+        if self.game == "sevens" and state:
+            await save_sevens_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "daifugo" and state:
+            await save_daifugo_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "uno" and state:
+            await save_uno_game(interaction.guild_id, str(interaction.channel_id), state)
+        if self.game == "poker" and state:
+            view = PokerLobbyView(str(interaction.channel_id))
+        elif self.game == "uno" and state:
+            view = UnoLobbyView(str(interaction.channel_id))
+        elif self.game == "sevens" and state:
+            view = SevensLobbyView(str(interaction.channel_id))
+        elif self.game == "daifugo" and state:
+            view = DaifugoLobbyView(str(interaction.channel_id))
+        else:
+            view = GameControlView(self.game)
         await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
 
 
@@ -516,7 +542,22 @@ class GameActionButton(discord.ui.Button):
             state = store.get(str(interaction.channel_id))
             if self.game == "poker" and state:
                 await save_poker_game(interaction.guild_id, str(interaction.channel_id), state)
-            view = PokerLobbyView(str(interaction.channel_id)) if self.game == "poker" and state else GameControlView(self.game)
+            if self.game == "sevens" and state:
+                await save_sevens_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "daifugo" and state:
+                await save_daifugo_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "uno" and state:
+                await save_uno_game(interaction.guild_id, str(interaction.channel_id), state)
+            if self.game == "poker" and state:
+                view = PokerLobbyView(str(interaction.channel_id))
+            elif self.game == "uno" and state:
+                view = UnoLobbyView(str(interaction.channel_id))
+            elif self.game == "sevens" and state:
+                view = SevensLobbyView(str(interaction.channel_id))
+            elif self.game == "daifugo" and state:
+                view = DaifugoLobbyView(str(interaction.channel_id))
+            else:
+                view = GameControlView(self.game)
             await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
         elif self.action == "join":
             if self.game == "othello":
@@ -529,6 +570,12 @@ class GameActionButton(discord.ui.Button):
             state = store.get(str(interaction.channel_id))
             if self.game == "poker" and state and len(state.get("players", [])) > len(before_players):
                 await save_poker_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+            if self.game == "sevens" and state and len(state.get("players", [])) > len(before_players):
+                await save_sevens_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+            if self.game == "daifugo" and state and len(state.get("players", [])) > len(before_players):
+                await save_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+            if self.game == "uno" and state and len(state.get("players", [])) > len(before_players):
+                await save_uno_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
             if state and interaction.message and len(state.get("players", [])) > len(before_players):
                 await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
             else:
@@ -543,6 +590,21 @@ class GameActionButton(discord.ui.Button):
                     await save_poker_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
                 elif before_state:
                     await delete_poker_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "sevens":
+                if state:
+                    await save_sevens_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_sevens_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "daifugo":
+                if state:
+                    await save_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_daifugo_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "uno":
+                if state:
+                    await save_uno_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_uno_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if before_state and not state and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             elif state and interaction.message:
@@ -564,6 +626,12 @@ class GameActionButton(discord.ui.Button):
             ok, text = cancel_game(interaction, self.game)
             if self.game == "poker" and ok and before_state:
                 await delete_poker_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "sevens" and ok and before_state:
+                await delete_sevens_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "daifugo" and ok and before_state:
+                await delete_daifugo_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
+            if self.game == "uno" and ok and before_state:
+                await delete_uno_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if ok and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             else:
@@ -724,6 +792,12 @@ class Quick(commands.Cog):
         store.pop(game_id, None)
         if game.value == "poker":
             await delete_poker_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "sevens":
+            await delete_sevens_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "daifugo":
+            await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "uno":
+            await delete_uno_game(interaction.guild_id or state.get("guild_id"), game_id)
         suffix = f"\n理由: {reason[:500]}" if reason else ""
         status = "強制終了" if already_started else "募集を中止"
         await interaction.response.send_message(f"{label}を{status}しました。{suffix}")

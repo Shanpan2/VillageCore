@@ -1,10 +1,14 @@
 import random
+import asyncio
+import json
 from io import BytesIO
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
+
+from database.config_db import db_get, db_set
 
 
 SUITS = ["S", "H", "D", "C"]
@@ -20,6 +24,74 @@ DEFAULT_RULES = {
 }
 
 daifugo_games: dict[str, dict] = {}
+
+
+def daifugo_index_key(guild_id: int) -> str:
+    return f"daifugo_games_index:{guild_id}"
+
+
+def daifugo_game_key(guild_id: int, game_id: str) -> str:
+    return f"daifugo_game:{guild_id}:{game_id}"
+
+
+async def save_daifugo_game(guild_id: int | None, game_id: str, state: dict | None = None):
+    if not guild_id:
+        return
+    state = state or daifugo_games.get(game_id)
+    if not state:
+        return
+    state["guild_id"] = guild_id
+    await db_set(daifugo_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
+    try:
+        index = json.loads(await db_get(daifugo_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    if game_id not in index:
+        index.append(game_id)
+        await db_set(daifugo_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+
+
+async def delete_daifugo_game(guild_id: int | None, game_id: str):
+    if not guild_id:
+        return
+    try:
+        index = json.loads(await db_get(daifugo_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    index = [item for item in index if item != game_id]
+    await db_set(daifugo_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+
+
+async def load_daifugo_games_for_guild(bot: commands.Bot, guild: discord.Guild):
+    try:
+        index = json.loads(await db_get(daifugo_index_key(guild.id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+
+    changed = False
+    for game_id in index:
+        raw = await db_get(daifugo_game_key(guild.id, game_id))
+        if not raw:
+            changed = True
+            continue
+        try:
+            state = json.loads(raw)
+        except json.JSONDecodeError:
+            changed = True
+            continue
+        if not isinstance(state, dict) or not state.get("players"):
+            changed = True
+            continue
+        daifugo_games[game_id] = state
+        if state.get("started"):
+            current = state["players"][state.get("turn_index", 0)]
+            bot.add_view(DaifugoPlayView(game_id, current))
+        else:
+            bot.add_view(DaifugoLobbyView(game_id))
+
+    if changed:
+        active = [game_id for game_id in index if game_id in daifugo_games]
+        await db_set(daifugo_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
 def lobby_text(state: dict) -> str:
@@ -39,6 +111,8 @@ class DaifugoLobbyView(discord.ui.View):
     def __init__(self, game_id: str):
         super().__init__(timeout=None)
         self.game_id = game_id
+        for action, child in zip(("join", "leave", "begin", "cancel"), self.children):
+            child.custom_id = f"daifugo_lobby_{action}_{game_id}"
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -53,6 +127,7 @@ class DaifugoLobbyView(discord.ui.View):
             await interaction.response.send_message("すでに参加しています。", ephemeral=True)
             return
         state["players"].append(interaction.user.id)
+        await save_daifugo_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
@@ -69,11 +144,13 @@ class DaifugoLobbyView(discord.ui.View):
             return
         state["players"].remove(interaction.user.id)
         if not state["players"]:
+            await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), self.game_id)
             daifugo_games.pop(self.game_id, None)
             await interaction.response.edit_message(content="参加者がいなくなったため、大富豪募集を終了しました。", view=None)
             return
         if state.get("creator_id") == interaction.user.id:
             state["creator_id"] = state["players"][0]
+        await save_daifugo_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
@@ -108,6 +185,7 @@ class DaifugoLobbyView(discord.ui.View):
         if not is_creator and not is_admin:
             await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
             return
+        await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), self.game_id)
         daifugo_games.pop(self.game_id, None)
         await interaction.response.edit_message(content="大富豪募集を中止しました。", view=None)
 
@@ -377,6 +455,7 @@ async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
         state["finished"].append(str(remaining[0]))
     ranking_order = state["finished"] + state.get("fallen", [])
     ranking = "\n".join(f"{index + 1}. <@{uid}>" for index, uid in enumerate(ranking_order))
+    await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id))
     daifugo_games.pop(str(interaction.channel_id), None)
     await interaction.response.edit_message(content=f"**大富豪終了**\n{ranking}", view=None)
     return True
@@ -385,6 +464,7 @@ async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
 async def update_table(interaction: discord.Interaction, state: dict, prefix: str = ""):
     game_id = str(interaction.channel_id)
     current = state["players"][state["turn_index"]]
+    await save_daifugo_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     member = interaction.guild.get_member(current) if interaction.guild else None
     if member:
         try:
@@ -458,7 +538,7 @@ async def play_cards(interaction: discord.Interaction, game_id: str, user_id: in
     state["passed"] = []
 
     prefix = f"<@{user_id}> が **{group_label(cards)}** を出しました。"
-    if state["rules"].get("suit_lock") and previous_info and info and info["suits"] == previous_info["suits"]:
+    if state["rules"].get("suit_lock") and previous_info and info and info["suits"] == tuple(previous_info.get("suits", ())):
         state["locked_suits"] = info["suits"]
         prefix += "\nしばりが発生しました。"
 
@@ -515,6 +595,19 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
 class Daifugo(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._restore_task = None
+
+    async def cog_load(self):
+        self._restore_task = asyncio.create_task(self._restore_saved_games())
+
+    async def cog_unload(self):
+        if self._restore_task:
+            self._restore_task.cancel()
+
+    async def _restore_saved_games(self):
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            await load_daifugo_games_for_guild(self.bot, guild)
 
     @app_commands.command(name="daifugo_start", description="大富豪ゲームを作成します")
     @app_commands.describe(
@@ -562,7 +655,9 @@ class Daifugo(commands.Cog):
             "revolution": False,
             "rules": rules,
             "previous_daifugo_id": previous_daifugo.id if previous_daifugo else None,
+            "guild_id": interaction.guild_id,
         }
+        await save_daifugo_game(interaction.guild_id, game_id, daifugo_games[game_id])
         await interaction.response.send_message(lobby_text(daifugo_games[game_id]), view=DaifugoLobbyView(game_id))
 
     @app_commands.command(name="daifugo_join", description="大富豪に参加します")
@@ -578,6 +673,7 @@ class Daifugo(commands.Cog):
             await interaction.response.send_message("すでに参加しています。", ephemeral=True)
             return
         state["players"].append(interaction.user.id)
+        await save_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
         await interaction.response.send_message(f"{interaction.user.mention} が参加しました。")
 
     @app_commands.command(name="daifugo_begin", description="大富豪を開始します")
@@ -604,6 +700,8 @@ class Daifugo(commands.Cog):
 
         state["hands"] = hands
         state["started"] = True
+        state["guild_id"] = interaction.guild_id
+        await save_daifugo_game(interaction.guild_id, game_id, state)
 
         failed_dm = []
         for uid in state["players"]:

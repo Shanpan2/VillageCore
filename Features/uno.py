@@ -2,9 +2,12 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw, ImageFont
+import asyncio
+import json
 import random
 import os
 
+from database.config_db import db_get, db_set
 from views.uno_views import (
     UnoHandView,
     WildColorSelectView,
@@ -15,6 +18,89 @@ from views.uno_views import (
 
 # UNO ゲーム状態（メモリ管理）
 uno_games: dict[str, dict] = {}
+
+
+def uno_index_key(guild_id: int) -> str:
+    return f"uno_games_index:{guild_id}"
+
+
+def uno_game_key(guild_id: int, game_id: str) -> str:
+    return f"uno_game:{guild_id}:{game_id}"
+
+
+def normalize_uno_state(state: dict) -> dict:
+    players = [int(uid) for uid in state.get("players", [])]
+    state["players"] = players
+    hands = state.get("hands") or {}
+    state["hands"] = {int(uid): cards for uid, cards in hands.items()} if hands else {}
+    return state
+
+
+async def save_uno_game(guild_id: int | None, game_id: str, state: dict | None = None):
+    if not guild_id:
+        return
+    state = normalize_uno_state(state or uno_games.get(game_id) or {})
+    if not state:
+        return
+    state["guild_id"] = guild_id
+    await db_set(uno_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
+    try:
+        index = json.loads(await db_get(uno_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    if game_id not in index:
+        index.append(game_id)
+        await db_set(uno_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+
+
+async def delete_uno_game(guild_id: int | None, game_id: str):
+    if not guild_id:
+        return
+    try:
+        index = json.loads(await db_get(uno_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    index = [item for item in index if item != game_id]
+    await db_set(uno_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+
+
+async def load_uno_games_for_guild(bot: commands.Bot, guild: discord.Guild):
+    try:
+        index = json.loads(await db_get(uno_index_key(guild.id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+
+    changed = False
+    for game_id in index:
+        raw = await db_get(uno_game_key(guild.id, game_id))
+        if not raw:
+            changed = True
+            continue
+        try:
+            state = normalize_uno_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            changed = True
+            continue
+        if not isinstance(state, dict) or not state.get("players"):
+            changed = True
+            continue
+        uno_games[game_id] = state
+        pending = state.get("pending")
+        if not state.get("hands"):
+            bot.add_view(UnoLobbyView(game_id))
+        elif pending and pending.get("type") == "wild_color":
+            bot.add_view(WildColorSelectView(game_id, int(pending["user_id"]), pending["card"]))
+        elif pending and pending.get("type") == "challenge":
+            bot.add_view(ChallengeView(game_id, int(pending["attacker_id"]), int(pending["defender_id"])))
+        elif pending and pending.get("type") == "uno_declare":
+            bot.add_view(UnoDeclareView(game_id, int(pending["user_id"])))
+        else:
+            current = state["players"][state.get("turn_index", 0)]
+            bot.add_view(UnoHandView(game_id, current, state["hands"].get(current, [])))
+
+    if changed:
+        active = [game_id for game_id in index if game_id in uno_games]
+        await db_set(uno_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
 def lobby_text(state: dict) -> str:
@@ -32,6 +118,8 @@ class UnoLobbyView(discord.ui.View):
     def __init__(self, game_id: str):
         super().__init__(timeout=None)
         self.game_id = game_id
+        for action, child in zip(("join", "leave", "begin", "cancel"), self.children):
+            child.custom_id = f"uno_lobby_{action}_{game_id}"
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -46,6 +134,7 @@ class UnoLobbyView(discord.ui.View):
             await interaction.response.send_message("すでに参加しています。", ephemeral=True)
             return
         state["players"].append(interaction.user.id)
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
@@ -62,11 +151,13 @@ class UnoLobbyView(discord.ui.View):
             return
         state["players"].remove(interaction.user.id)
         if not state["players"]:
+            await delete_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id)
             uno_games.pop(self.game_id, None)
             await interaction.response.edit_message(content="参加者がいなくなったため、UNO募集を終了しました。", view=None)
             return
         if state.get("creator_id") == interaction.user.id:
             state["creator_id"] = state["players"][0]
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
@@ -101,6 +192,7 @@ class UnoLobbyView(discord.ui.View):
         if not is_creator and not is_admin:
             await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
             return
+        await delete_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id)
         uno_games.pop(self.game_id, None)
         await interaction.response.edit_message(content="UNO募集を中止しました。", view=None)
 
@@ -108,6 +200,19 @@ class UnoLobbyView(discord.ui.View):
 class Uno(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._restore_task = None
+
+    async def cog_load(self):
+        self._restore_task = asyncio.create_task(self._restore_saved_games())
+
+    async def cog_unload(self):
+        if self._restore_task:
+            self._restore_task.cancel()
+
+    async def _restore_saved_games(self):
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            await load_uno_games_for_guild(self.bot, guild)
 
     # -------------------------------------------------------
     # /uno_start
@@ -131,8 +236,11 @@ class Uno(commands.Cog):
             "top": None,
             "uno_declared": False,
             "challenge_mode": challenge,
+            "pending": None,
+            "guild_id": interaction.guild_id,
         }
 
+        await save_uno_game(interaction.guild_id, game_id, uno_games[game_id])
         await interaction.response.send_message(lobby_text(uno_games[game_id]), view=UnoLobbyView(game_id))
 
     # -------------------------------------------------------
@@ -158,6 +266,7 @@ class Uno(commands.Cog):
             return
 
         state["players"].append(user_id)
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
         await interaction.response.send_message(
             f"🙌 {interaction.user.mention} が参加しました！"
         )
@@ -206,7 +315,9 @@ class Uno(commands.Cog):
             "turn_index": 0,
             "direction": 1,
             "uno_declared": False,
+            "pending": None,
         })
+        await save_uno_game(interaction.guild_id, game_id, state)
 
         # 手札画像をDM送信
         failed_dm: list[str] = []
@@ -275,6 +386,8 @@ async def handle_play_card(
 
     # ワイルド系は色選択へ
     if card.startswith("wild"):
+        state["pending"] = {"type": "wild_color", "user_id": current_player_id, "card": card}
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
         await interaction.response.edit_message(
             content=f"🎨 <@{current_player_id}> が **{card}** を出しました。\n色を選んでください。",
             view=WildColorSelectView(game_id, current_player_id, card),
@@ -287,6 +400,8 @@ async def handle_play_card(
 
     # UNO宣言チェック（残り1枚）
     if len(hands[current_player_id]) == 1:
+        state["pending"] = {"type": "uno_declare", "user_id": current_player_id}
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
         await interaction.response.edit_message(
             content=f"⚠️ <@{current_player_id}> の手札が残り1枚です❗ UNO を宣言してください!!",
             view=UnoDeclareView(game_id, current_player_id),
@@ -295,6 +410,7 @@ async def handle_play_card(
 
     # 勝利判定
     if len(hands[current_player_id]) == 0:
+        await delete_uno_game(interaction.guild_id or state.get("guild_id"), game_id)
         await interaction.response.edit_message(
             content=f"🎉 <@{current_player_id}> の勝利!!", view=None
         )
@@ -329,11 +445,13 @@ async def handle_play_card(
                 hands[current_player_id].append(deck.pop())
 
     state["uno_declared"] = False
+    state["pending"] = None
 
     if len(deck) == 0:
         deck, discard = refill_deck(deck, discard)
 
     state.update({"turn_index": turn_index, "hands": hands, "deck": deck, "discard": discard})
+    await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     next_player_id = players[turn_index]
 
     await interaction.response.edit_message(
@@ -378,6 +496,12 @@ async def handle_wild_color_select(
         next_player = players[next_index]
 
         if state["challenge_mode"]:
+            state.update({"hands": hands, "deck": deck, "discard": discard, "pending": {
+                "type": "challenge",
+                "attacker_id": current_player_id,
+                "defender_id": next_player,
+            }})
+            await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
             await interaction.response.edit_message(
                 content=f"🃏 <@{current_player_id}> が **ワイルドドロー4** を出しました！\n"
                         f"<@{next_player}> はチャレンジしますか？",
@@ -394,7 +518,8 @@ async def handle_wild_color_select(
     else:
         turn_index = (turn_index + direction) % len(players)
 
-    state.update({"hands": hands, "deck": deck, "turn_index": turn_index})
+    state.update({"hands": hands, "deck": deck, "discard": discard, "turn_index": turn_index, "pending": None})
+    await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     next_player_id = players[turn_index]
 
     await interaction.response.edit_message(
@@ -442,7 +567,8 @@ async def handle_challenge(
         result = f"💥 チャレンジ失敗！\n<@{defender_id}> が 6 枚引きます。"
 
     turn_index = (turn_index + direction * 2) % len(players)
-    state.update({"hands": hands, "deck": deck, "turn_index": turn_index})
+    state.update({"hands": hands, "deck": deck, "turn_index": turn_index, "pending": None})
+    await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     next_player_id = players[turn_index]
 
     await interaction.response.edit_message(
@@ -472,6 +598,8 @@ async def handle_uno_declare(
         return
 
     state["uno_declared"] = True
+    state["pending"] = None
+    await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     await interaction.response.edit_message(
         content=f"🎉 <@{user_id}> が **UNO！** を宣言しました！", view=None
     )
@@ -493,6 +621,7 @@ async def handle_uno_surrender(
 
     remaining = [uid for uid in state["players"] if uid != user_id]
     winners = ", ".join(f"<@{uid}>" for uid in remaining) if remaining else "なし"
+    await delete_uno_game(interaction.guild_id or state.get("guild_id"), game_id)
     uno_games.pop(game_id, None)
 
     await interaction.response.edit_message(
@@ -650,6 +779,8 @@ async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_
         drawn = deck.pop()
         hands[current_player_id].append(drawn)
         state["deck"] = deck
+        state["hands"] = hands
+        await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
 
     await interaction.response.edit_message(
         content=f"🃏 <@{current_player_id}> が山札から1枚引きました。",

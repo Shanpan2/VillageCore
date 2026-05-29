@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import random
 from pathlib import Path
@@ -7,6 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import yt_dlp
+
+from database.config_db import db_get, db_set
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -94,6 +97,29 @@ FFMPEG_OPTIONS = {
     ),
     "options": "-vn",
 }
+
+
+def music_state_key(guild_id: int) -> str:
+    return f"music_state:{guild_id}"
+
+
+async def save_music_state(guild_id: int, state: dict):
+    await db_set(music_state_key(guild_id), json.dumps(state, ensure_ascii=False))
+
+
+async def load_music_state(guild_id: int) -> dict | None:
+    raw = await db_get(music_state_key(guild_id))
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data else None
+
+
+async def clear_music_state(guild_id: int):
+    await db_set(music_state_key(guild_id), "{}")
 
 
 def format_yt_dlp_error(error: Exception, prefix: str = "エラー") -> str:
@@ -219,6 +245,8 @@ class MusicPlayer:
         self.current_info = None
         self.loop_mode = "off"
         self.playing = False
+        self.text_channel_id = None
+        self.voice_channel_id = None
 
     def reset(self):
         self.queue.clear()
@@ -226,16 +254,39 @@ class MusicPlayer:
         self.current_info = None
         self.playing = False
 
+    def snapshot(self) -> dict:
+        queue = list(self.queue)
+        if self.loop_mode == "all" and self.current and queue and queue[-1] == self.current:
+            queue = queue[:-1]
+        return {
+            "queue": queue,
+            "current": self.current,
+            "loop_mode": self.loop_mode,
+            "text_channel_id": self.text_channel_id,
+            "voice_channel_id": self.voice_channel_id,
+        }
+
+    async def persist(self):
+        await save_music_state(self.guild.id, self.snapshot())
+
+    async def clear_persisted(self):
+        await clear_music_state(self.guild.id)
+
     async def play_next(self, channel=None):
+        if channel:
+            self.text_channel_id = channel.id
         voice = self.guild.voice_client
         if voice is None or not voice.is_connected():
             self.playing = False
+            await self.persist()
             return
+        self.voice_channel_id = voice.channel.id if voice.channel else self.voice_channel_id
 
         if not self.queue:
             self.playing = False
             self.current = None
             self.current_info = None
+            await self.persist()
             return
 
         if self.loop_mode == "single" and self.current:
@@ -247,6 +298,7 @@ class MusicPlayer:
 
         self.current = item
         self.playing = True
+        await self.persist()
 
         try:
             info = await asyncio.to_thread(_extract_info, item["url"])
@@ -261,6 +313,7 @@ class MusicPlayer:
                 raise RuntimeError("音声URLを取得できませんでした。")
 
             self.current_info = info
+            await self.persist()
             source = discord.FFmpegOpusAudio(
                 audio_url,
                 bitrate=MUSIC_OPUS_BITRATE,
@@ -290,6 +343,10 @@ class MusicPlayer:
             await channel.send(embed=embed)
 
     async def add_to_queue(self, channel, query: str):
+        self.text_channel_id = channel.id
+        voice = self.guild.voice_client
+        if voice and voice.channel:
+            self.voice_channel_id = voice.channel.id
         if query.startswith("spotify:"):
             query = query.replace("spotify:", "https://open.spotify.com/")
 
@@ -299,6 +356,7 @@ class MusicPlayer:
             if not self.playing:
                 await self.play_next(channel)
             else:
+                await self.persist()
                 await channel.send(f"🎶 キューに追加しました: **{query}**")
             return
 
@@ -330,6 +388,7 @@ class MusicPlayer:
         if not self.playing:
             await self.play_next(channel)
         else:
+            await self.persist()
             await channel.send(f"🎶 キューに追加しました: **{title}**")
 
 
@@ -339,11 +398,64 @@ class Music(commands.Cog):
         self.players: dict[int, MusicPlayer] = {}
         self.leave_tasks: dict[int, asyncio.Task] = {}
         self.monitor_tasks: dict[int, asyncio.Task] = {}
+        self._restore_task = None
+
+    async def cog_load(self):
+        self._restore_task = asyncio.create_task(self.restore_saved_music())
+
+    async def cog_unload(self):
+        if self._restore_task:
+            self._restore_task.cancel()
 
     def get_player(self, guild: discord.Guild) -> MusicPlayer:
         if guild.id not in self.players:
             self.players[guild.id] = MusicPlayer(self.bot, guild)
         return self.players[guild.id]
+
+    async def restore_saved_music(self):
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            state = await load_music_state(guild.id)
+            if not state:
+                continue
+
+            queue = state.get("queue") if isinstance(state.get("queue"), list) else []
+            current = state.get("current") if isinstance(state.get("current"), dict) else None
+            restore_queue = []
+            if current:
+                restore_queue.append(current)
+            restore_queue.extend(item for item in queue if isinstance(item, dict))
+            if not restore_queue:
+                continue
+
+            voice_channel = guild.get_channel(state.get("voice_channel_id"))
+            text_channel = guild.get_channel(state.get("text_channel_id"))
+            if not isinstance(voice_channel, discord.VoiceChannel):
+                continue
+
+            humans = [member for member in voice_channel.members if not member.bot]
+            if not humans:
+                continue
+
+            player = self.get_player(guild)
+            player.queue = restore_queue
+            player.current = None
+            player.current_info = None
+            player.loop_mode = state.get("loop_mode", "off")
+            player.text_channel_id = state.get("text_channel_id")
+            player.voice_channel_id = state.get("voice_channel_id")
+
+            try:
+                if guild.voice_client:
+                    await guild.voice_client.move_to(voice_channel)
+                else:
+                    await voice_channel.connect()
+                self.start_monitor_task(guild)
+                if text_channel:
+                    await text_channel.send("🔁 再起動前の音楽キューを復元して再生します。")
+                await player.play_next(text_channel)
+            except Exception as e:
+                print(f"[music restore] {guild.id}: {type(e).__name__}: {e}", flush=True)
 
     def cancel_leave_task(self, guild_id: int):
         task = self.leave_tasks.pop(guild_id, None)
@@ -372,6 +484,7 @@ class Music(commands.Cog):
 
         player = self.get_player(guild)
         player.reset()
+        await player.clear_persisted()
         if voice.is_playing() or voice.is_paused():
             voice.stop()
         await voice.disconnect()
@@ -455,6 +568,7 @@ class Music(commands.Cog):
         self.cancel_monitor_task(interaction.guild.id)
         player = self.get_player(interaction.guild)
         player.reset()
+        await player.clear_persisted()
         if voice.is_playing() or voice.is_paused():
             voice.stop()
         await voice.disconnect()
@@ -519,6 +633,7 @@ class Music(commands.Cog):
         voice = interaction.guild.voice_client
         player = self.get_player(interaction.guild)
         player.reset()
+        await player.clear_persisted()
         if voice:
             voice.stop()
             await interaction.response.send_message("⏹️ 停止しました。")
@@ -583,6 +698,7 @@ class Music(commands.Cog):
             return
         player = self.get_player(interaction.guild)
         player.loop_mode = mode
+        await player.persist()
         await interaction.response.send_message(f"🔁 ループモード: **{mode}**")
 
     @app_commands.command(name="shuffle", description="キューをシャッフルします")
@@ -594,6 +710,7 @@ class Music(commands.Cog):
             )
             return
         random.shuffle(player.queue)
+        await player.persist()
         await interaction.response.send_message("🔀 シャッフルしました。")
 
     @app_commands.command(name="remove", description="キューから指定番号の曲を削除します")
@@ -604,6 +721,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("❌ 正しい番号を指定してください。", ephemeral=True)
             return
         removed = player.queue.pop(index - 1)
+        await player.persist()
         await interaction.response.send_message(f"🗑️ 削除しました: **{removed['title']}**")
 
 
