@@ -18,7 +18,7 @@ from Features.othello import (
     save_othello_game,
     send_othello_state,
 )
-from Features.poker import poker_games, set_poker_bet_amount
+from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import sevens_games
 from Features.uno import uno_games
@@ -192,6 +192,7 @@ def create_poker_game(interaction: discord.Interaction) -> str:
         "bet": 0,
         "pot": 0,
         "bets_collected": False,
+        "guild_id": interaction.guild_id,
     }
     return f"ポーカーを作成しました。{interaction.user.mention} は自動参加しました。\n`/poker_join` で参加、`/poker_begin` で開始します。"
 
@@ -316,7 +317,10 @@ class GameStartButton(discord.ui.Button):
         text = creators[self.game](interaction)
         _, store = GAME_STORES[self.game]
         state = store.get(str(interaction.channel_id))
-        await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=GameControlView(self.game))
+        if self.game == "poker" and state:
+            await save_poker_game(interaction.guild_id, str(interaction.channel_id), state)
+        view = PokerLobbyView(str(interaction.channel_id)) if self.game == "poker" and state else GameControlView(self.game)
+        await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
 
 
 class OmikujiButton(discord.ui.Button):
@@ -510,7 +514,10 @@ class GameActionButton(discord.ui.Button):
             text = creators[self.game](interaction)
             _, store = GAME_STORES[self.game]
             state = store.get(str(interaction.channel_id))
-            await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=GameControlView(self.game))
+            if self.game == "poker" and state:
+                await save_poker_game(interaction.guild_id, str(interaction.channel_id), state)
+            view = PokerLobbyView(str(interaction.channel_id)) if self.game == "poker" and state else GameControlView(self.game)
+            await interaction.response.send_message(game_lobby_text(self.game, state) if state else text, view=view)
         elif self.action == "join":
             if self.game == "othello":
                 await interaction.response.send_message("オセロは作成された盤面の「参加する」ボタンから参加してください。", ephemeral=True)
@@ -520,6 +527,8 @@ class GameActionButton(discord.ui.Button):
             before_players = list(before_state.get("players", [])) if before_state else []
             text = join_game(interaction, self.game)
             state = store.get(str(interaction.channel_id))
+            if self.game == "poker" and state and len(state.get("players", [])) > len(before_players):
+                await save_poker_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
             if state and interaction.message and len(state.get("players", [])) > len(before_players):
                 await interaction.response.edit_message(content=game_lobby_text(self.game, state), view=self.view)
             else:
@@ -529,6 +538,11 @@ class GameActionButton(discord.ui.Button):
             before_state = store.get(str(interaction.channel_id))
             text = leave_game(interaction, self.game)
             state = store.get(str(interaction.channel_id))
+            if self.game == "poker":
+                if state:
+                    await save_poker_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
+                elif before_state:
+                    await delete_poker_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if before_state and not state and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             elif state and interaction.message:
@@ -545,7 +559,11 @@ class GameActionButton(discord.ui.Button):
                 except discord.HTTPException:
                     pass
         elif self.action == "cancel":
+            _, store = GAME_STORES[self.game]
+            before_state = store.get(str(interaction.channel_id))
             ok, text = cancel_game(interaction, self.game)
+            if self.game == "poker" and ok and before_state:
+                await delete_poker_game(interaction.guild_id or before_state.get("guild_id"), str(interaction.channel_id))
             if ok and interaction.message:
                 await interaction.response.edit_message(content=text, view=None)
             else:
@@ -704,6 +722,8 @@ class Quick(commands.Cog):
             return
 
         store.pop(game_id, None)
+        if game.value == "poker":
+            await delete_poker_game(interaction.guild_id or state.get("guild_id"), game_id)
         suffix = f"\n理由: {reason[:500]}" if reason else ""
         status = "強制終了" if already_started else "募集を中止"
         await interaction.response.send_message(f"{label}を{status}しました。{suffix}")

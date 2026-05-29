@@ -1,4 +1,6 @@
 import random
+import asyncio
+import json
 from collections import Counter
 from io import BytesIO
 
@@ -27,6 +29,74 @@ HAND_NAMES = {
 }
 
 poker_games: dict[str, dict] = {}
+
+
+def poker_index_key(guild_id: int) -> str:
+    return f"poker_games_index:{guild_id}"
+
+
+def poker_game_key(guild_id: int, game_id: str) -> str:
+    return f"poker_game:{guild_id}:{game_id}"
+
+
+async def save_poker_game(guild_id: int | None, game_id: str, state: dict | None = None):
+    if not guild_id:
+        return
+    state = state or poker_games.get(game_id)
+    if not state:
+        return
+    state["guild_id"] = guild_id
+    await db_set(poker_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
+    try:
+        index = json.loads(await db_get(poker_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    if game_id not in index:
+        index.append(game_id)
+        await db_set(poker_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+
+
+async def delete_poker_game(guild_id: int | None, game_id: str):
+    if not guild_id:
+        return
+    try:
+        index = json.loads(await db_get(poker_index_key(guild_id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+    index = [item for item in index if item != game_id]
+    await db_set(poker_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+
+
+async def load_poker_games_for_guild(bot: commands.Bot, guild: discord.Guild):
+    try:
+        index = json.loads(await db_get(poker_index_key(guild.id)) or "[]")
+    except json.JSONDecodeError:
+        index = []
+
+    changed = False
+    for game_id in index:
+        raw = await db_get(poker_game_key(guild.id, game_id))
+        if not raw:
+            changed = True
+            continue
+        try:
+            state = json.loads(raw)
+        except json.JSONDecodeError:
+            changed = True
+            continue
+        if not isinstance(state, dict) or not state.get("players"):
+            changed = True
+            continue
+        poker_games[game_id] = state
+        if state.get("started"):
+            current = state["players"][state.get("turn_index", 0)]
+            bot.add_view(PokerDrawView(game_id, current))
+        else:
+            bot.add_view(PokerLobbyView(game_id))
+
+    if changed:
+        active = [game_id for game_id in index if game_id in poker_games]
+        await db_set(poker_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
 def coin_key(guild_id: int, user_id: int) -> str:
@@ -75,6 +145,7 @@ async def set_poker_bet_amount(interaction: discord.Interaction, amount: int) ->
     state["bet"] = amount
     state["pot"] = 0
     state["bets_collected"] = False
+    await save_poker_game(interaction.guild_id, str(interaction.channel_id), state)
     return f"ポーカーの賭け額を1人 **{amount}** コインに設定しました。" if amount else "ポーカーの賭けをなしにしました。"
 
 
@@ -288,11 +359,13 @@ async def advance_or_finish(interaction: discord.Interaction, state: dict, prefi
         lines.append("")
         for index, (score, uid, hand) in enumerate(results, start=1):
             lines.append(f"{index}. <@{uid}> - {HAND_NAMES[score[0]]} / {', '.join(card_label(card) for card in sorted(hand, key=card_sort_key))}")
+        await delete_poker_game(interaction.guild_id or state.get("guild_id"), game_id)
         poker_games.pop(game_id, None)
         await interaction.response.edit_message(content="\n".join(lines), view=None)
         return
 
     await advance_turn(state)
+    await save_poker_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     current = state["players"][state["turn_index"]]
     member = interaction.guild.get_member(current) if interaction.guild else None
     if member:
@@ -384,6 +457,8 @@ class PokerLobbyView(discord.ui.View):
     def __init__(self, game_id: str):
         super().__init__(timeout=None)
         self.game_id = game_id
+        for action, child in zip(("join", "leave", "bet", "begin", "cancel"), self.children):
+            child.custom_id = f"poker_lobby_{action}_{game_id}"
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -409,6 +484,7 @@ class PokerLobbyView(discord.ui.View):
                 return
 
         state["players"].append(interaction.user.id)
+        await save_poker_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
@@ -425,11 +501,13 @@ class PokerLobbyView(discord.ui.View):
             return
         state["players"].remove(interaction.user.id)
         if not state["players"]:
+            await delete_poker_game(interaction.guild_id or state.get("guild_id"), self.game_id)
             poker_games.pop(self.game_id, None)
             await interaction.response.edit_message(content="参加者がいなくなったため、ポーカー募集を終了しました。", view=None)
             return
         if state.get("creator_id") == interaction.user.id:
             state["creator_id"] = state["players"][0]
+        await save_poker_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
         await interaction.response.edit_message(content=lobby_text(state), view=self)
 
     @discord.ui.button(label="賭け額", style=discord.ButtonStyle.secondary)
@@ -468,6 +546,7 @@ class PokerLobbyView(discord.ui.View):
         if not is_creator and not is_admin:
             await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
             return
+        await delete_poker_game(interaction.guild_id or state.get("guild_id"), self.game_id)
         poker_games.pop(self.game_id, None)
         await interaction.response.edit_message(content="ポーカー募集を中止しました。", view=None)
 
@@ -505,6 +584,19 @@ async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id
 class Poker(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._restore_task = None
+
+    async def cog_load(self):
+        self._restore_task = asyncio.create_task(self._restore_saved_games())
+
+    async def cog_unload(self):
+        if self._restore_task:
+            self._restore_task.cancel()
+
+    async def _restore_saved_games(self):
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            await load_poker_games_for_guild(self.bot, guild)
 
     @app_commands.command(name="poker_start", description="ポーカーゲームを作成します")
     @app_commands.describe(bet="1人あたりの賭けコイン数。0で賭けなし")
@@ -532,7 +624,9 @@ class Poker(commands.Cog):
             "bet": bet,
             "pot": 0,
             "bets_collected": False,
+            "guild_id": interaction.guild_id,
         }
+        await save_poker_game(interaction.guild_id, game_id, poker_games[game_id])
         await interaction.response.send_message(lobby_text(poker_games[game_id]), view=PokerLobbyView(game_id))
 
     @app_commands.command(name="poker_join", description="ポーカーに参加します")
@@ -557,6 +651,7 @@ class Poker(commands.Cog):
                 await interaction.response.send_message(f"参加に **{bet}** コイン必要です。現在の所持コインは **{balance}** です。", ephemeral=True)
                 return
         state["players"].append(interaction.user.id)
+        await save_poker_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id), state)
         await interaction.response.send_message(f"{interaction.user.mention} が参加しました。")
 
     @app_commands.command(name="poker_begin", description="ポーカーを開始します")
@@ -585,6 +680,8 @@ class Poker(commands.Cog):
         state["deck"] = deck
         state["hands"] = {str(uid): draw_cards(state, 5) for uid in state["players"]}
         state["started"] = True
+        state["guild_id"] = interaction.guild_id
+        await save_poker_game(interaction.guild_id, game_id, state)
 
         failed_dm = []
         for uid in state["players"]:
