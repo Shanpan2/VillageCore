@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import random
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import discord
@@ -24,6 +26,11 @@ YOUTUBE_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+YOUTUBE_PLAYER_CLIENTS = [
+    item.strip()
+    for item in os.getenv("YTDLP_YOUTUBE_PLAYER_CLIENTS", "web,web_embedded,mweb").split(",")
+    if item.strip()
+]
 COOKIE_RETRY_KEYWORDS = [
     "sign in to confirm",
     "confirm your age",
@@ -76,7 +83,7 @@ YDL_OPTIONS = {
     "fragment_retries": 3,
     "extractor_args": {
         "youtube": {
-            "player_client": ["default", "mweb", "web_embedded"],
+            "player_client": YOUTUBE_PLAYER_CLIENTS,
             "formats": ["missing_pot", "incomplete"],
         },
     },
@@ -86,9 +93,9 @@ YDL_OPTIONS = {
     },
 }
 YDL_PLAY_FORMATS = (
-    "251/140/bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
+    "140/251/bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
     "bestaudio[abr>=128][protocol^=http]/bestaudio[protocol^=http]/bestaudio",
-    "251/250/249/140/bestaudio[abr>=128]/bestaudio",
+    "140/251/250/249/bestaudio[abr>=128]/bestaudio",
     "best[acodec!=none][height<=720]/best[acodec!=none]",
     None,
 )
@@ -308,6 +315,27 @@ def _youtube_url_from_entry(entry: dict) -> str | None:
     return None
 
 
+def _is_audio_url_usable(url: str) -> bool:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": YOUTUBE_USER_AGENT,
+            "Referer": "https://www.youtube.com/",
+            "Range": "bytes=0-0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return response.status in (200, 206)
+    except urllib.error.HTTPError as e:
+        print(f"[music] audio preflight rejected: HTTP {e.code}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[music] audio preflight failed: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
 def _pick_audio_url(info: dict) -> str | None:
     formats = info.get("formats") or []
     audio_formats = [
@@ -333,23 +361,33 @@ def _pick_audio_url(info: dict) -> str | None:
         protocol = fmt.get("protocol") or ""
         abr = fmt.get("abr") or 0
         asr = fmt.get("asr") or 0
-        opus_bonus = 1000 if "opus" in acodec or ext == "webm" else 0
+        stable_bonus = 1200 if ext == "m4a" or "mp4a" in acodec else 0
+        opus_bonus = 900 if "opus" in acodec or ext == "webm" else 0
         http_bonus = 200 if protocol.startswith("http") else 0
         complete_penalty = -500 if fmt.get("has_drm") or fmt.get("format_note") == "storyboard" else 0
-        return (opus_bonus + http_bonus + complete_penalty, abr, asr)
+        return (stable_bonus + opus_bonus + http_bonus + complete_penalty, abr, asr)
 
     audio_formats.sort(
         key=quality_score,
         reverse=True,
     )
-    selected = audio_formats[0]
-    print(
-        "[music] selected audio format: "
-        f"id={selected.get('format_id')} ext={selected.get('ext')} "
-        f"acodec={selected.get('acodec')} abr={selected.get('abr')}",
-        flush=True,
-    )
-    return audio_formats[0]["url"]
+    for selected in audio_formats[:8]:
+        print(
+            "[music] checking audio format: "
+            f"id={selected.get('format_id')} ext={selected.get('ext')} "
+            f"acodec={selected.get('acodec')} abr={selected.get('abr')}",
+            flush=True,
+        )
+        if _is_audio_url_usable(selected["url"]):
+            print(
+                "[music] selected audio format: "
+                f"id={selected.get('format_id')} ext={selected.get('ext')} "
+                f"acodec={selected.get('acodec')} abr={selected.get('abr')}",
+                flush=True,
+            )
+            return selected["url"]
+
+    return None
 
 
 class MusicPlayer:
