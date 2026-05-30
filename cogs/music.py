@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,8 +20,10 @@ DEFAULT_COOKIE_FILE = BASE_DIR / "cookies.txt"
 MUSIC_OPUS_BITRATE = int(os.getenv("MUSIC_OPUS_BITRATE", "160"))
 GENERATED_COOKIE_FILE = Path(os.getenv("YTDLP_GENERATED_COOKIE_FILE", "/tmp/ytdlp_cookies.txt"))
 YTDLP_COOKIE_FILE_ACTIVE = None
+YTDLP_COOKIE_INVALID_DETECTED = False
 COOKIE_WARNING_COOLDOWN_SECONDS = 3600
 COOKIE_WARNING_TIMES: dict[int, float] = {}
+YOUTUBE_429_BACKOFF_UNTIL = 0.0
 YOUTUBE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -60,6 +63,12 @@ class QuietYtdlpLogger:
         pass
 
     def warning(self, msg):
+        global YTDLP_COOKIE_INVALID_DETECTED, YOUTUBE_429_BACKOFF_UNTIL
+        lower = str(msg).lower()
+        if "cookies are no longer valid" in lower:
+            YTDLP_COOKIE_INVALID_DETECTED = True
+        if "http error 429" in lower or "too many requests" in lower:
+            YOUTUBE_429_BACKOFF_UNTIL = time.monotonic() + 300
         print(f"[yt-dlp warning] {msg}", flush=True)
 
     def error(self, msg):
@@ -227,6 +236,10 @@ def _is_cookie_invalid_error(error: Exception) -> bool:
     return any(keyword in raw for keyword in COOKIE_INVALID_KEYWORDS)
 
 
+def _cookies_can_be_used() -> bool:
+    return bool(YTDLP_COOKIE_FILE_ACTIVE and not YTDLP_COOKIE_INVALID_DETECTED)
+
+
 def _make_ydl_options(use_cookies: bool, requested_format=None, metadata: bool = False) -> dict:
     options = YDL_OPTIONS.copy()
     if use_cookies and YTDLP_COOKIE_FILE_ACTIVE:
@@ -263,10 +276,13 @@ def _extract_info_attempt(query: str, use_cookies: bool):
 
 
 def _extract_info(query: str):
+    if YOUTUBE_429_BACKOFF_UNTIL and time.monotonic() < YOUTUBE_429_BACKOFF_UNTIL:
+        wait = int(YOUTUBE_429_BACKOFF_UNTIL - time.monotonic())
+        raise RuntimeError(f"YouTube側の429制限中です。約{wait}秒後に再試行してください。")
     try:
         return _extract_info_attempt(query, use_cookies=False)
     except Exception as first_error:
-        if not YTDLP_COOKIE_FILE_ACTIVE or not _should_retry_with_cookies(first_error):
+        if not _cookies_can_be_used() or not _should_retry_with_cookies(first_error):
             raise
         try:
             print("[music] retrying extraction with cookies", flush=True)
@@ -284,10 +300,13 @@ def _extract_metadata_attempt(query: str, use_cookies: bool):
 
 
 def _extract_metadata(query: str):
+    if YOUTUBE_429_BACKOFF_UNTIL and time.monotonic() < YOUTUBE_429_BACKOFF_UNTIL:
+        wait = int(YOUTUBE_429_BACKOFF_UNTIL - time.monotonic())
+        raise RuntimeError(f"YouTube側の429制限中です。約{wait}秒後に再試行してください。")
     try:
         return _extract_metadata_attempt(query, use_cookies=False)
     except Exception as first_error:
-        if not YTDLP_COOKIE_FILE_ACTIVE or not _should_retry_with_cookies(first_error):
+        if not _cookies_can_be_used() or not _should_retry_with_cookies(first_error):
             raise
         try:
             print("[music] retrying metadata extraction with cookies", flush=True)
@@ -456,6 +475,8 @@ class MusicPlayer:
 
         try:
             info = await asyncio.to_thread(_extract_info, item["url"])
+            if YTDLP_COOKIE_INVALID_DETECTED:
+                await send_music_cookie_warning(self.bot, self.guild, RuntimeError("YouTube cookies are no longer valid."))
             if "entries" in info:
                 entries = [entry for entry in info["entries"] if entry]
                 if not entries:
@@ -534,6 +555,8 @@ class MusicPlayer:
 
         try:
             info = await asyncio.to_thread(_extract_metadata, query)
+            if YTDLP_COOKIE_INVALID_DETECTED:
+                await send_music_cookie_warning(self.bot, self.guild, RuntimeError("YouTube cookies are no longer valid."))
             if "entries" in info:
                 entries = [entry for entry in info["entries"] if entry]
                 if not entries:
