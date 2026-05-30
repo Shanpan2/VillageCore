@@ -19,6 +19,11 @@ GENERATED_COOKIE_FILE = Path(os.getenv("YTDLP_GENERATED_COOKIE_FILE", "/tmp/ytdl
 YTDLP_COOKIE_FILE_ACTIVE = None
 COOKIE_WARNING_COOLDOWN_SECONDS = 3600
 COOKIE_WARNING_TIMES: dict[int, float] = {}
+YOUTUBE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 COOKIE_RETRY_KEYWORDS = [
     "sign in to confirm",
     "confirm your age",
@@ -76,11 +81,7 @@ YDL_OPTIONS = {
         },
     },
     "http_headers": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/125.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": YOUTUBE_USER_AGENT,
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     },
 }
@@ -113,6 +114,8 @@ elif os.getenv("YTDLP_COOKIE_FILE"):
 FFMPEG_OPTIONS = {
     "before_options": (
         "-nostdin "
+        f"-user_agent \"{YOUTUBE_USER_AGENT}\" "
+        "-referer \"https://www.youtube.com/\" "
         "-reconnect 1 "
         "-reconnect_streamed 1 "
         "-reconnect_at_eof 1 "
@@ -441,9 +444,7 @@ class MusicPlayer:
             return
 
         def after_play(err):
-            if err:
-                print(f"[music after_play] {err}", flush=True)
-            asyncio.run_coroutine_threadsafe(self.play_next(channel), self.bot.loop)
+            asyncio.run_coroutine_threadsafe(self.handle_after_play(err, channel), self.bot.loop)
 
         voice.play(source, after=after_play)
 
@@ -456,6 +457,22 @@ class MusicPlayer:
             if info.get("thumbnail"):
                 embed.set_thumbnail(url=info["thumbnail"])
             await channel.send(embed=embed)
+
+    async def handle_after_play(self, err, channel=None):
+        if err:
+            print(f"[music after_play] {err}", flush=True)
+            err_text = str(err).lower()
+            retry_count = int((self.current or {}).get("_stream_retry", 0) or 0)
+            if ("403" in err_text or "forbidden" in err_text) and self.current and retry_count < 1:
+                retry_item = dict(self.current)
+                retry_item["_stream_retry"] = retry_count + 1
+                self.queue.insert(0, retry_item)
+                if channel:
+                    await channel.send("⚠️ YouTubeの一時URLが拒否されたため、URLを取り直して1回だけ再試行します。")
+                await self.persist()
+                await self.play_next(channel)
+                return
+        await self.play_next(channel)
 
     async def add_to_queue(self, channel, query: str):
         self.text_channel_id = channel.id
