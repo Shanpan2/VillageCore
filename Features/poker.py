@@ -99,6 +99,41 @@ async def load_poker_games_for_guild(bot: commands.Bot, guild: discord.Guild):
         await db_set(poker_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
+def normalize_poker_state(state: dict) -> dict:
+    state["players"] = [int(uid) for uid in state.get("players", [])]
+    state["turn_index"] = int(state.get("turn_index", 0) or 0)
+    if state["players"]:
+        state["turn_index"] %= len(state["players"])
+    state["exchanged"] = [str(uid) for uid in state.get("exchanged", [])]
+    return state
+
+
+async def get_poker_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
+    state = poker_games.get(game_id)
+    if state:
+        state = normalize_poker_state(state)
+        poker_games[game_id] = state
+        return state
+    guild_ids: list[int] = []
+    if guild_id:
+        guild_ids.append(int(guild_id))
+    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
+    for target_guild_id in guild_ids:
+        raw = await db_get(poker_game_key(target_guild_id, game_id))
+        if not raw:
+            continue
+        try:
+            state = normalize_poker_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not state.get("players"):
+            continue
+        state["guild_id"] = target_guild_id
+        poker_games[game_id] = state
+        return state
+    return None
+
+
 def coin_key(guild_id: int, user_id: int) -> str:
     return f"community_coin:{guild_id}:{user_id}"
 
@@ -616,7 +651,7 @@ class PokerLobbyView(discord.ui.View):
 
 
 async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id: int, selected: list[str]):
-    state = poker_games.get(game_id)
+    state = await get_poker_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("ゲームが存在しません。", ephemeral=True)
         return
@@ -647,7 +682,7 @@ async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id
 
 async def start_poker_game(interaction: discord.Interaction, game_id: str | None = None):
     game_id = game_id or str(interaction.channel_id)
-    state = poker_games.get(game_id)
+    state = await get_poker_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("まず `/poker_start` を実行してください。", ephemeral=True)
         return

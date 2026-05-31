@@ -94,6 +94,40 @@ async def load_daifugo_games_for_guild(bot: commands.Bot, guild: discord.Guild):
         await db_set(daifugo_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
+def normalize_daifugo_state(state: dict) -> dict:
+    state["players"] = [int(uid) for uid in state.get("players", [])]
+    state["turn_index"] = int(state.get("turn_index", 0) or 0)
+    if state["players"]:
+        state["turn_index"] %= len(state["players"])
+    return state
+
+
+async def get_daifugo_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
+    state = daifugo_games.get(game_id)
+    if state:
+        state = normalize_daifugo_state(state)
+        daifugo_games[game_id] = state
+        return state
+    guild_ids: list[int] = []
+    if guild_id:
+        guild_ids.append(int(guild_id))
+    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
+    for target_guild_id in guild_ids:
+        raw = await db_get(daifugo_game_key(target_guild_id, game_id))
+        if not raw:
+            continue
+        try:
+            state = normalize_daifugo_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not state.get("players"):
+            continue
+        state["guild_id"] = target_guild_id
+        daifugo_games[game_id] = state
+        return state
+    return None
+
+
 def lobby_text(state: dict) -> str:
     players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
     note = ""
@@ -523,7 +557,7 @@ class DaifugoPassButton(discord.ui.Button):
 
 
 async def play_cards(interaction: discord.Interaction, game_id: str, user_id: int, encoded: str):
-    state = daifugo_games.get(game_id)
+    state = await get_daifugo_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("ゲームが存在しません。", ephemeral=True)
         return
@@ -578,7 +612,7 @@ async def play_cards(interaction: discord.Interaction, game_id: str, user_id: in
 
 
 async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int):
-    state = daifugo_games.get(game_id)
+    state = await get_daifugo_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("ゲームが存在しません。", ephemeral=True)
         return
@@ -694,7 +728,7 @@ class Daifugo(commands.Cog):
 
 async def start_daifugo_game(interaction: discord.Interaction, game_id: str | None = None):
     game_id = game_id or str(interaction.channel_id)
-    state = daifugo_games.get(game_id)
+    state = await get_daifugo_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("まず `/daifugo_start` を実行してください。", ephemeral=True)
         return

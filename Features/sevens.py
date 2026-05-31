@@ -89,6 +89,40 @@ async def load_sevens_games_for_guild(bot: commands.Bot, guild: discord.Guild):
         await db_set(sevens_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
+def normalize_sevens_state(state: dict) -> dict:
+    state["players"] = [int(uid) for uid in state.get("players", [])]
+    state["turn_index"] = int(state.get("turn_index", 0) or 0)
+    if state["players"]:
+        state["turn_index"] %= len(state["players"])
+    return state
+
+
+async def get_sevens_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
+    state = sevens_games.get(game_id)
+    if state:
+        state = normalize_sevens_state(state)
+        sevens_games[game_id] = state
+        return state
+    guild_ids: list[int] = []
+    if guild_id:
+        guild_ids.append(int(guild_id))
+    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
+    for target_guild_id in guild_ids:
+        raw = await db_get(sevens_game_key(target_guild_id, game_id))
+        if not raw:
+            continue
+        try:
+            state = normalize_sevens_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not state.get("players"):
+            continue
+        state["guild_id"] = target_guild_id
+        sevens_games[game_id] = state
+        return state
+    return None
+
+
 def lobby_text(state: dict) -> str:
     players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
     return (
@@ -485,7 +519,7 @@ async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
 
 
 async def play_card(interaction: discord.Interaction, game_id: str, user_id: int, card: tuple[str, int]):
-    state = sevens_games.get(game_id)
+    state = await get_sevens_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -514,7 +548,7 @@ async def play_card(interaction: discord.Interaction, game_id: str, user_id: int
 
 
 async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int):
-    state = sevens_games.get(game_id)
+    state = await get_sevens_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -537,7 +571,7 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
 
 
 async def surrender(interaction: discord.Interaction, game_id: str, user_id: int):
-    state = sevens_games.get(game_id)
+    state = await get_sevens_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -614,7 +648,7 @@ class Sevens(commands.Cog):
 
 async def start_sevens_game(interaction: discord.Interaction, game_id: str | None = None):
     game_id = game_id or str(interaction.channel_id)
-    state = sevens_games.get(game_id)
+    state = await get_sevens_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ まず `/sevens_start` を実行してください。", ephemeral=True)
         return

@@ -242,6 +242,7 @@ class ChallengeNoButton(discord.ui.Button):
                 f"次のターン：<@{next_player_id}>"
             ),
             view=None,
+            attachments=[],
         )
         await send_uno_turn(
             interaction.client,

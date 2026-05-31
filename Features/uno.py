@@ -369,6 +369,7 @@ async def handle_play_card(
         await interaction.response.edit_message(
             content=f"🎨 **{card}** を出します。色を選んでください。",
             view=WildColorSelectView(game_id, current_player_id, card),
+            attachments=[],
         )
         return
 
@@ -385,7 +386,7 @@ async def handle_play_card(
     if len(hands[current_player_id]) == 0:
         await delete_uno_game(interaction.guild_id or state.get("guild_id"), game_id)
         uno_games.pop(game_id, None)
-        await interaction.response.edit_message(content="🎉 勝利しました！", view=None)
+        await interaction.response.edit_message(content="🎉 勝利しました！", view=None, attachments=[])
         await send_uno_channel_update(interaction.client, game_id, state, f"🎉 <@{current_player_id}> の勝利!!", include_top=False)
         return
 
@@ -429,6 +430,7 @@ async def handle_play_card(
     await interaction.response.edit_message(
         content=f"🃏 **{card}** を出しました。",
         view=None,
+        attachments=[],
     )
     prefix = f"🃏 <@{current_player_id}> が **{card}** を出しました。"
     if uno_notice:
@@ -489,6 +491,7 @@ async def handle_wild_color_select(
             await interaction.response.edit_message(
                 content="🃏 ワイルドドロー4を出しました。チャレンジ確認を相手に送ります。",
                 view=None,
+                attachments=[],
             )
             await send_uno_channel_update(
                 interaction.client,
@@ -510,7 +513,7 @@ async def handle_wild_color_select(
 
     state.update({"hands": hands, "deck": deck, "discard": discard, "turn_index": turn_index, "pending": None})
     await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
-    await interaction.response.edit_message(content=f"🎨 色を **{color}** に変更しました。", view=None)
+    await interaction.response.edit_message(content=f"🎨 色を **{color}** に変更しました。", view=None, attachments=[])
     await send_uno_turn(interaction.client, game_id, state, f"🎨 色は **{color}** に変更されました。")
 
 
@@ -563,6 +566,7 @@ async def handle_challenge(
     await interaction.response.edit_message(
         content=result,
         view=None,
+        attachments=[],
     )
     await send_uno_turn(interaction.client, game_id, state, result)
 
@@ -592,7 +596,7 @@ async def handle_uno_declare(
     state["uno_declared"] = True
     state["pending"] = None
     await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
-    await interaction.response.edit_message(content="🎉 **UNO！** を宣言しました！", view=None)
+    await interaction.response.edit_message(content="🎉 **UNO！** を宣言しました！", view=None, attachments=[])
     await send_uno_channel_update(interaction.client, game_id, state, f"🎉 <@{user_id}> が **UNO！** を宣言しました。")
     current = state["players"][state["turn_index"]]
     await send_uno_hand_dm(interaction.client, state, game_id, current)
@@ -622,6 +626,7 @@ async def handle_uno_surrender(
     await interaction.response.edit_message(
         content="⛔ 降参しました。",
         view=None,
+        attachments=[],
     )
     await send_uno_channel_update(interaction.client, game_id, state, f"⛔ <@{user_id}> が降参しました。\nゲーム終了。勝者: {winners}", include_top=False)
 
@@ -641,7 +646,7 @@ def generate_deck() -> list[str]:
     return deck
 
 
-def generate_hand_image(cards: list[str]) -> str:
+def render_hand_image(cards: list[str]) -> Image.Image:
     card_width, card_height = 120, 180
     gap = 10
     margin = 14
@@ -662,9 +667,14 @@ def generate_hand_image(cards: list[str]) -> str:
             card_img = draw_uno_card(card, card_width, card_height)
         img.paste(card_img, (margin + i * (card_width + gap), margin), card_img)
 
-    out = "uno_hand.png"
-    img.save(out)
-    return out
+    return img
+
+
+def generate_hand_file(cards: list[str], filename: str = "hand.png") -> discord.File:
+    buffer = BytesIO()
+    render_hand_image(cards).save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename=filename)
 
 
 def generate_card_file(card: str, filename: str = "uno_top.png") -> discord.File:
@@ -676,7 +686,6 @@ def generate_card_file(card: str, filename: str = "uno_top.png") -> discord.File
 
 
 def uno_public_text(state: dict, prefix: str = "") -> str:
-    current = state["players"][state.get("turn_index", 0)]
     top = state.get("top") or "なし"
     lines = []
     if prefix:
@@ -685,7 +694,7 @@ def uno_public_text(state: dict, prefix: str = "") -> str:
         [
             "**UNO**",
             f"場のカード: **{top}**",
-            f"現在のターン: <@{current}>",
+            "現在のターン: 参加者のDMに送信済み",
             "手札と操作パネルはターンの人のDMに送られます。",
         ]
     )
@@ -700,7 +709,11 @@ async def send_uno_channel_update(bot, game_id: str, state: dict, prefix: str = 
     kwargs = {}
     if include_top and state.get("top"):
         kwargs["file"] = generate_card_file(state["top"])
-    await channel.send(uno_public_text(state, prefix) if include_top else prefix, **kwargs)
+    await channel.send(
+        uno_public_text(state, prefix) if include_top else prefix,
+        allowed_mentions=discord.AllowedMentions.none(),
+        **kwargs,
+    )
 
 
 async def send_uno_hand_dm(bot, state: dict, game_id: str, user_id: int):
@@ -717,7 +730,7 @@ async def send_uno_hand_dm(bot, state: dict, game_id: str, user_id: int):
     try:
         await member.send(
             f"あなたのターンです。場のカード: **{state.get('top')}**",
-            file=discord.File(generate_hand_image(hand), filename="hand.png"),
+            file=generate_hand_file(hand),
             view=UnoHandView(game_id, user_id, hand),
         )
         return True
@@ -879,6 +892,7 @@ async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_
     await interaction.response.edit_message(
         content="🃏 山札から1枚引きました。",
         view=None,
+        attachments=[],
     )
     await send_uno_channel_update(interaction.client, game_id, state, f"🃏 <@{current_player_id}> が山札から1枚引きました。")
     await send_uno_hand_dm(interaction.client, state, game_id, current_player_id)
@@ -926,17 +940,18 @@ async def start_uno_game(interaction: discord.Interaction, game_id: str | None =
     for user_id in state["players"]:
         if user_id == state["players"][0]:
             continue
-        path = generate_hand_image(hands[user_id])
-        file = discord.File(path, filename="hand.png")
         member = interaction.guild.get_member(user_id) if interaction.guild else None
         if member:
             try:
-                await member.send(file=file)
+                await member.send(
+                    "あなたのUNOの手札です。ターンが来たら操作パネルを送ります。",
+                    file=generate_hand_file(hands[user_id]),
+                )
             except Exception:
                 failed_dm.append(member.mention)
 
     first_player = state["players"][0]
-    followup_text = f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>"
+    followup_text = f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターンの人にDMを送りました。"
     if failed_dm:
         followup_text += "\n\n⚠️ DM送信に失敗したプレイヤーがあります。DMを受信できる状態にしてください。\n"
         followup_text += " " + " ".join(failed_dm)
@@ -944,13 +959,14 @@ async def start_uno_game(interaction: discord.Interaction, game_id: str | None =
     await interaction.followup.send(
         followup_text,
         file=generate_card_file(top),
+        allowed_mentions=discord.AllowedMentions.none(),
     )
     if not await send_uno_hand_dm(interaction.client, state, game_id, first_player):
         await send_uno_channel_update(
             interaction.client,
             game_id,
             state,
-            f"⚠️ <@{first_player}> へのDM送信に失敗しました。DMを受信できる状態にしてください。",
+            "⚠️ ターンの人へのDM送信に失敗しました。参加者はDMを受信できる状態にしてください。",
             include_top=False,
         )
 
