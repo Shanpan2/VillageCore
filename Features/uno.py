@@ -114,6 +114,34 @@ async def load_uno_games_for_guild(bot: commands.Bot, guild: discord.Guild):
         await db_set(uno_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
+async def get_uno_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
+    state = uno_games.get(game_id)
+    if state:
+        state = normalize_uno_state(state)
+        uno_games[game_id] = state
+        return state
+
+    guild_ids: list[int] = []
+    if guild_id:
+        guild_ids.append(int(guild_id))
+    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
+
+    for target_guild_id in guild_ids:
+        raw = await db_get(uno_game_key(target_guild_id, game_id))
+        if not raw:
+            continue
+        try:
+            state = normalize_uno_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not state.get("players"):
+            continue
+        state["guild_id"] = target_guild_id
+        uno_games[game_id] = state
+        return state
+    return None
+
+
 def lobby_text(state: dict) -> str:
     players = " / ".join(f"<@{uid}>" for uid in state.get("players", []))
     challenge = "ON" if state.get("challenge_mode", True) else "OFF"
@@ -294,7 +322,7 @@ class Uno(commands.Cog):
 async def handle_play_card(
     interaction: discord.Interaction, game_id: str, button_user_id: int, card: str
 ):
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -415,7 +443,7 @@ async def handle_wild_color_select(
     card: str,
     color: str,
 ):
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -492,7 +520,7 @@ async def handle_challenge(
     attacker_id: int,
     defender_id: int,
 ):
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -542,7 +570,7 @@ async def handle_challenge(
 async def handle_uno_declare(
     interaction: discord.Interaction, game_id: str, user_id: int
 ):
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -573,7 +601,7 @@ async def handle_uno_declare(
 async def handle_uno_surrender(
     interaction: discord.Interaction, game_id: str, user_id: int
 ):
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
@@ -813,7 +841,7 @@ def refill_deck(deck: list, discard: list) -> tuple[list, list]:
 
 async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_id: int):
     """山札から1枚引く"""
-    state = uno_games.get(game_id)
+    state = await get_uno_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return

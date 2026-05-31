@@ -203,12 +203,11 @@ class ChallengeNoButton(discord.ui.Button):
             )
             return
 
-        from Features.uno import normalize_uno_state, save_uno_game, uno_games, refill_deck, send_uno_turn
-        state = uno_games.get(self.game_id)
+        from Features.uno import get_uno_game_state, save_uno_game, refill_deck, send_uno_turn
+        state = await get_uno_game_state(interaction.client, self.game_id, interaction.guild_id)
         if not state:
             await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
             return
-        state = normalize_uno_state(state)
 
         deck = state["deck"]
         hands = state["hands"]
