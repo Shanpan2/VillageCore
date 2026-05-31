@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     ffmpeg \
+    fonts-noto-cjk \
     libffi-dev \
     libsodium-dev \
     unzip \

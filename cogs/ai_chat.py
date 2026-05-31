@@ -4,10 +4,13 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from database.config_db import db_get, db_set
 
@@ -25,6 +28,56 @@ DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
 DEFAULT_QUOTA_BACKOFF_SECONDS = 600
 DEFAULT_SERVER_BACKOFF_SECONDS = 300
+QUOTE_CARD_SIZE = (1200, 630)
+QUOTE_MAX_CHARS = 180
+QUOTE_THEMES = {
+    "black": {
+        "label": "黒",
+        "top": (8, 9, 12),
+        "bottom": (10, 10, 12),
+        "accent": (22, 58, 45),
+        "shade": 215,
+    },
+    "forest": {
+        "label": "森",
+        "top": (8, 30, 24),
+        "bottom": (25, 67, 47),
+        "accent": (66, 138, 92),
+        "shade": 190,
+    },
+    "night": {
+        "label": "夜空",
+        "top": (6, 12, 32),
+        "bottom": (24, 18, 56),
+        "accent": (72, 86, 180),
+        "shade": 195,
+    },
+    "sunset": {
+        "label": "夕焼け",
+        "top": (52, 23, 48),
+        "bottom": (136, 67, 40),
+        "accent": (230, 126, 84),
+        "shade": 185,
+    },
+    "mono": {
+        "label": "灰",
+        "top": (24, 26, 30),
+        "bottom": (68, 68, 72),
+        "accent": (125, 125, 130),
+        "shade": 200,
+    },
+}
+QUOTE_THEME_ORDER = ("black", "forest", "night", "sunset", "mono")
+FONT_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/NotoSansJP-VF.ttf",
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/BIZ-UDGothicR.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
+]
 
 
 def sanitize_error_text(text: str, api_key: str | None = None) -> str:
@@ -75,6 +128,158 @@ def split_discord_message(text: str, limit: int = 1900) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def load_font(size: int, bold: bool = False):
+    candidates = FONT_CANDIDATES[:]
+    if bold:
+        candidates = [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+            "C:/Windows/Fonts/NotoSansJP-VF.ttf",
+            "C:/Windows/Fonts/meiryob.ttc",
+            "C:/Windows/Fonts/BIZ-UDGothicB.ttc",
+        ] + candidates
+    for path in candidates:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list[str]:
+    paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
+    lines: list[str] = []
+    for paragraph in paragraphs or [text.strip()]:
+        current = ""
+        for char in paragraph:
+            candidate = current + char
+            if draw.textlength(candidate, font=font) <= max_width:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = char
+        if current:
+            lines.append(current)
+    return lines
+
+
+def make_gradient_background(width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+    image = Image.new("RGB", (width, height), top)
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        color = tuple(int(top[i] + (bottom[i] - top[i]) * ratio) for i in range(3))
+        draw.line((0, y, width, y), fill=color)
+    return image
+
+
+def apply_quote_background(theme_key: str) -> Image.Image:
+    width, height = QUOTE_CARD_SIZE
+    theme = QUOTE_THEMES.get(theme_key, QUOTE_THEMES["black"])
+    image = make_gradient_background(width, height, theme["top"], theme["bottom"])
+    overlay = Image.new("RGBA", QUOTE_CARD_SIZE, (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.rectangle((0, 0, width, height), fill=(0, 0, 0, theme["shade"]))
+    accent = theme["accent"]
+    odraw.ellipse((-180, -150, 560, 760), fill=(*accent, 120))
+    odraw.ellipse((760, -260, 1400, 380), fill=(*accent, 70))
+    if theme_key == "night":
+        star_draw = ImageDraw.Draw(overlay)
+        for x, y, alpha in ((930, 92, 95), (1018, 156, 70), (1105, 84, 85), (858, 216, 55), (1138, 262, 50)):
+            star_draw.ellipse((x, y, x + 3, y + 3), fill=(255, 255, 245, alpha))
+    return Image.alpha_composite(image.convert("RGBA"), overlay)
+
+
+async def make_quote_card(message: discord.Message, theme_key: str = "black") -> BytesIO:
+    text = (message.content or "").strip()
+    if not text:
+        raise ValueError("quote target has no text")
+    if len(text) > QUOTE_MAX_CHARS:
+        text = text[:QUOTE_MAX_CHARS].rstrip() + "..."
+
+    width, height = QUOTE_CARD_SIZE
+    image = apply_quote_background(theme_key)
+
+    avatar = Image.new("RGBA", (300, 300), (40, 40, 40, 255))
+    try:
+        avatar_bytes = await message.author.display_avatar.replace(size=512, static_format="png").read()
+        avatar = Image.open(BytesIO(avatar_bytes)).convert("RGBA").resize((300, 300))
+    except Exception:
+        pass
+
+    mask = Image.new("L", (300, 300), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 300, 300), fill=255)
+    avatar.putalpha(mask)
+    avatar = avatar.filter(ImageFilter.UnsharpMask(radius=1, percent=120))
+    image.alpha_composite(avatar, (90, 165))
+
+    draw = ImageDraw.Draw(image)
+    quote_font_size = 54
+    while quote_font_size >= 34:
+        quote_font = load_font(quote_font_size)
+        lines = wrap_text(draw, text, quote_font, 660)
+        line_height = quote_font_size + 14
+        if len(lines) * line_height <= 320:
+            break
+        quote_font_size -= 4
+    quote_font = load_font(quote_font_size)
+    name_font = load_font(28, bold=True)
+    tag_font = load_font(22)
+
+    lines = wrap_text(draw, text, quote_font, 660)
+    line_height = quote_font_size + 14
+    total_height = len(lines) * line_height
+    start_y = max(105, (height - total_height) // 2 - 20)
+    x = 470
+    draw.text((x - 38, start_y - 8), "“", font=load_font(70), fill=(210, 210, 210, 160))
+    for i, line in enumerate(lines):
+        draw.text((x, start_y + i * line_height), line, font=quote_font, fill=(245, 245, 245))
+
+    display_name = getattr(message.author, "display_name", message.author.name)
+    user_name = getattr(message.author, "name", display_name)
+    footer_y = start_y + total_height + 34
+    draw.text((x, footer_y), f"- {display_name}", font=name_font, fill=(235, 235, 235))
+    draw.text((x, footer_y + 36), f"@{user_name}", font=tag_font, fill=(155, 155, 155))
+    draw.text((width - 255, height - 54), "むらびと名言", font=tag_font, fill=(160, 160, 160))
+
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, "PNG", optimize=True)
+    buffer.seek(0)
+    return buffer
+
+
+class QuoteThemeButton(discord.ui.Button):
+    def __init__(self, theme_key: str):
+        theme = QUOTE_THEMES[theme_key]
+        super().__init__(label=theme["label"], style=discord.ButtonStyle.secondary, custom_id=f"quote_theme:{theme_key}")
+        self.theme_key = theme_key
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if not isinstance(view, QuoteCardView):
+            await interaction.response.send_message("名言カードの情報を取得できませんでした。", ephemeral=True)
+            return
+        try:
+            card = await make_quote_card(view.quote_message, self.theme_key)
+        except Exception as e:
+            print(f"[ai_quote theme error] {type(e).__name__}: {e}", flush=True)
+            await interaction.response.send_message("背景の変更に失敗しました。", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        await interaction.message.edit(
+            attachments=[discord.File(card, filename=f"quote_{self.theme_key}.png")],
+            view=view,
+        )
+
+
+class QuoteCardView(discord.ui.View):
+    def __init__(self, quote_message: discord.Message):
+        super().__init__(timeout=900)
+        self.quote_message = quote_message
+        for theme_key in QUOTE_THEME_ORDER:
+            self.add_item(QuoteThemeButton(theme_key))
 
 
 class AIChat(commands.Cog):
@@ -193,6 +398,7 @@ class AIChat(commands.Cog):
 
         is_mentioned = self.bot.user in message.mentions
         is_reply_to_bot = False
+        replied_message = None
         if message.reference:
             replied_message = message.reference.resolved
             if not isinstance(replied_message, discord.Message) and message.reference.message_id:
@@ -207,6 +413,25 @@ class AIChat(commands.Cog):
             return
 
         question = MENTION_RE.sub("", message.content).strip()
+        if is_mentioned and isinstance(replied_message, discord.Message) and not question:
+            try:
+                card = await make_quote_card(replied_message)
+                await message.reply(
+                    file=discord.File(card, filename="quote.png"),
+                    view=QuoteCardView(replied_message),
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except ValueError:
+                await message.reply(
+                    "引用できるテキストがありません。テキスト付きのメッセージに返信してBotをメンションしてください。",
+                    mention_author=False,
+                )
+            except Exception as e:
+                print(f"[ai_quote error] {type(e).__name__}: {e}", flush=True)
+                await message.reply("名言カードの生成に失敗しました。", mention_author=False)
+            return
+
         if not question:
             await message.reply("質問内容も一緒に送ってください。例: `@Bot 今日の予定を整理して`")
             return
