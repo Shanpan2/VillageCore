@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from cogs.server_logs import send_server_log
 from database.config_db import db_get, db_set
 
 try:
@@ -305,12 +306,22 @@ class QuoteDeleteButton(discord.ui.Button):
             await interaction.response.send_message("この名言カードを削除できるのは、作成者またはメッセージ管理権限を持つ人だけです。", ephemeral=True)
             return
 
+        if interaction.guild:
+            quoted_author = view.quote_message.author
+            embed = discord.Embed(title="コマンド削除: 名言カード", color=0xE74C3C)
+            embed.add_field(name="削除者", value=f"{interaction.user.mention} ({interaction.user.id})", inline=False)
+            embed.add_field(name="引用元", value=f"{quoted_author.mention} ({quoted_author.id})", inline=False)
+            embed.add_field(name="チャンネル", value=getattr(interaction.channel, "mention", "不明"), inline=True)
+            quote_text = (view.quote_message.content or "内容なし").replace("\n", " ").strip()
+            embed.add_field(name="引用内容", value=quote_text[:1000], inline=False)
+            await send_server_log(view.bot, interaction.guild, embed, "command_delete")
         await interaction.message.delete()
 
 
 class QuoteCardView(discord.ui.View):
-    def __init__(self, quote_message: discord.Message, requester_id: int):
+    def __init__(self, bot: commands.Bot, quote_message: discord.Message, requester_id: int):
         super().__init__(timeout=900)
+        self.bot = bot
         self.quote_message = quote_message
         self.requester_id = requester_id
         for theme_key in QUOTE_THEME_ORDER:
@@ -454,7 +465,7 @@ class AIChat(commands.Cog):
                 card = await make_quote_card(replied_message)
                 await message.reply(
                     file=discord.File(card, filename="quote.png"),
-                    view=QuoteCardView(replied_message, message.author.id),
+                    view=QuoteCardView(self.bot, replied_message, message.author.id),
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
