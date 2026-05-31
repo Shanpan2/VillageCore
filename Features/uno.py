@@ -299,7 +299,7 @@ class Uno(commands.Cog):
             return
 
         # ★ DM送信・画像生成で時間がかかるため先にdefer
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
 
         deck = generate_deck()
         random.shuffle(deck)

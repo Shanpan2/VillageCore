@@ -612,7 +612,7 @@ class Sevens(commands.Cog):
             await interaction.response.send_message("❌ 2人以上必要です。", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         deck = [card for card in build_deck() if card[1] != 7]
         random.shuffle(deck)
         hands = {str(uid): [] for uid in state["players"]}

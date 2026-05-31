@@ -690,7 +690,7 @@ class Daifugo(commands.Cog):
             await interaction.response.send_message("2人以上必要です。", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         deck = build_deck()
         random.shuffle(deck)
         random.shuffle(state["players"])

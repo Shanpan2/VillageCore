@@ -673,7 +673,7 @@ class Poker(commands.Cog):
             await interaction.response.send_message(bet_message, ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         deck = build_deck()
         random.shuffle(deck)
         random.shuffle(state["players"])
