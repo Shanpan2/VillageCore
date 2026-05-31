@@ -147,11 +147,7 @@ class SevensLobbyView(discord.ui.View):
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
     async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            cog = interaction.client.get_cog("Sevens")
-            if not cog:
-                await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
-                return
-            await cog.sevens_begin.callback(cog, interaction)
+            await start_sevens_game(interaction, self.game_id)
             state = sevens_games.get(self.game_id)
             if state and state.get("started") and interaction.message:
                 try:
@@ -600,47 +596,51 @@ class Sevens(commands.Cog):
 
     @app_commands.command(name="sevens_begin", description="7並べを開始します")
     async def sevens_begin(self, interaction: discord.Interaction):
-        game_id = str(interaction.channel_id)
-        state = sevens_games.get(game_id)
-        if not state:
-            await interaction.response.send_message("❌ まず `/sevens_start` を実行してください。", ephemeral=True)
-            return
-        if state["started"]:
-            await interaction.response.send_message("❌ すでに開始しています。", ephemeral=True)
-            return
-        if len(state["players"]) < 2:
-            await interaction.response.send_message("❌ 2人以上必要です。", ephemeral=True)
-            return
+        await start_sevens_game(interaction)
 
-        await interaction.response.defer(thinking=True)
-        deck = [card for card in build_deck() if card[1] != 7]
-        random.shuffle(deck)
-        hands = {str(uid): [] for uid in state["players"]}
-        for index, card in enumerate(deck):
-            uid = state["players"][index % len(state["players"])]
-            hands[str(uid)].append(list(card))
-        state["hands"] = hands
-        state["started"] = True
-        random.shuffle(state["players"])
-        state["guild_id"] = interaction.guild_id
-        await save_sevens_game(interaction.guild_id, game_id, state)
 
-        failed_dm = []
-        for uid in state["players"]:
-            member = interaction.guild.get_member(uid)
-            if not member:
-                continue
-            hand = [tuple(c) for c in hands[str(uid)]]
-            try:
-                await send_hand(member, hand, playable_cards(hand, state["board"]))
-            except Exception:
-                failed_dm.append(member.mention)
+async def start_sevens_game(interaction: discord.Interaction, game_id: str | None = None):
+    game_id = game_id or str(interaction.channel_id)
+    state = sevens_games.get(game_id)
+    if not state:
+        await interaction.response.send_message("❌ まず `/sevens_start` を実行してください。", ephemeral=True)
+        return
+    if state["started"]:
+        await interaction.response.send_message("❌ すでに開始しています。", ephemeral=True)
+        return
+    if len(state["players"]) < 2:
+        await interaction.response.send_message("❌ 2人以上必要です。", ephemeral=True)
+        return
 
-        current_user = state["players"][state["turn_index"]]
-        text = status_text(state)
-        if failed_dm:
-            text += "\n\n⚠️ DM送信に失敗: " + " ".join(failed_dm)
-        await interaction.followup.send(text, file=board_file(state), view=SevensPlayView(game_id, current_user))
+    await interaction.response.defer(thinking=True)
+    deck = [card for card in build_deck() if card[1] != 7]
+    random.shuffle(deck)
+    hands = {str(uid): [] for uid in state["players"]}
+    for index, card in enumerate(deck):
+        uid = state["players"][index % len(state["players"])]
+        hands[str(uid)].append(list(card))
+    state["hands"] = hands
+    state["started"] = True
+    random.shuffle(state["players"])
+    state["guild_id"] = interaction.guild_id
+    await save_sevens_game(interaction.guild_id, game_id, state)
+
+    failed_dm = []
+    for uid in state["players"]:
+        member = interaction.guild.get_member(uid) if interaction.guild else None
+        if not member:
+            continue
+        hand = [tuple(c) for c in hands[str(uid)]]
+        try:
+            await send_hand(member, hand, playable_cards(hand, state["board"]))
+        except Exception:
+            failed_dm.append(member.mention)
+
+    current_user = state["players"][state["turn_index"]]
+    text = status_text(state)
+    if failed_dm:
+        text += "\n\n⚠️ DM送信に失敗: " + " ".join(failed_dm)
+    await interaction.followup.send(text, file=board_file(state), view=SevensPlayView(game_id, current_user))
 
 
 async def setup(bot: commands.Bot):

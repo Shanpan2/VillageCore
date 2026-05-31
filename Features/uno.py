@@ -163,11 +163,7 @@ class UnoLobbyView(discord.ui.View):
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
     async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            cog = interaction.client.get_cog("Uno")
-            if not cog:
-                await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
-                return
-            await cog.uno_begin.callback(cog, interaction)
+            await start_uno_game(interaction, self.game_id)
             state = uno_games.get(self.game_id)
             if state and state.get("hands") and interaction.message:
                 try:
@@ -276,73 +272,7 @@ class Uno(commands.Cog):
     # -------------------------------------------------------
     @app_commands.command(name="uno_begin", description="UNOゲームを開始します")
     async def uno_begin(self, interaction: discord.Interaction):
-        game_id = str(interaction.channel_id)
-
-        if game_id not in uno_games:
-            await interaction.response.send_message(
-                "❌ まず `/uno_start` を実行してください。", ephemeral=True
-            )
-            return
-
-        state = uno_games[game_id]
-
-        if state.get("hands"):
-            await interaction.response.send_message(
-                "❌ このUNOゲームはすでに開始しています。", ephemeral=True
-            )
-            return
-
-        if len(state["players"]) < 2:
-            await interaction.response.send_message(
-                "❌ 2人以上必要です。", ephemeral=True
-            )
-            return
-
-        # ★ DM送信・画像生成で時間がかかるため先にdefer
-        await interaction.response.defer(thinking=True)
-
-        deck = generate_deck()
-        random.shuffle(deck)
-
-        hands = {uid: [deck.pop() for _ in range(7)] for uid in state["players"]}
-        top = deck.pop()
-
-        state.update({
-            "deck": deck,
-            "hands": hands,
-            "discard": [top],
-            "top": top,
-            "turn_index": 0,
-            "direction": 1,
-            "uno_declared": False,
-            "pending": None,
-        })
-        await save_uno_game(interaction.guild_id, game_id, state)
-
-        # 手札画像をDM送信
-        failed_dm: list[str] = []
-        for user_id in state["players"]:
-            path = generate_hand_image(hands[user_id])
-            file = discord.File(path, filename="hand.png")
-            member = interaction.guild.get_member(user_id)
-            if member:
-                try:
-                    await member.send(file=file)
-                except Exception:
-                    failed_dm.append(member.mention)
-
-        first_player = state["players"][0]
-        followup_text = (
-            f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>"
-        )
-        if failed_dm:
-            followup_text += "\n\n⚠️ DM送信に失敗したプレイヤーがあります。DMを受信できる状態にしてください。\n"
-            followup_text += " " + " ".join(failed_dm)
-
-        await interaction.followup.send(
-            followup_text,
-            view=UnoHandView(game_id, first_player, hands[first_player]),
-        )
+        await start_uno_game(interaction)
 
 
 # ============================================================
@@ -785,6 +715,61 @@ async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_
     await interaction.response.edit_message(
         content=f"🃏 <@{current_player_id}> が山札から1枚引きました。",
         view=UnoHandView(game_id, current_player_id, hands[current_player_id]),
+    )
+
+
+async def start_uno_game(interaction: discord.Interaction, game_id: str | None = None):
+    game_id = game_id or str(interaction.channel_id)
+
+    if game_id not in uno_games:
+        await interaction.response.send_message("❌ まず `/uno_start` を実行してください。", ephemeral=True)
+        return
+
+    state = uno_games[game_id]
+    if state.get("hands"):
+        await interaction.response.send_message("❌ このUNOゲームはすでに開始しています。", ephemeral=True)
+        return
+    if len(state["players"]) < 2:
+        await interaction.response.send_message("❌ 2人以上必要です。", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+    deck = generate_deck()
+    random.shuffle(deck)
+    hands = {uid: [deck.pop() for _ in range(7)] for uid in state["players"]}
+    top = deck.pop()
+    state.update({
+        "deck": deck,
+        "hands": hands,
+        "discard": [top],
+        "top": top,
+        "turn_index": 0,
+        "direction": 1,
+        "uno_declared": False,
+        "pending": None,
+    })
+    await save_uno_game(interaction.guild_id, game_id, state)
+
+    failed_dm: list[str] = []
+    for user_id in state["players"]:
+        path = generate_hand_image(hands[user_id])
+        file = discord.File(path, filename="hand.png")
+        member = interaction.guild.get_member(user_id) if interaction.guild else None
+        if member:
+            try:
+                await member.send(file=file)
+            except Exception:
+                failed_dm.append(member.mention)
+
+    first_player = state["players"][0]
+    followup_text = f"🎮 UNO開始！\n最初のカード：**{top}**\n最初のターン：<@{first_player}>"
+    if failed_dm:
+        followup_text += "\n\n⚠️ DM送信に失敗したプレイヤーがあります。DMを受信できる状態にしてください。\n"
+        followup_text += " " + " ".join(failed_dm)
+
+    await interaction.followup.send(
+        followup_text,
+        view=UnoHandView(game_id, first_player, hands[first_player]),
     )
 
 

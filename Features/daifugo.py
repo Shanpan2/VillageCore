@@ -156,11 +156,7 @@ class DaifugoLobbyView(discord.ui.View):
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
     async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            cog = interaction.client.get_cog("Daifugo")
-            if not cog:
-                await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
-                return
-            await cog.daifugo_begin.callback(cog, interaction)
+            await start_daifugo_game(interaction, self.game_id)
             state = daifugo_games.get(self.game_id)
             if state and state.get("started") and interaction.message:
                 try:
@@ -678,46 +674,50 @@ class Daifugo(commands.Cog):
 
     @app_commands.command(name="daifugo_begin", description="大富豪を開始します")
     async def daifugo_begin(self, interaction: discord.Interaction):
-        game_id = str(interaction.channel_id)
-        state = daifugo_games.get(game_id)
-        if not state:
-            await interaction.response.send_message("まず `/daifugo_start` を実行してください。", ephemeral=True)
-            return
-        if state["started"]:
-            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-            return
-        if len(state["players"]) < 2:
-            await interaction.response.send_message("2人以上必要です。", ephemeral=True)
-            return
+        await start_daifugo_game(interaction)
 
-        await interaction.response.defer(thinking=True)
-        deck = build_deck()
-        random.shuffle(deck)
-        random.shuffle(state["players"])
-        hands = {str(uid): [] for uid in state["players"]}
-        for index, card in enumerate(deck):
-            hands[str(state["players"][index % len(state["players"])])].append(card)
 
-        state["hands"] = hands
-        state["started"] = True
-        state["guild_id"] = interaction.guild_id
-        await save_daifugo_game(interaction.guild_id, game_id, state)
+async def start_daifugo_game(interaction: discord.Interaction, game_id: str | None = None):
+    game_id = game_id or str(interaction.channel_id)
+    state = daifugo_games.get(game_id)
+    if not state:
+        await interaction.response.send_message("まず `/daifugo_start` を実行してください。", ephemeral=True)
+        return
+    if state["started"]:
+        await interaction.response.send_message("すでに開始しています。", ephemeral=True)
+        return
+    if len(state["players"]) < 2:
+        await interaction.response.send_message("2人以上必要です。", ephemeral=True)
+        return
 
-        failed_dm = []
-        for uid in state["players"]:
-            member = interaction.guild.get_member(uid) if interaction.guild else None
-            if not member:
-                continue
-            try:
-                await send_hand(member, hands[str(uid)])
-            except Exception:
-                failed_dm.append(member.mention)
+    await interaction.response.defer(thinking=True)
+    deck = build_deck()
+    random.shuffle(deck)
+    random.shuffle(state["players"])
+    hands = {str(uid): [] for uid in state["players"]}
+    for index, card in enumerate(deck):
+        hands[str(state["players"][index % len(state["players"])])].append(card)
 
-        current = state["players"][state["turn_index"]]
-        text = status_text(state, "大富豪を開始しました。")
-        if failed_dm:
-            text += "\n\nDM送信に失敗: " + " ".join(failed_dm)
-        await interaction.followup.send(text, view=DaifugoPlayView(game_id, current))
+    state["hands"] = hands
+    state["started"] = True
+    state["guild_id"] = interaction.guild_id
+    await save_daifugo_game(interaction.guild_id, game_id, state)
+
+    failed_dm = []
+    for uid in state["players"]:
+        member = interaction.guild.get_member(uid) if interaction.guild else None
+        if not member:
+            continue
+        try:
+            await send_hand(member, hands[str(uid)])
+        except Exception:
+            failed_dm.append(member.mention)
+
+    current = state["players"][state["turn_index"]]
+    text = status_text(state, "大富豪を開始しました。")
+    if failed_dm:
+        text += "\n\nDM送信に失敗: " + " ".join(failed_dm)
+    await interaction.followup.send(text, view=DaifugoPlayView(game_id, current))
 
 
 async def setup(bot: commands.Bot):

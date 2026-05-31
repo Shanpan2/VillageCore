@@ -517,11 +517,7 @@ class PokerLobbyView(discord.ui.View):
     @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
     async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            cog = interaction.client.get_cog("Poker")
-            if not cog:
-                await interaction.response.send_message("開始処理を呼び出せませんでした。", ephemeral=True)
-                return
-            await cog.poker_begin.callback(cog, interaction)
+            await start_poker_game(interaction, self.game_id)
             state = poker_games.get(self.game_id)
             if state and state.get("started") and interaction.message:
                 try:
@@ -579,6 +575,54 @@ async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id
 
     prefix = f"<@{user_id}> が {discard_count} 枚交換しました。" if discard_count else f"<@{user_id}> は交換しませんでした。"
     await advance_or_finish(interaction, state, prefix)
+
+
+async def start_poker_game(interaction: discord.Interaction, game_id: str | None = None):
+    game_id = game_id or str(interaction.channel_id)
+    state = poker_games.get(game_id)
+    if not state:
+        await interaction.response.send_message("まず `/poker_start` を実行してください。", ephemeral=True)
+        return
+    if state["started"]:
+        await interaction.response.send_message("すでに開始しています。", ephemeral=True)
+        return
+    if len(state["players"]) < 2:
+        await interaction.response.send_message("2人以上必要です。", ephemeral=True)
+        return
+
+    ok, bet_message = await collect_poker_bets(interaction, state)
+    if not ok:
+        await interaction.response.send_message(bet_message, ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+    deck = build_deck()
+    random.shuffle(deck)
+    random.shuffle(state["players"])
+    state["deck"] = deck
+    state["hands"] = {str(uid): draw_cards(state, 5) for uid in state["players"]}
+    state["started"] = True
+    state["guild_id"] = interaction.guild_id
+    await save_poker_game(interaction.guild_id, game_id, state)
+
+    failed_dm = []
+    for uid in state["players"]:
+        member = interaction.guild.get_member(uid) if interaction.guild else None
+        if not member:
+            continue
+        try:
+            await send_hand(member, state["hands"][str(uid)])
+        except Exception:
+            failed_dm.append(member.mention)
+
+    current = state["players"][state["turn_index"]]
+    prefix = "ポーカーを開始しました。"
+    if bet_message:
+        prefix += f"\n{bet_message}"
+    text = status_text(state, prefix)
+    if failed_dm:
+        text += "\n\nDM送信に失敗: " + " ".join(failed_dm)
+    await interaction.followup.send(text, view=PokerDrawView(game_id, current))
 
 
 class Poker(commands.Cog):
@@ -656,51 +700,7 @@ class Poker(commands.Cog):
 
     @app_commands.command(name="poker_begin", description="ポーカーを開始します")
     async def poker_begin(self, interaction: discord.Interaction):
-        game_id = str(interaction.channel_id)
-        state = poker_games.get(game_id)
-        if not state:
-            await interaction.response.send_message("まず `/poker_start` を実行してください。", ephemeral=True)
-            return
-        if state["started"]:
-            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-            return
-        if len(state["players"]) < 2:
-            await interaction.response.send_message("2人以上必要です。", ephemeral=True)
-            return
-
-        ok, bet_message = await collect_poker_bets(interaction, state)
-        if not ok:
-            await interaction.response.send_message(bet_message, ephemeral=True)
-            return
-
-        await interaction.response.defer(thinking=True)
-        deck = build_deck()
-        random.shuffle(deck)
-        random.shuffle(state["players"])
-        state["deck"] = deck
-        state["hands"] = {str(uid): draw_cards(state, 5) for uid in state["players"]}
-        state["started"] = True
-        state["guild_id"] = interaction.guild_id
-        await save_poker_game(interaction.guild_id, game_id, state)
-
-        failed_dm = []
-        for uid in state["players"]:
-            member = interaction.guild.get_member(uid) if interaction.guild else None
-            if not member:
-                continue
-            try:
-                await send_hand(member, state["hands"][str(uid)])
-            except Exception:
-                failed_dm.append(member.mention)
-
-        current = state["players"][state["turn_index"]]
-        prefix = "ポーカーを開始しました。"
-        if bet_message:
-            prefix += f"\n{bet_message}"
-        text = status_text(state, prefix)
-        if failed_dm:
-            text += "\n\nDM送信に失敗: " + " ".join(failed_dm)
-        await interaction.followup.send(text, view=PokerDrawView(game_id, current))
+        await start_poker_game(interaction)
 
 
 async def setup(bot: commands.Bot):

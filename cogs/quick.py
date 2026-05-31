@@ -20,6 +20,7 @@ from Features.daifugo import (
     delete_daifugo_game,
     rules_text,
     save_daifugo_game,
+    start_daifugo_game,
 )
 from Features.ito import ItoLobbyView, DEFAULT_TOPICS, begin_ito, delete_ito_game, ito_games, lobby_text as ito_lobby_text, save_ito_game
 from Features.omikuji import run_omikuji
@@ -34,10 +35,10 @@ from Features.othello import (
     save_othello_game,
     send_othello_state,
 )
-from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount
+from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount, start_poker_game
 from Features.sevens import SUITS as SEVENS_SUITS
-from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games
-from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games
+from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games, start_sevens_game
+from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games, start_uno_game
 from Features.werewolf import (
     WerewolfLobbyView,
     delete_werewolf_game,
@@ -607,6 +608,18 @@ def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]
 
 
 async def begin_game(interaction: discord.Interaction, game: str):
+    if game == "poker":
+        await start_poker_game(interaction, str(interaction.channel_id))
+        return
+    if game == "uno":
+        await start_uno_game(interaction, str(interaction.channel_id))
+        return
+    if game == "sevens":
+        await start_sevens_game(interaction, str(interaction.channel_id))
+        return
+    if game == "daifugo":
+        await start_daifugo_game(interaction, str(interaction.channel_id))
+        return
     if game == "ito":
         await begin_ito(interaction, str(interaction.channel_id))
         return
