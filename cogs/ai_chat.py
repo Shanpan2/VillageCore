@@ -170,7 +170,17 @@ def clean_quote_label(text: str) -> str:
     cleaned = []
     for char in text:
         category = unicodedata.category(char)
-        if category in {"So", "Sk", "Cs"}:
+        if category in {"So", "Sk", "Cs", "Co", "Cn"} or char in {"\ufe0f", "\ufffd"}:
+            continue
+        cleaned.append(char)
+    return "".join(cleaned).strip()
+
+
+def clean_quote_content(text: str) -> str:
+    cleaned = []
+    for char in text:
+        category = unicodedata.category(char)
+        if category in {"So", "Cs", "Co", "Cn"} or char in {"\ufe0f", "\ufffd"}:
             continue
         cleaned.append(char)
     return "".join(cleaned).strip()
@@ -204,7 +214,7 @@ def apply_quote_background(theme_key: str) -> Image.Image:
 
 
 async def make_quote_card(message: discord.Message, theme_key: str = "black") -> BytesIO:
-    text = (message.content or "").strip()
+    text = clean_quote_content(message.content or "")
     if not text:
         raise ValueError("quote target has no text")
     if len(text) > QUOTE_MAX_CHARS:
