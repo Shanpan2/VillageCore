@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -164,6 +165,16 @@ def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> lis
     return lines
 
 
+def clean_quote_label(text: str) -> str:
+    cleaned = []
+    for char in text:
+        category = unicodedata.category(char)
+        if category in {"So", "Sk", "Cs"}:
+            continue
+        cleaned.append(char)
+    return "".join(cleaned).strip()
+
+
 def make_gradient_background(width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
     image = Image.new("RGB", (width, height), top)
     draw = ImageDraw.Draw(image)
@@ -232,12 +243,15 @@ async def make_quote_card(message: discord.Message, theme_key: str = "black") ->
     total_height = len(lines) * line_height
     start_y = max(105, (height - total_height) // 2 - 20)
     x = 470
-    draw.text((x - 38, start_y - 8), "“", font=load_font(70), fill=(210, 210, 210, 160))
     for i, line in enumerate(lines):
         draw.text((x, start_y + i * line_height), line, font=quote_font, fill=(245, 245, 245))
 
-    display_name = getattr(message.author, "display_name", message.author.name)
-    user_name = getattr(message.author, "name", display_name)
+    display_name = clean_quote_label(getattr(message.author, "display_name", message.author.name))
+    user_name = clean_quote_label(getattr(message.author, "name", display_name))
+    if not display_name:
+        display_name = "Unknown"
+    if not user_name:
+        user_name = display_name
     footer_y = start_y + total_height + 34
     draw.text((x, footer_y), f"- {display_name}", font=name_font, fill=(235, 235, 235))
     draw.text((x, footer_y + 36), f"@{user_name}", font=tag_font, fill=(155, 155, 155))
@@ -274,12 +288,34 @@ class QuoteThemeButton(discord.ui.Button):
         )
 
 
+class QuoteDeleteButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="削除", style=discord.ButtonStyle.danger, custom_id="quote_delete", row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if not isinstance(view, QuoteCardView):
+            await interaction.response.send_message("名言カードの情報を取得できませんでした。", ephemeral=True)
+            return
+
+        can_delete = interaction.user.id == view.requester_id
+        if isinstance(interaction.user, discord.Member):
+            can_delete = can_delete or interaction.user.guild_permissions.manage_messages
+        if not can_delete:
+            await interaction.response.send_message("この名言カードを削除できるのは、作成者またはメッセージ管理権限を持つ人だけです。", ephemeral=True)
+            return
+
+        await interaction.message.delete()
+
+
 class QuoteCardView(discord.ui.View):
-    def __init__(self, quote_message: discord.Message):
+    def __init__(self, quote_message: discord.Message, requester_id: int):
         super().__init__(timeout=900)
         self.quote_message = quote_message
+        self.requester_id = requester_id
         for theme_key in QUOTE_THEME_ORDER:
             self.add_item(QuoteThemeButton(theme_key))
+        self.add_item(QuoteDeleteButton())
 
 
 class AIChat(commands.Cog):
@@ -418,7 +454,7 @@ class AIChat(commands.Cog):
                 card = await make_quote_card(replied_message)
                 await message.reply(
                     file=discord.File(card, filename="quote.png"),
-                    view=QuoteCardView(replied_message),
+                    view=QuoteCardView(replied_message, message.author.id),
                     mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
