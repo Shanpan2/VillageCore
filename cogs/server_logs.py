@@ -21,7 +21,8 @@ LOG_CATEGORIES = {
     "command_delete": "コマンド削除",
     "member": "参加/退出",
     "moderation": "Kick/BAN",
-    "voice": "VC入室/退出",
+    "voice_join_leave": "VC入室/退出/移動",
+    "voice_state": "VCミュート等",
     "role_channel": "ロール/チャンネル",
 }
 DEFAULT_LOG_SETTINGS = {key: True for key in LOG_CATEGORIES}
@@ -50,6 +51,9 @@ async def load_log_settings(guild_id: int) -> dict[str, bool]:
         for key in settings:
             if key in data:
                 settings[key] = bool(data[key])
+        if "voice" in data:
+            settings["voice_join_leave"] = bool(data["voice"])
+            settings["voice_state"] = bool(data["voice"])
     return settings
 
 
@@ -92,6 +96,34 @@ def log_settings_embed(settings: dict[str, bool]) -> discord.Embed:
     for key, label in LOG_CATEGORIES.items():
         embed.add_field(name=label, value="ON" if settings.get(key, True) else "OFF", inline=True)
     return embed
+
+
+def message_matches_log_search(message: discord.Message, keyword: str) -> bool:
+    needle = keyword.lower()
+    parts = [message.content or ""]
+    for embed in message.embeds:
+        parts.append(embed.title or "")
+        parts.append(embed.description or "")
+        for field in embed.fields:
+            parts.append(field.name)
+            parts.append(field.value)
+    return needle in "\n".join(parts).lower()
+
+
+def describe_log_message(message: discord.Message) -> str:
+    title = "ログ"
+    detail = message.content or ""
+    if message.embeds:
+        embed = message.embeds[0]
+        title = embed.title or title
+        if embed.description:
+            detail = embed.description
+        elif embed.fields:
+            field = embed.fields[0]
+            detail = f"{field.name}: {field.value}"
+    detail = detail.replace("\n", " ").strip() or "内容なし"
+    timestamp = message.created_at.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+    return f"[{timestamp}] [{title}] {detail[:140]}\n{message.jump_url}"
 
 
 class LogCategorySelect(discord.ui.Select):
@@ -159,6 +191,46 @@ class ServerLogs(commands.Cog):
             return
         settings = await load_log_settings(interaction.guild_id)
         await interaction.response.send_message(embed=log_settings_embed(settings), view=LogSettingsView(settings), ephemeral=True)
+
+    @app_commands.command(name="log_search", description="【管理者】サーバーログチャンネル内を検索します")
+    @app_commands.describe(keyword="検索したい文字", limit="確認するログ件数。最大300件です")
+    @app_commands.default_permissions(manage_guild=True)
+    async def log_search(self, interaction: discord.Interaction, keyword: str, limit: int = 100):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        channel = await self.get_log_channel(interaction.guild)
+        if not channel:
+            await interaction.response.send_message("先に `/server_log_channel` でログ送信先を設定してください。", ephemeral=True)
+            return
+
+        limit = max(1, min(limit, 300))
+        keyword = keyword.strip()
+        if not keyword:
+            await interaction.response.send_message("検索文字を入力してください。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        results = []
+        try:
+            async for message in channel.history(limit=limit):
+                if message_matches_log_search(message, keyword):
+                    results.append(message)
+                    if len(results) >= 10:
+                        break
+        except discord.Forbidden:
+            await interaction.followup.send("Botにログチャンネルの履歴を読む権限がありません。", ephemeral=True)
+            return
+
+        if not results:
+            await interaction.followup.send(f"`{keyword}` に一致するログは見つかりませんでした。", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="ログ検索結果", color=0x3498DB)
+        embed.description = f"検索: `{keyword}` / 確認: 最新 {limit}件 / 表示: {len(results)}件"
+        for index, message in enumerate(results, start=1):
+            embed.add_field(name=f"結果 {index}", value=describe_log_message(message)[:1024], inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
@@ -262,7 +334,7 @@ class ServerLogs(commands.Cog):
             embed.add_field(name="メンバー", value=f"{member.mention} ({member.id})", inline=False)
             embed.add_field(name="チャンネル", value=after_channel.mention if after_channel else "不明", inline=True)
             embed.add_field(name="変更", value=", ".join(changes), inline=False)
-            await send_server_log(self.bot, member.guild, embed, "voice")
+            await send_server_log(self.bot, member.guild, embed, "voice_state")
             return
 
         if before_channel is None and after_channel is not None:
@@ -281,7 +353,7 @@ class ServerLogs(commands.Cog):
         embed = discord.Embed(title=title, color=color)
         embed.add_field(name="メンバー", value=f"{member.mention} ({member.id})", inline=False)
         embed.add_field(name="チャンネル", value=detail, inline=False)
-        await send_server_log(self.bot, member.guild, embed, "voice")
+        await send_server_log(self.bot, member.guild, embed, "voice_join_leave")
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
