@@ -327,8 +327,68 @@ def hand_file(member: discord.Member, hand: list[dict], title: str = "ポーカ�
     return discord.File(buffer, filename=f"poker_hand_{member.id}.png")
 
 
+def result_file(
+    guild: discord.Guild | None,
+    results: list[tuple[tuple[int, list[int]], int, list[dict]]],
+    winners: list[tuple[tuple[int, list[int]], int, list[dict]]],
+) -> discord.File:
+    card_w, card_h, gap = 82, 116, 10
+    row_h = 164
+    width = 860
+    height = 92 + row_h * max(1, len(results)) + 28
+    image = Image.new("RGB", (width, height), (24, 50, 44))
+    draw = ImageDraw.Draw(image)
+    try:
+        title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 34)
+        name_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
+        small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+        card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+        card_small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
+    except Exception:
+        title_font = ImageFont.load_default()
+        name_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+        card_font = ImageFont.load_default()
+        card_small_font = ImageFont.load_default()
+
+    winner_ids = {uid for _, uid, _ in winners}
+    draw.text((30, 24), "ポーカー最終結果", fill=(255, 255, 255), font=title_font)
+    if winners:
+        winner_names = []
+        for _, uid, _ in winners:
+            member = guild.get_member(uid) if guild else None
+            winner_names.append(member.display_name if member else str(uid))
+        draw.text((32, 62), "勝者: " + " / ".join(winner_names), fill=(255, 224, 130), font=small_font)
+
+    y = 96
+    for index, (score, uid, hand) in enumerate(results, start=1):
+        member = guild.get_member(uid) if guild else None
+        name = member.display_name if member else f"User {uid}"
+        name = name[:24]
+        is_winner = uid in winner_ids
+        panel_fill = (39, 84, 66) if is_winner else (31, 66, 58)
+        outline = (255, 211, 99) if is_winner else (76, 126, 105)
+        draw.rounded_rectangle((24, y, width - 24, y + row_h - 18), radius=12, fill=panel_fill, outline=outline, width=3 if is_winner else 1)
+        draw.text((44, y + 18), f"{index}. {name}", fill=(255, 255, 255), font=name_font)
+        draw.text((44, y + 48), HAND_NAMES[score[0]], fill=(220, 238, 228), font=small_font)
+
+        start_x = 270
+        for card_index, card in enumerate(sorted(hand, key=card_sort_key)):
+            x = start_x + card_index * (card_w + gap)
+            draw_card(draw, (x, y + 18), card, card_font, card_small_font)
+        y += row_h
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename="poker_result.png")
+
+
 async def send_hand(member: discord.Member, hand: list[dict], title: str = "ポーカーの手札"):
-    await member.send(f"あなたの{title}です。", file=hand_file(member, hand, title))
+    await member.send(
+        f"あなたの{title}です。\n公開パネルの「カード1」から順に、画像の左から1枚目、2枚目...に対応します。",
+        file=hand_file(member, hand, title),
+    )
 
 
 def draw_cards(state: dict, count: int) -> list[dict]:
@@ -361,7 +421,11 @@ async def advance_or_finish(interaction: discord.Interaction, state: dict, prefi
             lines.append(f"{index}. <@{uid}> - {HAND_NAMES[score[0]]} / {', '.join(card_label(card) for card in sorted(hand, key=card_sort_key))}")
         await delete_poker_game(interaction.guild_id or state.get("guild_id"), game_id)
         poker_games.pop(game_id, None)
-        await interaction.response.edit_message(content="\n".join(lines), view=None)
+        await interaction.response.edit_message(
+            content="\n".join(lines),
+            attachments=[result_file(interaction.guild, results, winners)],
+            view=None,
+        )
         return
 
     await advance_turn(state)
@@ -387,8 +451,12 @@ async def advance_turn(state: dict):
 class PokerDrawSelect(discord.ui.Select):
     def __init__(self, game_id: str, user_id: int, hand: list[dict]):
         options = [
-            discord.SelectOption(label=card_label(card), value=encode_card(card))
-            for card in sorted(hand, key=card_sort_key)
+            discord.SelectOption(
+                label=f"カード {index}",
+                value=encode_card(card),
+                description="DMの手札画像の左から順番に対応します。",
+            )
+            for index, card in enumerate(sorted(hand, key=card_sort_key), start=1)
         ]
         super().__init__(
             placeholder="交換するカードを選んでください",

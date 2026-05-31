@@ -161,6 +161,7 @@ def create_uno_game(interaction: discord.Interaction) -> str:
         return "このチャンネルにはすでにUNOがあります。"
     uno_games[game_id] = {
         "creator_id": interaction.user.id,
+        "channel_id": interaction.channel_id,
         "players": [interaction.user.id],
         "hands": {},
         "deck": [],
@@ -796,7 +797,19 @@ class GameActionButton(discord.ui.Button):
             else:
                 await interaction.response.send_message(text, ephemeral=True)
         elif self.action == "begin":
-            await begin_game(interaction, self.game)
+            try:
+                await begin_game(interaction, self.game)
+            except Exception as e:
+                print(f"[GameActionButton.begin] {self.game} error: {type(e).__name__}: {e}", flush=True)
+                message = "開始処理中にエラーが発生しました。少し待ってから、もう一度開始ボタンを押してください。"
+                try:
+                    if interaction.response.is_done():
+                        await interaction.followup.send(message, ephemeral=True)
+                    else:
+                        await interaction.response.send_message(message, ephemeral=True)
+                except Exception:
+                    pass
+                return
             _, store = GAME_STORES[self.game]
             state = store.get(str(interaction.channel_id))
             if state and state.get("started") and interaction.message:

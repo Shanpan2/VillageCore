@@ -408,8 +408,18 @@ def hand_file(member: discord.Member, hand: list[dict]) -> discord.File:
     return discord.File(buffer, filename=f"daifugo_hand_{member.id}.png")
 
 
-async def send_hand(member: discord.Member, hand: list[dict]):
-    await member.send("あなたの大富豪の手札です。", file=hand_file(member, hand))
+async def send_hand(member: discord.Member, hand: list[dict], candidates: list[list[dict]] | None = None):
+    text = "あなたの大富豪の手札です。"
+    if candidates is not None:
+        if candidates:
+            lines = [
+                f"候補 {index}: {group_label(group)}"
+                for index, group in enumerate(candidates[:25], start=1)
+            ]
+            text += "\n\n出せる候補:\n" + "\n".join(lines)
+        else:
+            text += "\n\n今出せるカードはありません。パスを選んでください。"
+    await member.send(text, file=hand_file(member, hand))
 
 
 def clear_field(state: dict):
@@ -464,7 +474,8 @@ async def update_table(interaction: discord.Interaction, state: dict, prefix: st
     member = interaction.guild.get_member(current) if interaction.guild else None
     if member:
         try:
-            await send_hand(member, state["hands"][str(current)])
+            hand = state["hands"][str(current)]
+            await send_hand(member, hand, legal_groups(hand, state))
         except Exception:
             pass
     await interaction.response.edit_message(content=status_text(state, prefix), view=DaifugoPlayView(game_id, current))
@@ -486,8 +497,12 @@ class DaifugoPlayView(discord.ui.View):
 class DaifugoCardSelect(discord.ui.Select):
     def __init__(self, game_id: str, user_id: int, groups: list[list[dict]]):
         options = [
-            discord.SelectOption(label=group_label(group)[:100], value=encode_group(group))
-            for group in groups
+            discord.SelectOption(
+                label=f"候補 {index}",
+                value=encode_group(group),
+                description="DMの手札画像と候補順で確認してください。",
+            )
+            for index, group in enumerate(groups, start=1)
         ]
         super().__init__(placeholder="出すカードを選んでください", options=options, custom_id=f"daifugo_select_{game_id}_{user_id}")
         self.game_id = game_id
@@ -703,17 +718,18 @@ async def start_daifugo_game(interaction: discord.Interaction, game_id: str | No
     state["guild_id"] = interaction.guild_id
     await save_daifugo_game(interaction.guild_id, game_id, state)
 
+    current = state["players"][state["turn_index"]]
     failed_dm = []
     for uid in state["players"]:
         member = interaction.guild.get_member(uid) if interaction.guild else None
         if not member:
             continue
         try:
-            await send_hand(member, hands[str(uid)])
+            hand = hands[str(uid)]
+            await send_hand(member, hand, legal_groups(hand, state) if uid == current else None)
         except Exception:
             failed_dm.append(member.mention)
 
-    current = state["players"][state["turn_index"]]
     text = status_text(state, "大富豪を開始しました。")
     if failed_dm:
         text += "\n\nDM送信に失敗: " + " ".join(failed_dm)

@@ -203,7 +203,7 @@ class ChallengeNoButton(discord.ui.Button):
             )
             return
 
-        from Features.uno import save_uno_game, uno_games, refill_deck
+        from Features.uno import save_uno_game, uno_games, refill_deck, send_uno_turn
         state = uno_games.get(self.game_id)
         if not state:
             await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
@@ -241,5 +241,11 @@ class ChallengeNoButton(discord.ui.Button):
                 f"<@{next_player}> が 4 枚引きます。\n"
                 f"次のターン：<@{next_player_id}>"
             ),
-            view=UnoHandView(self.game_id, next_player_id, hands[next_player_id]),
+            view=None,
+        )
+        await send_uno_turn(
+            interaction.client,
+            self.game_id,
+            state,
+            f"🃏 チャレンジなし。<@{next_player}> が4枚引き、<@{next_player_id}> のターンです。",
         )

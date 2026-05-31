@@ -366,9 +366,15 @@ def hand_file(member: discord.Member, hand: list[tuple[str, int]], playable: lis
 
 
 async def send_hand(member: discord.Member, hand: list[tuple[str, int]], playable: list[tuple[str, int]]):
+    candidate_lines = [
+        f"候補 {index}: {card_label(card)}"
+        for index, card in enumerate(playable[:25], start=1)
+    ]
+    candidates = "\n\n出せる候補:\n" + "\n".join(candidate_lines) if candidate_lines else "\n\n今出せるカードはありません。"
     await member.send(
         "あなたの7並べの手札です。\n"
-        "黄色い枠のカードは現在出せます。",
+        "黄色い枠のカードは現在出せます。"
+        + candidates,
         file=hand_file(member, hand, playable),
     )
 
@@ -390,7 +396,14 @@ class SevensPlayView(discord.ui.View):
 
 class SevensCardSelect(discord.ui.Select):
     def __init__(self, game_id: str, user_id: int, cards: list[tuple[str, int]]):
-        options = [discord.SelectOption(label=card_label(card), value=card_value(card)) for card in cards]
+        options = [
+            discord.SelectOption(
+                label=f"候補 {index}",
+                value=card_value(card),
+                description="DMの手札画像で出せるカードを確認してください。",
+            )
+            for index, card in enumerate(cards, start=1)
+        ]
         super().__init__(
             placeholder="出すカードを選んでください",
             options=options,

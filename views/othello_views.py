@@ -2,6 +2,20 @@ import discord
 import traceback
 
 
+async def safe_defer(interaction: discord.Interaction, *, ephemeral: bool = False, thinking: bool = False) -> bool:
+    if interaction.response.is_done():
+        return True
+    try:
+        await interaction.response.defer(ephemeral=ephemeral, thinking=thinking)
+        return True
+    except discord.NotFound:
+        print("[OthelloView] interaction expired before acknowledgement", flush=True)
+        return False
+    except discord.HTTPException as e:
+        print(f"[OthelloView] defer failed: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
 class OthelloView(discord.ui.View):
     def __init__(self, game_id: str, valid_moves: list[tuple[int, int]], show_join: bool = True):
         super().__init__(timeout=None)
@@ -81,14 +95,14 @@ class OthelloConfirmButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view = self.view
         try:
+            if not await safe_defer(interaction, ephemeral=True):
+                return
             if view.selected_move is None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ 置きたい場所を選択してから確定してください。",
                     ephemeral=True,
                 )
                 return
-
-            await interaction.response.defer()
 
             x, y = view.selected_move
             from Features.othello import handle_othello_move
@@ -125,19 +139,21 @@ class JoinButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             from Features.othello import othello_games, get_valid_moves, generate_othello_image, save_othello_game
 
             game = othello_games.get(self.game_id)
             if not game:
-                await interaction.response.send_message("❌ ゲームが見つかりません。", ephemeral=True)
+                await interaction.followup.send("❌ ゲームが見つかりません。", ephemeral=True)
                 return
 
             if game.get("white_id") is not None:
-                await interaction.response.send_message("❌ 既に後手プレイヤーが参加しています。", ephemeral=True)
+                await interaction.followup.send("❌ 既に後手プレイヤーが参加しています。", ephemeral=True)
                 return
 
             if interaction.user.id == game.get("black_id"):
-                await interaction.response.send_message("❌ 先手と同じ人は後手に参加できません。", ephemeral=True)
+                await interaction.followup.send("❌ 先手と同じ人は後手に参加できません。", ephemeral=True)
                 return
 
             # 参加登録
@@ -164,8 +180,8 @@ class JoinButton(discord.ui.Button):
             )
 
             # 編集は interaction.message を使って行う
-            await interaction.response.send_message("✅ 後手として参加しました。", ephemeral=True)
             await interaction.message.edit(embed=embed, attachments=[file], view=OthelloView(self.game_id, valid_moves, show_join=False))
+            await interaction.followup.send("✅ 後手として参加しました。", ephemeral=True)
         except Exception as e:
             print(f"[OthelloView.Join] error: {type(e).__name__}: {e}")
             traceback.print_exc()
@@ -187,16 +203,18 @@ class SurrenderButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         try:
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             from Features.othello import othello_games, player_name, settle_ai_coins, delete_othello_game
 
             game = othello_games.get(self.game_id)
             if not game:
-                await interaction.response.send_message("❌ ゲームが見つかりません。", ephemeral=True)
+                await interaction.followup.send("❌ ゲームが見つかりません。", ephemeral=True)
                 return
 
             user_id = interaction.user.id
             if user_id != game.get("black_id") and user_id != game.get("white_id"):
-                await interaction.response.send_message("❌ ゲーム参加者のみ降参できます。", ephemeral=True)
+                await interaction.followup.send("❌ ゲーム参加者のみ降参できます。", ephemeral=True)
                 return
 
             # 決着: 押した人が降参 -> 相手の勝利
@@ -216,7 +234,6 @@ class SurrenderButton(discord.ui.Button):
                 pass
 
             # 表示更新
-            await interaction.response.send_message(f"✅ 降参しました。{winner} の勝利です。", ephemeral=True)
             try:
                 await interaction.message.edit(
                     embed=discord.Embed(
@@ -228,6 +245,7 @@ class SurrenderButton(discord.ui.Button):
                 )
             except Exception:
                 pass
+            await interaction.followup.send(f"✅ 降参しました。{winner} の勝利です。", ephemeral=True)
         except Exception as e:
             print(f"[OthelloView.Surrender] error: {type(e).__name__}: {e}")
             traceback.print_exc()
