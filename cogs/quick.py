@@ -120,8 +120,8 @@ def quick_embed() -> discord.Embed:
         color=0x2ECC71,
     )
     embed.add_field(
-        name="ゲーム作成",
-        value="UNO / 7並べ / 大富豪 / ポーカー / オセロ",
+        name="ゲーム",
+        value="ゲームボタンから、UNO / 7並べ / 大富豪 / ポーカー / オセロ / Ito / コードネーム / 人狼を選べます。",
         inline=False,
     )
     embed.add_field(
@@ -893,14 +893,26 @@ class GameMenuView(discord.ui.View):
         self.add_item(GameSelect())
 
 
+class GameMenuButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="ゲーム", style=discord.ButtonStyle.primary, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="ゲームパネル",
+            description=(
+                "遊びたいゲームを選んでください。\n"
+                "選択後に、募集作成・参加・抜ける・開始・中止・ルール確認をボタンで操作できます。"
+            ),
+            color=0x2ECC71,
+        )
+        await interaction.response.send_message(embed=embed, view=GameMenuView())
+
+
 class QuickView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
-        self.add_item(GameStartButton("UNO作成", "uno", 0))
-        self.add_item(GameStartButton("7並べ作成", "sevens", 0))
-        self.add_item(GameStartButton("大富豪作成", "daifugo", 0))
-        self.add_item(GameStartButton("ポーカー作成", "poker", 0))
-        self.add_item(GameStartButton("オセロ作成", "othello", 1))
+        self.add_item(GameMenuButton())
         self.add_item(OmikujiButton())
         self.add_item(DiceButton())
         self.add_item(JankenButton())

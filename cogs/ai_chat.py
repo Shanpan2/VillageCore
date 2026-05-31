@@ -11,7 +11,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from cogs.server_logs import send_server_log
 from database.config_db import db_get, db_set
@@ -186,6 +186,41 @@ def clean_quote_content(text: str) -> str:
     return "".join(cleaned).strip()
 
 
+def is_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = attachment.content_type or ""
+    if content_type.startswith("image/"):
+        return True
+    return attachment.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+
+
+async def load_quote_attachment_image(message: discord.Message) -> Image.Image | None:
+    for attachment in message.attachments:
+        if not is_image_attachment(attachment):
+            continue
+        try:
+            data = await attachment.read()
+            return Image.open(BytesIO(data)).convert("RGBA")
+        except Exception:
+            return None
+    return None
+
+
+def paste_rounded_image(base: Image.Image, source: Image.Image, box: tuple[int, int, int, int], radius: int = 24):
+    max_width = box[2] - box[0]
+    max_height = box[3] - box[1]
+    fitted = ImageOps.contain(source, (max_width, max_height))
+    x = box[0] + (max_width - fitted.width) // 2
+    y = box[1] + (max_height - fitted.height) // 2
+    shadow = Image.new("RGBA", (fitted.width + 18, fitted.height + 18), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((9, 9, fitted.width + 9, fitted.height + 9), radius=radius, fill=(0, 0, 0, 125))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(8))
+    base.alpha_composite(shadow, (x - 9, y - 9))
+    mask = Image.new("L", fitted.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, fitted.width, fitted.height), radius=radius, fill=255)
+    fitted.putalpha(mask)
+    base.alpha_composite(fitted, (x, y))
+
+
 def make_gradient_background(width: int, height: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
     image = Image.new("RGB", (width, height), top)
     draw = ImageDraw.Draw(image)
@@ -215,7 +250,8 @@ def apply_quote_background(theme_key: str) -> Image.Image:
 
 async def make_quote_card(message: discord.Message, theme_key: str = "black") -> BytesIO:
     text = clean_quote_content(message.content or "")
-    if not text:
+    attachment_image = await load_quote_attachment_image(message)
+    if not text and attachment_image is None:
         raise ValueError("quote target has no text")
     if len(text) > QUOTE_MAX_CHARS:
         text = text[:QUOTE_MAX_CHARS].rstrip() + "..."
@@ -237,25 +273,30 @@ async def make_quote_card(message: discord.Message, theme_key: str = "black") ->
     image.alpha_composite(avatar, (90, 165))
 
     draw = ImageDraw.Draw(image)
-    quote_font_size = 54
-    while quote_font_size >= 34:
-        quote_font = load_font(quote_font_size)
-        lines = wrap_text(draw, text, quote_font, 660)
-        line_height = quote_font_size + 14
-        if len(lines) * line_height <= 320:
-            break
-        quote_font_size -= 4
-    quote_font = load_font(quote_font_size)
     name_font = load_font(28, bold=True)
     tag_font = load_font(22)
 
-    lines = wrap_text(draw, text, quote_font, 660)
-    line_height = quote_font_size + 14
-    total_height = len(lines) * line_height
-    start_y = max(105, (height - total_height) // 2 - 20)
     x = 470
-    for i, line in enumerate(lines):
-        draw.text((x, start_y + i * line_height), line, font=quote_font, fill=(245, 245, 245))
+    if text:
+        quote_font_size = 54
+        while quote_font_size >= 34:
+            quote_font = load_font(quote_font_size)
+            lines = wrap_text(draw, text, quote_font, 660)
+            line_height = quote_font_size + 14
+            if len(lines) * line_height <= 320:
+                break
+            quote_font_size -= 4
+        quote_font = load_font(quote_font_size)
+        lines = wrap_text(draw, text, quote_font, 660)
+        line_height = quote_font_size + 14
+        total_height = len(lines) * line_height
+        start_y = max(105, (height - total_height) // 2 - 20)
+        for i, line in enumerate(lines):
+            draw.text((x, start_y + i * line_height), line, font=quote_font, fill=(245, 245, 245))
+        footer_y = start_y + total_height + 34
+    else:
+        paste_rounded_image(image, attachment_image, (470, 95, 1090, 455))
+        footer_y = 490
 
     display_name = clean_quote_label(getattr(message.author, "display_name", message.author.name))
     user_name = clean_quote_label(getattr(message.author, "name", display_name))
@@ -263,7 +304,6 @@ async def make_quote_card(message: discord.Message, theme_key: str = "black") ->
         display_name = "Unknown"
     if not user_name:
         user_name = display_name
-    footer_y = start_y + total_height + 34
     draw.text((x, footer_y), f"- {display_name}", font=name_font, fill=(235, 235, 235))
     draw.text((x, footer_y + 36), f"@{user_name}", font=tag_font, fill=(155, 155, 155))
     draw.text((width - 255, height - 54), "むらびと名言", font=tag_font, fill=(160, 160, 160))
@@ -481,7 +521,7 @@ class AIChat(commands.Cog):
                 )
             except ValueError:
                 await message.reply(
-                    "引用できるテキストがありません。テキスト付きのメッセージに返信してBotをメンションしてください。",
+                    "引用できるテキストまたは画像がありません。テキスト/画像付きのメッセージに返信してBotをメンションしてください。",
                     mention_author=False,
                 )
             except Exception as e:

@@ -128,6 +128,7 @@ async def load_cogs():
         "Features.dice",
         "Features.google_search",
         "Features.ito",
+        "Features.meigen",
         "Features.omikuji",
         "Features.othello",
         "Features.poker",
