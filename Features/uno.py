@@ -706,13 +706,44 @@ async def send_uno_channel_update(bot, game_id: str, state: dict, prefix: str = 
     channel = bot.get_channel(channel_id)
     if not isinstance(channel, discord.abc.Messageable):
         return
-    kwargs = {}
+    content = uno_public_text(state, prefix) if include_top else prefix
+    files = [generate_card_file(state["top"])] if include_top and state.get("top") else []
+    message_id = state.get("status_message_id")
+    if message_id:
+        try:
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(
+                content=content,
+                attachments=files,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, ValueError):
+            state.pop("status_message_id", None)
+
     if include_top and state.get("top"):
-        kwargs["file"] = generate_card_file(state["top"])
+        sent = await channel.send(
+            content,
+            file=files[0],
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    else:
+        sent = await channel.send(
+            content,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    state["status_message_id"] = sent.id
+    await save_uno_game(state.get("guild_id"), game_id, state)
+
+
+async def send_uno_channel_notice(bot, game_id: str, state: dict, content: str):
+    channel_id = int(state.get("channel_id") or game_id)
+    channel = bot.get_channel(channel_id)
+    if not isinstance(channel, discord.abc.Messageable):
+        return
     await channel.send(
-        uno_public_text(state, prefix) if include_top else prefix,
+        content,
         allowed_mentions=discord.AllowedMentions.none(),
-        **kwargs,
     )
 
 
@@ -956,11 +987,14 @@ async def start_uno_game(interaction: discord.Interaction, game_id: str | None =
         followup_text += "\n\n⚠️ DM送信に失敗したプレイヤーがあります。DMを受信できる状態にしてください。\n"
         followup_text += " " + " ".join(failed_dm)
 
-    await interaction.followup.send(
+    status_message = await interaction.followup.send(
         followup_text,
         file=generate_card_file(top),
         allowed_mentions=discord.AllowedMentions.none(),
+        wait=True,
     )
+    state["status_message_id"] = status_message.id
+    await save_uno_game(interaction.guild_id or state.get("guild_id"), game_id, state)
     if not await send_uno_hand_dm(interaction.client, state, game_id, first_player):
         await send_uno_channel_update(
             interaction.client,
