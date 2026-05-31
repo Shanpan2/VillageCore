@@ -172,7 +172,7 @@ class ChallengeYesButton(discord.ui.Button):
         self.defender_id = defender_id
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.defender_id:
+        if int(interaction.user.id) != int(self.defender_id):
             await interaction.response.send_message(
                 "❌ あなたはチャレンジできません。", ephemeral=True
             )
@@ -197,17 +197,18 @@ class ChallengeNoButton(discord.ui.Button):
         self.defender_id = defender_id
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.defender_id:
+        if int(interaction.user.id) != int(self.defender_id):
             await interaction.response.send_message(
                 "❌ あなたは選択できません。", ephemeral=True
             )
             return
 
-        from Features.uno import save_uno_game, uno_games, refill_deck, send_uno_turn
+        from Features.uno import normalize_uno_state, save_uno_game, uno_games, refill_deck, send_uno_turn
         state = uno_games.get(self.game_id)
         if not state:
             await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
             return
+        state = normalize_uno_state(state)
 
         deck = state["deck"]
         hands = state["hands"]

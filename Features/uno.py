@@ -34,6 +34,16 @@ def normalize_uno_state(state: dict) -> dict:
     state["players"] = players
     hands = state.get("hands") or {}
     state["hands"] = {int(uid): cards for uid, cards in hands.items()} if hands else {}
+    if state.get("turn_index") is None:
+        state["turn_index"] = 0
+    state["turn_index"] = int(state.get("turn_index", 0) or 0)
+    if players:
+        state["turn_index"] %= len(players)
+    pending = state.get("pending")
+    if isinstance(pending, dict):
+        for key in ("user_id", "attacker_id", "defender_id"):
+            if pending.get(key) is not None:
+                pending[key] = int(pending[key])
     return state
 
 
@@ -288,6 +298,7 @@ async def handle_play_card(
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
 
     players = state["players"]
     hands = state["hands"]
@@ -296,11 +307,18 @@ async def handle_play_card(
     top = state["top"]
     turn_index = state["turn_index"]
     direction = state["direction"]
-    current_player_id = players[turn_index]
+    current_player_id = int(players[turn_index])
+    button_user_id = int(button_user_id)
 
-    if interaction.user.id != current_player_id:
+    if int(interaction.user.id) != button_user_id:
         await interaction.response.send_message(
-            "❌ あなたのターンではありません。", ephemeral=True
+            "❌ この手札パネルはあなた用ではありません。", ephemeral=True
+        )
+        return
+
+    if int(interaction.user.id) != current_player_id:
+        await interaction.response.send_message(
+            f"❌ あなたのターンではありません。現在のターンは <@{current_player_id}> です。", ephemeral=True
         )
         return
 
@@ -401,6 +419,7 @@ async def handle_wild_color_select(
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
 
     players = state["players"]
     hands = state["hands"]
@@ -408,11 +427,18 @@ async def handle_wild_color_select(
     discard = state["discard"]
     turn_index = state["turn_index"]
     direction = state["direction"]
-    current_player_id = players[turn_index]
+    current_player_id = int(players[turn_index])
+    user_id = int(user_id)
 
-    if interaction.user.id != current_player_id:
+    if int(interaction.user.id) != user_id:
         await interaction.response.send_message(
-            "❌ あなたのターンではありません。", ephemeral=True
+            "❌ この色選択パネルはあなた用ではありません。", ephemeral=True
+        )
+        return
+
+    if int(interaction.user.id) != current_player_id:
+        await interaction.response.send_message(
+            f"❌ あなたのターンではありません。現在のターンは <@{current_player_id}> です。", ephemeral=True
         )
         return
 
@@ -470,6 +496,7 @@ async def handle_challenge(
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
 
     hands = state["hands"]
     deck = state["deck"]
@@ -477,6 +504,8 @@ async def handle_challenge(
     turn_index = state["turn_index"]
     direction = state["direction"]
 
+    attacker_id = int(attacker_id)
+    defender_id = int(defender_id)
     top_color = state["top"].split("_")[1]
     can_play_other = any(
         (not c.startswith("wild")) and c.split("_")[0] == top_color
@@ -517,14 +546,16 @@ async def handle_uno_declare(
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
+    user_id = int(user_id)
 
-    if interaction.user.id != user_id:
+    if int(interaction.user.id) != user_id:
         await interaction.response.send_message(
             "❌ あなたは UNO を宣言できません。", ephemeral=True
         )
         return
 
-    if len(state["hands"][user_id]) != 1:
+    if len(state["hands"].get(user_id, [])) != 1:
         await interaction.response.send_message(
             "❌ 今は UNO を宣言できません。", ephemeral=True
         )
@@ -546,8 +577,10 @@ async def handle_uno_surrender(
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
+    user_id = int(user_id)
 
-    if interaction.user.id != user_id:
+    if int(interaction.user.id) != user_id:
         await interaction.response.send_message(
             "❌ あなたはこの降参ボタンを使えません。", ephemeral=True
         )
@@ -703,7 +736,7 @@ def draw_uno_card(card: str, width: int, height: int) -> Image.Image:
     }
     label_map = {
         "skip": "SKIP",
-        "reverse": "REV",
+        "reverse": "↺",
         "draw2": "+2",
         "draw": "+2",
         "wild": "WILD",
@@ -784,16 +817,24 @@ async def handle_draw_card(interaction: discord.Interaction, game_id: str, user_
     if not state:
         await interaction.response.send_message("❌ ゲームが存在しません。", ephemeral=True)
         return
+    state = normalize_uno_state(state)
+    user_id = int(user_id)
 
     players = state["players"]
     hands = state["hands"]
     deck = state["deck"]
     turn_index = state["turn_index"]
-    current_player_id = players[turn_index]
+    current_player_id = int(players[turn_index])
 
-    if interaction.user.id != current_player_id:
+    if int(interaction.user.id) != user_id:
         await interaction.response.send_message(
-            "❌ あなたのターンではありません。", ephemeral=True
+            "❌ この手札パネルはあなた用ではありません。", ephemeral=True
+        )
+        return
+
+    if int(interaction.user.id) != current_player_id:
+        await interaction.response.send_message(
+            f"❌ あなたのターンではありません。現在のターンは <@{current_player_id}> です。", ephemeral=True
         )
         return
 
@@ -823,6 +864,7 @@ async def start_uno_game(interaction: discord.Interaction, game_id: str | None =
         return
 
     state = uno_games[game_id]
+    state = normalize_uno_state(state)
     if state.get("hands"):
         await interaction.response.send_message("❌ このUNOゲームはすでに開始しています。", ephemeral=True)
         return
