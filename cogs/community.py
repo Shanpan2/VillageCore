@@ -83,6 +83,10 @@ def coin_daily_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_daily:{guild_id}:{user_id}"
 
 
+def coin_gamble_lock_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin_gamble_lock:{guild_id}:{user_id}"
+
+
 def titles_key(guild_id: int, user_id: int) -> str:
     return f"community_titles:{guild_id}:{user_id}"
 
@@ -108,6 +112,27 @@ COIN_SHOP_ITEMS = {
     "gold": {"label": "金カラー", "role_name": "カラー: 金", "cost": 500, "days": 7, "color": 0xF1C40F},
 }
 
+PENALTY_GACHA_ITEMS = [
+    "次の発言だけ、語尾に「ですぞ」を付ける",
+    "今日の反省を1行で書く",
+    "好きな食べ物を1つ発表する",
+    "次のゲーム募集を1回立てる",
+    "最近のおすすめ動画や曲を1つ紹介する",
+    "次のおみくじ結果を素直に受け入れる",
+    "今日だけ慎重派を名乗る",
+    "負けた理由をかっこよく言い訳する",
+    "今日の一言を名言っぽく投稿する",
+    "自分のラッキーアイテムを勝手に決めて発表する",
+    "次の1回だけ丁寧語で話す",
+    "村への感謝を1行で書く",
+    "次に遊びたいゲームを1つ宣言する",
+    "今日の自分に称号を1つ付ける",
+    "好きな絵文字を3つだけ並べる",
+    "今の気持ちを五七五っぽく書く",
+    "次の発言だけ大げさに反省する",
+    "コイン復活後の目標を1つ宣言する",
+]
+
 
 def coin_shop_expirations_key(guild_id: int) -> str:
     return f"community_coin_shop_expirations:{guild_id}"
@@ -115,9 +140,42 @@ def coin_shop_expirations_key(guild_id: int) -> str:
 
 def parse_utc(value: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def format_remaining(delta: timedelta) -> str:
+    total_seconds = max(0, int(delta.total_seconds()))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes = remainder // 60
+    if hours:
+        return f"{hours}時間{minutes}分"
+    return f"{minutes}分"
+
+
+async def get_coin_gamble_lock_until(guild_id: int, user_id: int) -> datetime | None:
+    locked_until = parse_utc(await db_get(coin_gamble_lock_key(guild_id, user_id)))
+    if locked_until and locked_until > utc_now():
+        return locked_until
+    return None
+
+
+async def lock_coin_gamble_for_24h(guild_id: int, user_id: int) -> datetime:
+    locked_until = utc_now() + timedelta(hours=24)
+    await db_set(coin_gamble_lock_key(guild_id, user_id), locked_until.isoformat())
+    return locked_until
+
+
+def draw_penalty_gacha() -> str:
+    return random.choice(PENALTY_GACHA_ITEMS)
 
 
 async def add_unique_json_value(key: str, value: str, limit: int = 30) -> bool:
@@ -560,8 +618,25 @@ class Community(commands.Cog):
             await interaction.response.send_message("賭けるコイン数は1以上にしてください。", ephemeral=True)
             return
 
+        locked_until = await get_coin_gamble_lock_until(interaction.guild_id, interaction.user.id)
+        if locked_until:
+            remaining = format_remaining(locked_until - utc_now())
+            await interaction.response.send_message(
+                f"0コインになったため、ギャンブルはあと **{remaining}** できません。\n"
+                "コイン集めや別のゲームで少し休憩しましょう。",
+                ephemeral=True,
+            )
+            return
+
         key = coin_key(interaction.guild_id, interaction.user.id)
         current = int(await db_get(key) or "0")
+        if current <= 0:
+            await interaction.response.send_message(
+                "現在の所持コインは **0** です。ギャンブルはできません。\n"
+                "まずは `/coin_daily` やおみくじでコインを集めてください。",
+                ephemeral=True,
+            )
+            return
         if current < amount:
             await interaction.response.send_message(
                 f"コインが足りません。現在の所持コインは **{current}** です。",
@@ -585,10 +660,24 @@ class Community(commands.Cog):
         loss = amount if random.random() < 0.65 else max(1, amount // 2)
         new_balance = max(0, current - loss)
         await db_set(key, str(new_balance))
+        zero_lock_text = ""
+        if new_balance == 0:
+            locked_until = await lock_coin_gamble_for_24h(interaction.guild_id, interaction.user.id)
+            remaining = format_remaining(locked_until - utc_now())
+            penalty = draw_penalty_gacha()
+            zero_lock_text = (
+                f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
+                f"\n罰ゲームガチャが自動発生: **{penalty}**"
+            )
         await interaction.response.send_message(
             f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
-            f"現在 **{new_balance}** コインです。"
+            f"現在 **{new_balance}** コインです。{zero_lock_text}"
         )
+
+    @app_commands.command(name="penalty_gacha", description="軽い罰ゲームをランダムで引きます")
+    async def penalty_gacha(self, interaction: discord.Interaction):
+        penalty = draw_penalty_gacha()
+        await interaction.response.send_message(f"罰ゲームガチャ: **{penalty}**")
 
     @app_commands.command(name="coin_give", description="【管理者】メンバーにコインを付与します")
     @app_commands.default_permissions(manage_guild=True)

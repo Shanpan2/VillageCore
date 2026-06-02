@@ -295,7 +295,7 @@ async def handle_help_site(request):
           font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           background: var(--bg);
           color: var(--ink);
-          line-height: 1.7;
+          line-height: 1.72;
         }}
         header {{
           background: #274f39;
@@ -303,7 +303,7 @@ async def handle_help_site(request):
           padding: 28px 18px 22px;
           border-bottom: 5px solid #d99345;
         }}
-        .wrap {{ max-width: 1080px; margin: 0 auto; }}
+        .wrap {{ max-width: 1120px; margin: 0 auto; }}
         .brand {{ display: flex; gap: 16px; align-items: center; }}
         .badge {{
           width: 62px; height: 62px; border-radius: 8px;
@@ -331,23 +331,23 @@ async def handle_help_site(request):
           font-weight: 650; font-size: .94rem;
         }}
         nav a:hover {{ background: var(--soft); }}
-        main {{ padding: 20px 18px 42px; }}
+        main {{ padding: 24px 18px 46px; }}
         section {{
-          margin: 18px 0;
-          padding: 18px;
+          margin: 20px 0;
+          padding: 22px;
           background: var(--panel);
           border: 1px solid var(--line);
           border-radius: 8px;
         }}
-        h2 {{ margin: 0 0 10px; font-size: 1.35rem; }}
+        h2 {{ margin: 0 0 12px; font-size: 1.42rem; }}
         h3 {{ margin: 16px 0 8px; font-size: 1.05rem; }}
         .grid {{
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          gap: 14px;
         }}
         .tile {{
-          padding: 14px;
+          padding: 15px 16px;
           border: 1px solid var(--line);
           border-radius: 8px;
           background: #fbfcfa;
@@ -374,9 +374,13 @@ async def handle_help_site(request):
         .notice {{
           border-left: 4px solid var(--accent-2);
           background: #fff8ed;
-          padding: 12px 14px;
+          padding: 13px 15px;
           border-radius: 6px;
         }}
+        .notice p {{ margin: 0 0 10px; }}
+        .notice p:last-child {{ margin-bottom: 0; }}
+        .compact-list {{ margin: 8px 0 0; padding-left: 1.2rem; }}
+        .compact-list li {{ margin: 3px 0; }}
         footer {{ color: var(--muted); padding: 24px 18px 42px; text-align: center; }}
         @media (max-width: 640px) {{
           .brand {{ align-items: flex-start; }}
@@ -401,6 +405,7 @@ async def handle_help_site(request):
           <a href="#start">はじめに</a>
           <a href="#daily">日常</a>
           <a href="#games">ゲーム</a>
+          <a href="#coin-note">コイン遊び</a>
           <a href="#admin">管理者</a>
           <a href="#trouble">困った時</a>
           <a href="#commands">コマンド</a>
@@ -436,10 +441,10 @@ async def handle_help_site(request):
           <p>UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
             <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
-            <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。場のカードと同じ色、数字、記号を出して、先に手札をなくした人が勝ちです。</div>
-            <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届きます。</div>
-            <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。</div>
-            <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。</div>
+            <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。手札と操作はDM、公開チャンネルは1つの進行メッセージを編集して場札だけを表示します。</div>
+            <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届き、公開パネルにはカード名を表示しません。</div>
+            <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。出せる候補はDMで確認できます。</div>
+            <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。最終結果はトランプ画像付きで表示されます。</div>
             <div class="tile"><strong>オセロ</strong><code>/game</code> でオセロを選びます。対人戦またはAI対戦の難易度を選んで開始できます。</div>
             <div class="tile"><strong>Ito</strong><code>/game</code> でItoを選びます。主催者がお題を入力でき、空欄ならランダムお題で始められます。</div>
             <div class="tile"><strong>コードネーム</strong><code>/game</code> でコードネームを選びます。赤/青チーム参加とスパイマスター設定をボタンで行えます。</div>
@@ -451,6 +456,10 @@ async def handle_help_site(request):
             <p><strong>ゲーム募集の中止</strong><br>
               UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼の募集中止は <code>/game</code> の「中止」ボタンから行えます。
               募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
+            </p>
+            <p><strong>ゲームの保存</strong><br>
+              多くのゲームはデータベースに状態を保存します。再デプロイ後も続きから操作できるようにしています。
+              ただし、古い操作パネルや終了済みゲームは復元できない場合があります。
             </p>
             <p><strong>UNOのルール</strong><br>
               手札を先になくした人が勝ちです。場のカードと同じ色、同じ数字、同じ記号のカードを出せます。
@@ -480,6 +489,31 @@ async def handle_help_site(request):
           </div>
           {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "ito", "codenames", "werewolf", "janken", "omikuji", "dice"))}
         </section>
+        <section id="coin-note">
+          <h2>コイン遊びのメモ</h2>
+          <div class="notice">
+            <p><strong>遊び方の目安</strong><br>
+              コインはサーバー内の遊び用ポイントです。勝ち負けが続く時は、少し休憩して別の話題やゲームに切り替えるのがおすすめです。
+            </p>
+          </div>
+          <div class="grid">
+            <div class="tile"><strong>ほどほどに遊ぶ</strong>連続で賭け続けず、区切りを決めて遊ぶと長く楽しめます。</div>
+            <div class="tile"><strong>休憩を入れる</strong>大きく負けた時や連敗した時は10分休憩。熱くなりすぎる前に止めるのが安心です。</div>
+            <div class="tile"><strong>煽りすぎない</strong>「今日はここまで」と言った人には追加で煽らないようにしましょう。</div>
+            <div class="tile"><strong>0コイン時</strong>ギャンブルで0コインになった場合、その時点から24時間はギャンブルできません。</div>
+          </div>
+          <div class="notice">
+            <p><strong>軽い罰ゲームにするなら</strong><br>
+              安全で短く、笑って終われる内容にしてください。<code>/penalty_gacha</code> で軽い罰ゲームをランダムに引けます。
+            </p>
+            <ul class="compact-list">
+              <li>その日だけ軽い語尾を付ける</li>
+              <li>今日の反省を1行で書く</li>
+              <li>好きな食べ物や最近のおすすめを発表する</li>
+              <li>今の気持ちを五七五っぽく書く</li>
+            </ul>
+          </div>
+        </section>
         <section id="admin">
           <h2>管理者向け</h2>
           <div class="grid">
@@ -504,7 +538,7 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "music", "youtube", "attendance", "admin", "profile", "coin", "title", "topic", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "music", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "topic", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
           {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "birthday", "welcome", "ng_word", "backup"))}
         </section>
