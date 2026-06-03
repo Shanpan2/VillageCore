@@ -129,10 +129,12 @@ class GuessSession:
         self.current_question: str | None = None
 
     def apply_answer(self, answer: bool | None) -> None:
-        if answer is None or not self.current_question:
+        if not self.current_question:
             return
         key = self.current_question
         if key.startswith("guess:"):
+            if answer is None:
+                return
             guessed_name = key.removeprefix("guess:")
             if answer:
                 self.candidates = [role for role in self.candidates if role.name == guessed_name]
@@ -174,6 +176,34 @@ class GuessSession:
 sessions: dict[int, GuessSession] = {}
 
 
+def grouped_candidate_text(roles: list[Role], limit: int = 10) -> str:
+    grouped: dict[str, list[Role]] = {}
+    for role in roles:
+        grouped.setdefault(role.display_name, []).append(role)
+
+    lines = []
+    for display_name, items in list(grouped.items())[:limit]:
+        mods = " / ".join(sorted({role.mod for role in items}))
+        lines.append(f"- {display_name} ({mods})")
+    remaining = len(grouped) - limit
+    if remaining > 0:
+        lines.append(f"ほか {remaining} 種類")
+    return "\n".join(lines)
+
+
+def single_group_result(roles: list[Role]) -> discord.Embed | None:
+    display_names = {role.display_name for role in roles}
+    if len(display_names) != 1:
+        return None
+    display_name = next(iter(display_names))
+    mods = " / ".join(sorted({role.mod for role in roles}))
+    return discord.Embed(
+        title="役職当て",
+        description=f"たぶん、あなたが思い浮かべた役職は **{display_name}** です。\nMOD: `{mods}`",
+        color=0x2ECC71,
+    )
+
+
 def session_embed(session: GuessSession) -> discord.Embed:
     if len(session.candidates) == 0:
         return discord.Embed(
@@ -181,6 +211,10 @@ def session_embed(session: GuessSession) -> discord.Embed:
             description="候補がなくなりました。役職データが足りないか、どこかの回答が違うかもしれません。",
             color=0xE74C3C,
         )
+
+    grouped_result = single_group_result(session.candidates)
+    if grouped_result:
+        return grouped_result
 
     if len(session.candidates) == 1:
         role = session.candidates[0]
@@ -195,11 +229,9 @@ def session_embed(session: GuessSession) -> discord.Embed:
 
     key = session.current_question or session.next_question()
     if not key:
-        preview = "\n".join(f"- {role.display_name} ({role.mod})" for role in session.candidates[:10])
-        more = "" if len(session.candidates) <= 10 else f"\nほか {len(session.candidates) - 10} 件"
         return discord.Embed(
             title="役職当て",
-            description=f"候補をすべて確認しました。残っている候補はこのあたりです。\n{preview}{more}",
+            description=f"候補をすべて確認しました。残っている候補はこのあたりです。\n{grouped_candidate_text(session.candidates)}",
             color=0xF1C40F,
         )
 
@@ -253,7 +285,12 @@ class GuessView(discord.ui.View):
         session.apply_answer(value)
         session.current_question = None
         embed = session_embed(session)
-        finished = len(session.candidates) <= 1 or "候補がなくなりました" in embed.description or "候補をすべて確認しました" in embed.description
+        finished = (
+            len(session.candidates) <= 1
+            or single_group_result(session.candidates) is not None
+            or "候補がなくなりました" in embed.description
+            or "候補をすべて確認しました" in embed.description
+        )
         if finished:
             sessions.pop(self.user_id, None)
         await interaction.response.edit_message(embed=embed, view=None if finished else self)
@@ -266,7 +303,7 @@ class GuessView(discord.ui.View):
     async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.answer(interaction, False)
 
-    @discord.ui.button(label="わからない", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="どちらでもない/不明", style=discord.ButtonStyle.secondary)
     async def unknown(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.answer(interaction, None)
 
