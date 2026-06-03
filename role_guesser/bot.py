@@ -18,18 +18,42 @@ FEATURE_QUESTIONS = {
     "team_crewmate": "その役職はクルー陣営ですか？",
     "team_impostor": "その役職はインポスター陣営ですか？",
     "team_neutral": "その役職は第三陣営ですか？",
+    "team_liberal": "その役職はリベラル陣営ですか？",
     "can_kill": "その役職はキルできますか？",
     "uses_vent": "その役職はベントを使えますか？",
     "can_win_alone": "その役職は単独勝利できますか？",
     "can_protect": "その役職は誰かを守る能力がありますか？",
     "can_investigate": "その役職は情報を調べる能力がありますか？",
     "meeting_ability": "その役職は会議中に強い能力を発揮しますか？",
+    "has_tasks": "その役職にはタスクがありますか？",
+    "task_based_power": "タスク進行で能力が強くなったり発動したりしますか？",
+    "death_trigger": "死亡したときに能力が発動しますか？",
+    "vote_power": "投票や会議結果に直接影響する能力ですか？",
+    "tracking_power": "誰かの位置や移動を追跡できますか？",
+    "role_info_power": "他人の役職や陣営を知る能力がありますか？",
+    "body_info_power": "死体・死因・死亡位置に関わる情報を得られますか？",
+    "delayed_kill": "キルが遅れて発生したり、呪いのように間接的に発生しますか？",
+    "disguise_or_invisible": "変身・透明化・姿を偽る能力がありますか？",
+    "area_effect": "周囲や部屋全体に影響する能力がありますか？",
+    "sabotage_power": "サボタージュに関わる特別な能力がありますか？",
+    "revenge_kill": "自分を殺した相手を道連れにできますか？",
+    "suicide_risk": "能力の代償や条件で自滅する可能性がありますか？",
+    "conversion_power": "陣営変更・指名・感染などで他人の状態を変えますか？",
+    "ranged_power": "遠距離から能力やキルを使えますか？",
+    "teleport_power": "テレポートや位置入れ替えに関わる能力ですか？",
+    "cooldown_power": "キルクールや能力クールダウンを変化させますか？",
+    "speed_power": "移動速度を変化させる能力がありますか？",
+    "report_power": "死体通報や緊急会議ボタンに干渉しますか？",
+    "vision_power": "視界を広げたり暗くしたりしますか？",
+    "swap_power": "投票先・位置・役職などを入れ替える能力ですか？",
+    "extra_vote_power": "追加票や複数票を持ちますか？",
 }
 
 
 @dataclass(frozen=True)
 class Role:
     name: str
+    display_name: str
     mod: str
     features: dict[str, bool | None]
 
@@ -53,6 +77,7 @@ def load_roles() -> list[Role]:
             name = (row.get("name") or "").strip()
             if not name:
                 continue
+            display_name = (row.get("display_name") or name).strip()
             team = (row.get("team") or "").strip().lower()
             features = {
                 key: parse_bool(row.get(key))
@@ -62,7 +87,15 @@ def load_roles() -> list[Role]:
             features["team_crewmate"] = team == "crewmate"
             features["team_impostor"] = team == "impostor"
             features["team_neutral"] = team == "neutral"
-            roles.append(Role(name=name, mod=(row.get("mod") or "Unknown").strip(), features=features))
+            features["team_liberal"] = team == "liberal"
+            roles.append(
+                Role(
+                    name=name,
+                    display_name=display_name,
+                    mod=(row.get("mod") or "Unknown").strip(),
+                    features=features,
+                )
+            )
     return roles
 
 
@@ -122,15 +155,18 @@ def session_embed(session: GuessSession) -> discord.Embed:
 
     if len(session.candidates) == 1:
         role = session.candidates[0]
+        name_line = f"**{role.display_name}**"
+        if role.display_name != role.name:
+            name_line += f" (`{role.name}`)"
         return discord.Embed(
             title="役職当て",
-            description=f"あなたが思い浮かべた役職は **{role.name}** ですか？\nMOD: `{role.mod}`",
+            description=f"あなたが思い浮かべた役職は {name_line} ですか？\nMOD: `{role.mod}`",
             color=0x2ECC71,
         )
 
     key = session.current_question or session.next_question()
     if not key:
-        preview = "\n".join(f"- {role.name} ({role.mod})" for role in session.candidates[:10])
+        preview = "\n".join(f"- {role.display_name} ({role.mod})" for role in session.candidates[:10])
         more = "" if len(session.candidates) <= 10 else f"\nほか {len(session.candidates) - 10} 件"
         return discord.Embed(
             title="役職当て",
