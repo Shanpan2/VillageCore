@@ -8,6 +8,7 @@ from aiohttp import web
 
 from bot_instance import bot
 from database.config_db import db_get_all_config, db_init, use_postgres
+from role_guesser.bot import start_role_guesser_bot
 
 try:
     from dotenv import load_dotenv
@@ -659,6 +660,8 @@ async def main():
 
     await db_init()
     await load_cogs()
+
+    asyncio.create_task(start_role_guesser_bot())
 
     print(f"🌐 Starting health server on port {PORT}", flush=True)
     asyncio.create_task(start_health_server())

@@ -1,0 +1,13 @@
+name,mod,team,can_kill,uses_vent,can_win_alone,can_protect,can_investigate,meeting_ability
+Crewmate,Vanilla,Crewmate,false,false,false,false,false,false
+Impostor,Vanilla,Impostor,true,true,false,false,false,false
+Engineer,Vanilla,Crewmate,false,true,false,false,false,false
+Scientist,Vanilla,Crewmate,false,false,false,false,true,false
+Guardian Angel,Vanilla,Crewmate,false,false,false,true,false,false
+Shapeshifter,Vanilla,Impostor,true,true,false,false,false,false
+Sheriff,Common Mod,Crewmate,true,false,false,false,false,false
+Jester,Common Mod,Neutral,false,false,true,false,false,true
+Jackal,Common Mod,Neutral,true,true,true,false,false,false
+Medic,Common Mod,Crewmate,false,false,false,true,false,false
+Detective,Common Mod,Crewmate,false,false,false,false,true,false
+Mayor,Common Mod,Crewmate,false,false,false,false,false,true

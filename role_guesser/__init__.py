@@ -1,0 +1,1 @@
+"""Role Guesser bot package."""
