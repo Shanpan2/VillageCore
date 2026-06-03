@@ -109,11 +109,12 @@ def best_question(candidates: list[Role], asked: set[str]) -> str | None:
         yes_count = sum(1 for role in candidates if role.features.get(key) is True)
         no_count = sum(1 for role in candidates if role.features.get(key) is False)
         known_count = yes_count + no_count
-        if yes_count == 0 or no_count == 0:
+        if known_count == 0:
             continue
         balance = min(yes_count, no_count)
         coverage_bonus = known_count * 0.05
-        score = balance + coverage_bonus
+        one_sided_bonus = 0.25 if yes_count == 0 or no_count == 0 else 0
+        score = balance + coverage_bonus + one_sided_bonus
         if score > best_score:
             best_key = key
             best_score = score
@@ -131,6 +132,14 @@ class GuessSession:
         if answer is None or not self.current_question:
             return
         key = self.current_question
+        if key.startswith("guess:"):
+            guessed_name = key.removeprefix("guess:")
+            if answer:
+                self.candidates = [role for role in self.candidates if role.name == guessed_name]
+            else:
+                self.candidates = [role for role in self.candidates if role.name != guessed_name]
+            return
+
         matched = [
             role
             for role in self.candidates
@@ -138,9 +147,24 @@ class GuessSession:
         ]
         if matched:
             self.candidates = matched
+            return
+
+        unknown = [
+            role
+            for role in self.candidates
+            if role.features.get(key) is None
+        ]
+        if unknown:
+            self.candidates = unknown
 
     def next_question(self) -> str | None:
         key = best_question(self.candidates, self.asked)
+        if not key:
+            for role in self.candidates:
+                guess_key = f"guess:{role.name}"
+                if guess_key not in self.asked:
+                    key = guess_key
+                    break
         self.current_question = key
         if key:
             self.asked.add(key)
@@ -165,7 +189,7 @@ def session_embed(session: GuessSession) -> discord.Embed:
             name_line += f" (`{role.name}`)"
         return discord.Embed(
             title="役職当て",
-            description=f"あなたが思い浮かべた役職は {name_line} ですか？\nMOD: `{role.mod}`",
+            description=f"たぶん、あなたが思い浮かべた役職は {name_line} です。\nMOD: `{role.mod}`",
             color=0x2ECC71,
         )
 
@@ -175,9 +199,26 @@ def session_embed(session: GuessSession) -> discord.Embed:
         more = "" if len(session.candidates) <= 10 else f"\nほか {len(session.candidates) - 10} 件"
         return discord.Embed(
             title="役職当て",
-            description=f"これ以上うまく絞れませんでした。候補はこのあたりです。\n{preview}{more}",
+            description=f"候補をすべて確認しました。残っている候補はこのあたりです。\n{preview}{more}",
             color=0xF1C40F,
         )
+
+    if key.startswith("guess:"):
+        guessed_name = key.removeprefix("guess:")
+        role = next((role for role in session.candidates if role.name == guessed_name), None)
+        if role:
+            name_line = f"**{role.display_name}**"
+            if role.display_name != role.name:
+                name_line += f" (`{role.name}`)"
+            return discord.Embed(
+                title="役職当て",
+                description=(
+                    f"あなたが思い浮かべた役職は {name_line} ですか？\n"
+                    f"MOD: `{role.mod}`\n\n"
+                    f"残り候補: **{len(session.candidates)}** 件"
+                ),
+                color=0x2ECC71,
+            )
 
     return discord.Embed(
         title="役職当て",
@@ -212,7 +253,7 @@ class GuessView(discord.ui.View):
         session.apply_answer(value)
         session.current_question = None
         embed = session_embed(session)
-        finished = len(session.candidates) <= 1 or "候補がなくなりました" in embed.description or "これ以上" in embed.description
+        finished = len(session.candidates) <= 1 or "候補がなくなりました" in embed.description or "候補をすべて確認しました" in embed.description
         if finished:
             sessions.pop(self.user_id, None)
         await interaction.response.edit_message(embed=embed, view=None if finished else self)
