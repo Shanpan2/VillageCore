@@ -19,30 +19,52 @@ FEATURE_QUESTIONS = {
     "team_impostor": "その役職はインポスター陣営ですか？",
     "team_neutral": "その役職は第三陣営ですか？",
     "team_liberal": "その役職はリベラル陣営ですか？",
+    "modifier_role": "元の役職に追加されるモディファイアですか？",
     "can_kill": "その役職はキルできますか？",
+    "normal_kill": "通常のキルボタンでキルできますか？",
+    "special_kill": "特殊能力でキルできますか？",
+    "target_kill_power": "指定された対象をキルすることが勝利や能力条件ですか？",
     "uses_vent": "その役職はベントを使えますか？",
     "can_win_alone": "その役職は単独勝利できますか？",
+    "additional_win": "他陣営の勝利に便乗して追加勝利しますか？",
     "can_protect": "その役職は誰かを守る能力がありますか？",
     "can_investigate": "その役職は情報を調べる能力がありますか？",
+    "compare_power": "複数人を比較して陣営や関係を判定しますか？",
     "meeting_ability": "その役職は会議中に強い能力を発揮しますか？",
+    "meeting_message": "会議中や会議後に専用メッセージが出ますか？",
     "has_tasks": "その役職にはタスクがありますか？",
     "task_based_power": "タスク進行で能力が強くなったり発動したりしますか？",
     "death_trigger": "死亡したときに能力が発動しますか？",
+    "scheduled_death": "特定のタイミングで自動的に死亡しますか？",
+    "ghost_role": "死亡後や幽霊状態で使う役職ですか？",
+    "ghost_power": "幽霊や死亡済みプレイヤーに関わる能力がありますか？",
     "vote_power": "投票や会議結果に直接影響する能力ですか？",
+    "exile_win": "会議で追放されることが勝利条件ですか？",
     "tracking_power": "誰かの位置や移動を追跡できますか？",
     "role_info_power": "他人の役職や陣営を知る能力がありますか？",
+    "public_identity": "自分の役職や存在が他のプレイヤーに分かりますか？",
+    "fake_identity": "他人から別陣営や別役職のように見えますか？",
     "body_info_power": "死体・死因・死亡位置に関わる情報を得られますか？",
+    "body_clear_power": "死体を消したり処理したりできますか？",
     "delayed_kill": "キルが遅れて発生したり、呪いのように間接的に発生しますか？",
     "disguise_or_invisible": "変身・透明化・姿を偽る能力がありますか？",
     "area_effect": "周囲や部屋全体に影響する能力がありますか？",
     "sabotage_power": "サボタージュに関わる特別な能力がありますか？",
+    "door_power": "ドアを開閉する能力がありますか？",
     "revenge_kill": "自分を殺した相手を道連れにできますか？",
     "suicide_risk": "能力の代償や条件で自滅する可能性がありますか？",
     "conversion_power": "陣営変更・指名・感染などで他人の状態を変えますか？",
+    "infection_power": "感染や拡散で他人の状態を広げますか？",
+    "partner_power": "特定の相手を選んで、その相手の勝利や生存に関わりますか？",
+    "lovers_power": "ラバーズや恋人関係を作ったり狙ったりしますか？",
+    "alignment_shift_power": "自分の陣営や勝利条件が途中で変わりますか？",
+    "control_power": "他人を操作する能力がありますか？",
+    "restriction_power": "他人の行動や移動を制限する能力がありますか？",
     "ranged_power": "遠距離から能力やキルを使えますか？",
     "teleport_power": "テレポートや位置入れ替えに関わる能力ですか？",
     "cooldown_power": "キルクールや能力クールダウンを変化させますか？",
     "speed_power": "移動速度を変化させる能力がありますか？",
+    "movement_power": "移動方法・移動方向・足場や乗り物の動きに干渉しますか？",
     "report_power": "死体通報や緊急会議ボタンに干渉しますか？",
     "vision_power": "視界を広げたり暗くしたりしますか？",
     "swap_power": "投票先・位置・役職などを入れ替える能力ですか？",
@@ -214,6 +236,26 @@ def single_group_result(roles: list[Role]) -> discord.Embed | None:
     )
 
 
+def indistinguishable_result(roles: list[Role]) -> discord.Embed | None:
+    if len(roles) <= 1:
+        return None
+    signatures = {
+        tuple((key, role.features.get(key)) for key in FEATURE_QUESTIONS)
+        for role in roles
+    }
+    if len(signatures) != 1:
+        return None
+    return discord.Embed(
+        title="役職当て",
+        description=(
+            "ここから先は、今の役職データだけでは区別できません。\n"
+            "候補はこのあたりです。\n"
+            f"{grouped_candidate_text(roles)}"
+        ),
+        color=0xF1C40F,
+    )
+
+
 def session_embed(session: GuessSession) -> discord.Embed:
     if len(session.candidates) == 0:
         return discord.Embed(
@@ -225,6 +267,10 @@ def session_embed(session: GuessSession) -> discord.Embed:
     grouped_result = single_group_result(session.candidates)
     if grouped_result:
         return grouped_result
+
+    indistinguishable = indistinguishable_result(session.candidates)
+    if indistinguishable:
+        return indistinguishable
 
     if len(session.candidates) == 1:
         role = session.candidates[0]
@@ -298,6 +344,7 @@ class GuessView(discord.ui.View):
         finished = (
             len(session.candidates) <= 1
             or single_group_result(session.candidates) is not None
+            or indistinguishable_result(session.candidates) is not None
             or "候補がなくなりました" in embed.description
             or "候補をすべて確認しました" in embed.description
         )
