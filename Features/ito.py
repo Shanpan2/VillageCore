@@ -86,6 +86,41 @@ async def load_ito_games_for_guild(bot: commands.Bot, guild: discord.Guild):
         await db_set(ito_index_key(guild.id), json.dumps(active, ensure_ascii=False))
 
 
+def normalize_ito_state(state: dict) -> dict:
+    state["players"] = [int(uid) for uid in state.get("players", [])]
+    state["creator_id"] = int(state.get("creator_id", 0) or 0)
+    if state.get("channel_id"):
+        state["channel_id"] = int(state["channel_id"])
+    return state
+
+
+async def get_ito_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
+    state = ito_games.get(game_id)
+    if state:
+        state = normalize_ito_state(state)
+        ito_games[game_id] = state
+        return state
+
+    guild_ids: list[int] = []
+    if guild_id:
+        guild_ids.append(int(guild_id))
+    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
+    for target_guild_id in guild_ids:
+        raw = await db_get(ito_game_key(target_guild_id, game_id))
+        if not raw:
+            continue
+        try:
+            state = normalize_ito_state(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not state.get("players"):
+            continue
+        state["guild_id"] = target_guild_id
+        ito_games[game_id] = state
+        return state
+    return None
+
+
 def mention(user_id: int | str) -> str:
     return f"<@{int(user_id)}>"
 
@@ -180,7 +215,7 @@ class ItoLobbyView(discord.ui.View):
 
 
 async def begin_ito(interaction: discord.Interaction, game_id: str, edit_message: bool = False):
-    state = ito_games.get(game_id)
+    state = await get_ito_game_state(interaction.client, game_id, interaction.guild_id)
     if not state:
         await interaction.response.send_message("Ito募集がありません。", ephemeral=True)
         return
@@ -245,7 +280,7 @@ class Ito(commands.Cog):
             await interaction.response.send_message("サーバーのテキストチャンネルで実行してください。", ephemeral=True)
             return
         game_id = str(interaction.channel_id)
-        state = ito_games.get(game_id)
+        state = await get_ito_game_state(self.bot, game_id, interaction.guild_id)
 
         if action.value == "start":
             if state and state.get("phase") != "ended":

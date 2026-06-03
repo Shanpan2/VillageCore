@@ -413,6 +413,26 @@ async def send_hand(member: discord.Member, hand: list[tuple[str, int]], playabl
     )
 
 
+async def send_player_hand_update(
+    guild: discord.Guild | None,
+    user_id: int,
+    state: dict,
+    *,
+    include_candidates: bool = True,
+):
+    if not guild:
+        return
+    member = guild.get_member(user_id)
+    if not member:
+        return
+    hand = [tuple(c) for c in state["hands"].get(str(user_id), [])]
+    playable = playable_cards(hand, state["board"]) if include_candidates else []
+    try:
+        await send_hand(member, hand, playable)
+    except Exception:
+        pass
+
+
 class SevensPlayView(discord.ui.View):
     def __init__(self, game_id: str, user_id: int):
         super().__init__(timeout=None)
@@ -491,11 +511,21 @@ async def advance_turn(state: dict):
             return
 
 
+async def edit_sevens_message(interaction: discord.Interaction, **kwargs):
+    if interaction.response.is_done():
+        if interaction.message:
+            await interaction.message.edit(**kwargs)
+    else:
+        await interaction.response.edit_message(**kwargs)
+
+
 async def update_game_message(interaction: discord.Interaction, state: dict, prefix: str = ""):
     game_id = str(interaction.channel_id)
     current_user = state["players"][state["turn_index"]]
     await save_sevens_game(interaction.guild_id or state.get("guild_id"), game_id, state)
-    await interaction.response.edit_message(
+    await send_player_hand_update(interaction.guild, current_user, state)
+    await edit_sevens_message(
+        interaction,
         content=status_text(state, prefix),
         attachments=[board_file(state)],
         view=SevensPlayView(game_id, current_user),
@@ -510,7 +540,8 @@ async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
     winner = remaining[0] if remaining else int(state["finished"][0])
     await delete_sevens_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id))
     sevens_games.pop(str(interaction.channel_id), None)
-    await interaction.response.edit_message(
+    await edit_sevens_message(
+        interaction,
         content=f"🎉 7並べ終了！勝者: <@{winner}>",
         attachments=[board_file(state)],
         view=None,
@@ -533,6 +564,7 @@ async def play_card(interaction: discord.Interaction, game_id: str, user_id: int
         await interaction.response.send_message("❌ そのカードは今出せません。", ephemeral=True)
         return
 
+    await interaction.response.defer()
     hand.remove(card)
     state["hands"][str(user_id)] = [list(c) for c in hand]
     state["board"][card[0]].append(card[1])
@@ -542,6 +574,8 @@ async def play_card(interaction: discord.Interaction, game_id: str, user_id: int
         state["finished"].append(str(user_id))
         if await end_if_needed(interaction, state):
             return
+    else:
+        await send_player_hand_update(interaction.guild, user_id, state, include_candidates=False)
 
     await advance_turn(state)
     await update_game_message(interaction, state, f"🃏 <@{user_id}> が **{card_label(card)}** を出しました。")
@@ -561,10 +595,12 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
     if state["passes"][key] >= 3:
         state["finished"].append(key)
         prefix = f"⛔ <@{user_id}> は3回パスで脱落しました。"
+        await interaction.response.defer()
         if await end_if_needed(interaction, state):
             return
     else:
         prefix = f"⏭️ <@{user_id}> がパスしました。"
+        await interaction.response.defer()
 
     await advance_turn(state)
     await update_game_message(interaction, state, prefix)
@@ -580,6 +616,7 @@ async def surrender(interaction: discord.Interaction, game_id: str, user_id: int
         return
 
     state["finished"].append(str(user_id))
+    await interaction.response.defer()
     if await end_if_needed(interaction, state):
         return
 

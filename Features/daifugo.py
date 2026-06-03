@@ -456,6 +456,26 @@ async def send_hand(member: discord.Member, hand: list[dict], candidates: list[l
     await member.send(text, file=hand_file(member, hand))
 
 
+async def send_player_hand_update(
+    guild: discord.Guild | None,
+    user_id: int,
+    state: dict,
+    *,
+    include_candidates: bool = True,
+):
+    if not guild:
+        return
+    member = guild.get_member(user_id)
+    if not member:
+        return
+    hand = state["hands"].get(str(user_id), [])
+    candidates = legal_groups(hand, state) if include_candidates else None
+    try:
+        await send_hand(member, hand, candidates)
+    except Exception:
+        pass
+
+
 def clear_field(state: dict):
     state["last_play"] = None
     state["last_info"] = None
@@ -471,6 +491,14 @@ async def advance_turn(state: dict):
         state["turn_index"] = (state["turn_index"] + 1) % len(players)
         if players[state["turn_index"]] in active:
             return
+
+
+async def edit_daifugo_message(interaction: discord.Interaction, **kwargs):
+    if interaction.response.is_done():
+        if interaction.message:
+            await interaction.message.edit(**kwargs)
+    else:
+        await interaction.response.edit_message(**kwargs)
 
 
 def apply_capital_fall(state: dict, winner_id: int) -> str:
@@ -497,7 +525,7 @@ async def end_if_needed(interaction: discord.Interaction, state: dict) -> bool:
     ranking = "\n".join(f"{index + 1}. <@{uid}>" for index, uid in enumerate(ranking_order))
     await delete_daifugo_game(interaction.guild_id or state.get("guild_id"), str(interaction.channel_id))
     daifugo_games.pop(str(interaction.channel_id), None)
-    await interaction.response.edit_message(content=f"**大富豪終了**\n{ranking}", view=None)
+    await edit_daifugo_message(interaction, content=f"**大富豪終了**\n{ranking}", view=None)
     return True
 
 
@@ -505,14 +533,8 @@ async def update_table(interaction: discord.Interaction, state: dict, prefix: st
     game_id = str(interaction.channel_id)
     current = state["players"][state["turn_index"]]
     await save_daifugo_game(interaction.guild_id or state.get("guild_id"), game_id, state)
-    member = interaction.guild.get_member(current) if interaction.guild else None
-    if member:
-        try:
-            hand = state["hands"][str(current)]
-            await send_hand(member, hand, legal_groups(hand, state))
-        except Exception:
-            pass
-    await interaction.response.edit_message(content=status_text(state, prefix), view=DaifugoPlayView(game_id, current))
+    await send_player_hand_update(interaction.guild, current, state)
+    await edit_daifugo_message(interaction, content=status_text(state, prefix), view=DaifugoPlayView(game_id, current))
 
 
 class DaifugoPlayView(discord.ui.View):
@@ -572,6 +594,7 @@ async def play_cards(interaction: discord.Interaction, game_id: str, user_id: in
         await interaction.response.send_message("そのカードは今出せません。", ephemeral=True)
         return
 
+    await interaction.response.defer()
     previous_info = state.get("last_info")
     info = group_info(cards)
     for card in cards:
@@ -598,6 +621,8 @@ async def play_cards(interaction: discord.Interaction, game_id: str, user_id: in
         prefix += apply_capital_fall(state, user_id)
         if await end_if_needed(interaction, state):
             return
+    elif hand:
+        await send_player_hand_update(interaction.guild, user_id, state, include_candidates=False)
 
     if eight_cut:
         clear_field(state)
@@ -623,6 +648,7 @@ async def pass_turn(interaction: discord.Interaction, game_id: str, user_id: int
         await interaction.response.send_message("場が空なのでパスできません。", ephemeral=True)
         return
 
+    await interaction.response.defer()
     state["passed"].append(user_id)
     active = [uid for uid in active_players(state) if uid != state.get("last_player")]
     prefix = f"<@{user_id}> がパスしました。"
