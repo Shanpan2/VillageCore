@@ -88,11 +88,12 @@ def load_roles() -> list[Role]:
             features["team_impostor"] = team == "impostor"
             features["team_neutral"] = team == "neutral"
             features["team_liberal"] = team == "liberal"
+            mod = (row.get("mod") or "Unknown").strip()
             roles.append(
                 Role(
                     name=name,
                     display_name=display_name,
-                    mod=(row.get("mod") or "Unknown").strip(),
+                    mod=mod,
                     features=features,
                 )
             )
@@ -102,15 +103,17 @@ def load_roles() -> list[Role]:
 def best_question(candidates: list[Role], asked: set[str]) -> str | None:
     best_key = None
     best_score = -1
-    total = len(candidates)
     for key in FEATURE_QUESTIONS:
         if key in asked:
             continue
         yes_count = sum(1 for role in candidates if role.features.get(key) is True)
         no_count = sum(1 for role in candidates if role.features.get(key) is False)
+        known_count = yes_count + no_count
         if yes_count == 0 or no_count == 0:
             continue
-        score = min(yes_count, no_count) - abs((total / 2) - yes_count) * 0.01
+        balance = min(yes_count, no_count)
+        coverage_bonus = known_count * 0.05
+        score = balance + coverage_bonus
         if score > best_score:
             best_key = key
             best_score = score
@@ -128,11 +131,13 @@ class GuessSession:
         if answer is None or not self.current_question:
             return
         key = self.current_question
-        self.candidates = [
+        matched = [
             role
             for role in self.candidates
-            if role.features.get(key) is None or role.features.get(key) == answer
+            if role.features.get(key) == answer
         ]
+        if matched:
+            self.candidates = matched
 
     def next_question(self) -> str | None:
         key = best_question(self.candidates, self.asked)
