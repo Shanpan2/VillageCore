@@ -142,11 +142,21 @@ class GuessSession:
                 self.candidates = [role for role in self.candidates if role.name != guessed_name]
             return
 
-        matched = [
-            role
-            for role in self.candidates
-            if role.features.get(key) == answer
-        ]
+        matched = []
+        for role in self.candidates:
+            feature = role.features.get(key)
+            if feature == answer:
+                matched.append(role)
+                continue
+            # Most imported role data is incomplete. A blank feature should not
+            # eliminate a role when the user answers "no" to a capability.
+            if answer is False and feature is None:
+                matched.append(role)
+                continue
+            # Task assignment can differ between vanilla-like host roles and
+            # client/mod roles, so unknown task data should stay flexible.
+            if key == "has_tasks" and feature is None:
+                matched.append(role)
         if matched:
             self.candidates = matched
             return
