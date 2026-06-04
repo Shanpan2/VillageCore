@@ -1,5 +1,6 @@
-import random
 import json
+import random
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -22,8 +23,8 @@ PUZZLE_FILE = Path("assets/shogi/shogi_puzzles.json")
 
 LEVELS = {
     "easy": {"label": "初級", "reward": 2, "description": "1手詰め中心。まずは気軽に。"},
-    "normal": {"label": "中級", "reward": 5, "description": "少し読む問題。慣れてきた人向け。"},
-    "hard": {"label": "上級", "reward": 8, "description": "読みが必要な問題。腕試し向け。"},
+    "normal": {"label": "中級", "reward": 5, "description": "3手詰め中心。相手の応手を読んで進めます。"},
+    "hard": {"label": "上級", "reward": 8, "description": "5手詰め中心。数手先まで読む腕試し向け。"},
 }
 
 PIECES = {
@@ -230,10 +231,13 @@ def load_puzzles() -> list[dict]:
             "sfen": str(item["sfen"]),
             "answer": str(item["answer"]),
             "answer_text": str(item.get("answer_text") or item["answer"]),
+            "mate_moves": int(item.get("mate_moves") or 1),
             "explanation": str(item.get("explanation", "解説はまだ登録されていません。")),
             "source": str(item.get("source", "unknown")),
             "license": str(item.get("license", "unknown")),
         }
+        if isinstance(item.get("solution"), list):
+            puzzle["solution"] = [str(move) for move in item["solution"] if move]
         if isinstance(item.get("options"), list):
             puzzle["options"] = item["options"]
         puzzles.append(puzzle)
@@ -295,6 +299,58 @@ def answer_text(puzzle: dict) -> str:
         (option_label(option) for option in puzzle.get("options", []) if option_value(option) == puzzle.get("answer")),
         str(puzzle.get("answer", "")),
     )
+
+
+def runtime_puzzle(puzzle: dict) -> dict:
+    state = deepcopy(puzzle)
+    state["_initial_sfen"] = state.get("sfen", "")
+    state["_progress"] = 0
+    if "solution" not in state:
+        state["solution"] = [state["answer"]]
+    if not state.get("mate_moves"):
+        state["mate_moves"] = len(state["solution"])
+    return state
+
+
+def solution_moves(puzzle: dict) -> list[str]:
+    moves = puzzle.get("solution")
+    if isinstance(moves, list) and moves:
+        return [str(move) for move in moves]
+    return [str(puzzle.get("answer", ""))]
+
+
+def current_solution_move(puzzle: dict) -> str | None:
+    moves = solution_moves(puzzle)
+    progress = int(puzzle.get("_progress", 0) or 0)
+    if progress >= len(moves):
+        return None
+    return moves[progress]
+
+
+def push_solution_move(puzzle: dict, move_value: str) -> tuple[bool, str]:
+    if shogi is None:
+        if len(solution_moves(puzzle)) <= 1:
+            puzzle["_progress"] = int(puzzle.get("_progress", 0) or 0) + 1
+            return True, ""
+        return False, "将棋判定ライブラリが未導入のため、複数手の問題を進められません。"
+    try:
+        board = shogi.Board(puzzle_sfen(puzzle))
+        move = shogi.Move.from_usi(move_value)
+    except Exception as exc:
+        return False, f"局面または手の解析に失敗しました: {exc}"
+    if not any(move == legal_move for legal_move in board.legal_moves):
+        return False, "手順内の手が現在の局面では合法手ではありません。問題データを確認してください。"
+    board.push(move)
+    puzzle["sfen"] = board.sfen()
+    puzzle["_progress"] = int(puzzle.get("_progress", 0) or 0) + 1
+    return True, ""
+
+
+def solution_progress_text(puzzle: dict) -> str:
+    moves = solution_moves(puzzle)
+    user_turn = int(puzzle.get("_progress", 0) or 0) // 2 + 1
+    total_user_turns = (len(moves) + 1) // 2
+    return f"{user_turn}/{total_user_turns}手目"
 
 
 def parse_sfen_piece(token: str) -> tuple[str, str]:
@@ -384,7 +440,7 @@ USI_PIECE_TO_TEXT = {
 def square_label(square: str) -> str:
     if len(square) != 2:
         return square
-    return f"{square[0]}{RANK_TO_JA.get(square[1], square[1])}"
+    return f"{square[0]}筋{RANK_TO_JA.get(square[1], square[1])}段"
 
 
 def piece_at_usi_square(puzzle: dict, square: str) -> str:
@@ -595,8 +651,8 @@ def render_puzzle_image(
     hand = puzzle_hands(puzzle).get("sente", [])
     hand_text = " ".join(piece_text(piece) for piece in hand) if hand else "なし"
     draw.text((board_left + board_size + 36, 154), hand_text, fill=(255, 245, 210), font=small_font)
-    draw.text((board_left + board_size + 36, 216), "動かす駒と移動先を", fill=(220, 236, 222), font=small_font)
-    draw.text((board_left + board_size + 36, 246), "選んでください。", fill=(220, 236, 222), font=small_font)
+    draw.text((board_left + board_size + 36, 216), "上の数字が筋、", fill=(220, 236, 222), font=small_font)
+    draw.text((board_left + board_size + 36, 246), "左の漢数字が段です。", fill=(220, 236, 222), font=small_font)
 
     draw.rectangle(
         (board_left, board_top, board_left + board_size, board_top + board_size),
@@ -616,7 +672,8 @@ def render_puzzle_image(
         draw.text((x, board_top - 25), str(file_num), fill=(235, 235, 220), font=coord_font)
     for rank in range(1, 10):
         y = board_top + (rank - 1) * cell + 24
-        draw.text((board_left - 28, y), str(rank), fill=(235, 235, 220), font=coord_font)
+        rank_label = RANK_TO_JA["abcdefghi"[rank - 1]]
+        draw.text((board_left - 28, y), rank_label, fill=(235, 235, 220), font=coord_font)
 
     destination_hints = destination_hints or set()
     source_coord = usi_square_to_coord(selected_source) if selected_source and "*" not in selected_source else None
@@ -731,7 +788,7 @@ class ShogiSourceSelect(discord.ui.Select):
         hints = destination_squares_for_source(view.puzzle, source)
         await interaction.response.edit_message(
             content=(
-                f"移動元: **{move_source_label(view.puzzle, source)}**\n"
+                f"移動元: **{move_source_label(view.puzzle, source)}** ({solution_progress_text(view.puzzle)})\n"
                 "青いマスが移動できる候補です。移動先を選んでください。"
             ),
             attachments=[
@@ -778,24 +835,74 @@ class ShogiDestinationSelect(discord.ui.Select):
             return
 
         puzzle = view.puzzle
-        correct = selected == puzzle["answer"]
-        correct_text = answer_text(puzzle)
+        expected = current_solution_move(puzzle) or puzzle["answer"]
+        correct = selected == expected
+        correct_text = move_label(puzzle, expected)
         selected_text = move_label(puzzle, selected)
         legal, mate, analysis_text = analyze_move(puzzle, selected)
-        for item in view.children:
-            item.disabled = True
 
-        if correct:
+        if not correct:
+            for item in view.children:
+                item.disabled = True
+            result = f"惜しいです。選んだ手は **{selected_text}** です。\nこの局面の正解は **{correct_text}** です。"
+            if analysis_text:
+                result += f"\n\n判定: {analysis_text}"
+            if legal and mate:
+                result += "\n選んだ手も詰み判定になりました。問題側の正解候補を見直す必要があります。"
+            result += f"\n\n解説: {puzzle['explanation']}"
+            await interaction.response.edit_message(content=result, view=view)
+            return
+
+        ok, error = push_solution_move(puzzle, selected)
+        if not ok:
+            for item in view.children:
+                item.disabled = True
+            await interaction.response.edit_message(content=f"正解手でしたが、局面更新に失敗しました。\n{error}", view=view)
+            return
+
+        moves = solution_moves(puzzle)
+        if int(puzzle.get("_progress", 0) or 0) >= len(moves):
+            for item in view.children:
+                item.disabled = True
             _, reward_text = await grant_reward(interaction, puzzle["level"])
-            result = f"正解です！ **{correct_text}**\n{reward_text}"
-        else:
-            result = f"惜しいです。選んだ手は **{selected_text}** です。\n正解は **{correct_text}** です。"
-        if analysis_text:
-            result += f"\n\n判定: {analysis_text}"
-        if legal and mate and not correct:
-            result += "\n選んだ手も詰み判定になりました。問題側の正解候補を見直す必要があります。"
-        result += f"\n\n解説: {puzzle['explanation']}"
-        await interaction.response.edit_message(content=result, view=view)
+            result = f"正解です！ **{selected_text}**\n{reward_text}"
+            if analysis_text:
+                result += f"\n\n判定: {analysis_text}"
+            result += f"\n\n解説: {puzzle['explanation']}"
+            await interaction.response.edit_message(
+                content=result,
+                attachments=[render_puzzle_image(puzzle)],
+                view=view,
+            )
+            return
+
+        reply = current_solution_move(puzzle)
+        reply_label = move_label(puzzle, reply) if reply else ""
+        if reply:
+            ok, error = push_solution_move(puzzle, reply)
+            if not ok:
+                for item in view.children:
+                    item.disabled = True
+                await interaction.response.edit_message(content=f"正解手でしたが、応手の局面更新に失敗しました。\n{error}", view=view)
+                return
+
+        if int(puzzle.get("_progress", 0) or 0) >= len(moves):
+            for item in view.children:
+                item.disabled = True
+            _, reward_text = await grant_reward(interaction, puzzle["level"])
+            result = f"正解です！ **{selected_text}**\n{reward_text}\n\n解説: {puzzle['explanation']}"
+            await interaction.response.edit_message(content=result, attachments=[render_puzzle_image(puzzle)], view=view)
+            return
+
+        await interaction.response.edit_message(
+            content=(
+                f"正解です。**{selected_text}**\n"
+                f"応手: **{reply_label}**\n\n"
+                f"次の一手を選んでください。({solution_progress_text(puzzle)})"
+            ),
+            attachments=[render_puzzle_image(puzzle)],
+            view=ShogiPuzzleSourceView(puzzle, view.owner_id),
+        )
 
 
 class ShogiBackButton(discord.ui.Button):
@@ -808,7 +915,7 @@ class ShogiBackButton(discord.ui.Button):
             await interaction.response.send_message("この詰将棋に回答できるのは開始した人だけです。", ephemeral=True)
             return
         await interaction.response.edit_message(
-            content="動かす駒を選んでください。",
+            content=f"動かす駒を選んでください。({solution_progress_text(view.puzzle)})",
             attachments=[render_puzzle_image(view.puzzle)],
             view=ShogiPuzzleSourceView(view.puzzle, view.owner_id),
         )
@@ -834,12 +941,14 @@ class ShogiPuzzleLevelButton(discord.ui.Button):
         self.level = level
 
     async def callback(self, interaction: discord.Interaction):
-        puzzle = puzzle_for_level(self.level)
+        puzzle = runtime_puzzle(puzzle_for_level(self.level))
         level = LEVELS[self.level]
         content = (
             f"**詰将棋: {level['label']}**\n"
             f"{level['description']}\n"
-            "動かす駒と移動先を選んでください。\n"
+            f"問題: **{puzzle.get('mate_moves', 1)}手詰め**\n"
+            "動かす駒と移動先を選んでください。3手/5手詰めは、相手の応手をBotが自動で進めます。\n"
+            "座標は「数字=筋、漢数字=段」です。例: 5二 は5筋二段です。\n"
             f"正解すると **{level['reward']}コイン** 獲得できます。同じレベルの報酬は1日1回までです。"
         )
         if shogi is None:
@@ -864,9 +973,10 @@ class ShogiPuzzleRulesButton(discord.ui.Button):
         embed = discord.Embed(
             title="詰将棋の遊び方",
             description=(
-                "表示された盤面で、相手玉を詰ます最初の一手を選びます。\n"
+                "表示された盤面で、相手玉を詰ます手順を選びます。\n"
                 "まず動かす駒を選び、次に移動先を選んで回答します。\n"
-                "初級は1手詰め中心、中級と上級は読みが必要な問題です。\n"
+                "3手/5手詰めでは、相手の応手はBotが自動で進め、次の一手を続けて選べます。\n"
+                "座標は、横が数字の筋、縦が漢数字の段です。例: 5二 は5筋二段です。\n"
                 "正解するとコインがもらえますが、同じレベルの報酬は1日1回までです。\n\n"
                 "報酬: 初級2 / 中級5 / 上級8 コイン"
             ),
@@ -885,8 +995,8 @@ def shogi_puzzle_embed() -> discord.Embed:
         color=0xD6A24A,
     )
     embed.add_field(name="初級", value="1手詰め中心 / 2コイン", inline=True)
-    embed.add_field(name="中級", value="少し読む問題 / 5コイン", inline=True)
-    embed.add_field(name="上級", value="腕試し / 8コイン", inline=True)
+    embed.add_field(name="中級", value="3手詰め中心 / 5コイン", inline=True)
+    embed.add_field(name="上級", value="5手詰め中心 / 8コイン", inline=True)
     return embed
 
 
