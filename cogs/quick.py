@@ -38,6 +38,7 @@ from Features.othello import (
 from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount, start_poker_game
 from Features.sevens import SUITS as SEVENS_SUITS
 from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games, start_sevens_game
+from Features.shogi_puzzle import ShogiPuzzleLevelView, shogi_puzzle_embed
 from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games, start_uno_game
 from Features.werewolf import (
     WerewolfLobbyView,
@@ -122,7 +123,7 @@ def quick_embed() -> discord.Embed:
     )
     embed.add_field(
         name="ゲーム",
-        value="ゲームボタンから、UNO / 7並べ / 大富豪 / ポーカー / オセロ / Ito / コードネーム / 人狼を選べます。",
+        value="ゲームボタンから、UNO / 7並べ / 大富豪 / ポーカー / オセロ / 詰将棋 / Ito / コードネーム / 人狼を選べます。",
         inline=False,
     )
     embed.add_field(
@@ -893,6 +894,7 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label="大富豪", value="daifugo", description="手札を早く出し切る定番トランプゲーム"),
             discord.SelectOption(label="ポーカー", value="poker", description="5枚の役で勝負するトランプゲーム"),
             discord.SelectOption(label="オセロ", value="othello", description="盤面に石を置いて相手の石を裏返すゲーム"),
+            discord.SelectOption(label="詰将棋", value="shogi_puzzle", description="レベル別の詰将棋に挑戦してコインを獲得"),
             discord.SelectOption(label="Ito", value="ito", description="数字を言わずに例えで順番を当てる協力ゲーム"),
             discord.SelectOption(label="コードネーム", value="codenames", description="ヒントから味方チームの単語を当てるチームゲーム"),
             discord.SelectOption(label="人狼", value="werewolf", description="会話と投票で人狼を探す正体隠匿ゲーム"),
@@ -901,6 +903,9 @@ class GameSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         game = self.values[0]
+        if game == "shogi_puzzle":
+            await interaction.response.send_message(embed=shogi_puzzle_embed(), view=ShogiPuzzleLevelView())
+            return
         label, _ = GAME_STORES[game]
         if game == "othello":
             await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
