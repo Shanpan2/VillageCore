@@ -15,6 +15,24 @@ ROLE_GUESSER_TOKEN = os.getenv("ROLE_GUESSER_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
 DATA_PATH = Path(__file__).with_name("data") / "roles.csv"
 
+MOD_ALIASES = {
+    "vanilla": "Vanilla",
+    "among us": "Vanilla",
+    "amongus": "Vanilla",
+    "バニラ": "Vanilla",
+    "town of host": "TOH",
+    "toh": "TOH",
+    "tohk": "TOHK",
+    "supernewroles": "SNR",
+    "super new roles": "SNR",
+    "snr": "SNR",
+    "extremeroles": "ExR",
+    "extreme roles": "ExR",
+    "exr": "ExR",
+    "torgmia": "TORGMIA",
+    "nos": "NOS",
+}
+
 FEATURE_QUESTIONS = {
     "team_crewmate": "その役職はクルー陣営ですか？",
     "team_impostor": "その役職はインポスター陣営ですか？",
@@ -167,6 +185,16 @@ def parse_bool(value: str | None) -> bool | None:
     return None
 
 
+def normalize_mod_name(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return "Unknown"
+    key = raw.lower().replace("_", " ").replace("-", " ")
+    key = " ".join(key.split())
+    compact_key = key.replace(" ", "")
+    return MOD_ALIASES.get(key) or MOD_ALIASES.get(compact_key) or raw
+
+
 def load_roles() -> list[Role]:
     if not DATA_PATH.exists():
         return []
@@ -188,7 +216,7 @@ def load_roles() -> list[Role]:
             features["team_impostor"] = team == "impostor"
             features["team_neutral"] = team == "neutral"
             features["team_liberal"] = team == "liberal"
-            mod = (row.get("mod") or "Unknown").strip()
+            mod = normalize_mod_name(row.get("mod"))
             roles.append(
                 Role(
                     name=name,
@@ -620,7 +648,7 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
         await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
         return
 
-    selected_mod = (mod or "").strip()
+    selected_mod = normalize_mod_name(mod) if mod else ""
     if selected_mod:
         matched_roles = [role for role in roles if role.mod.lower() == selected_mod.lower()]
         if not matched_roles:
@@ -649,7 +677,7 @@ async def quiz(interaction: discord.Interaction, mod: str | None = None):
         await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
         return
 
-    selected_mod = (mod or "").strip()
+    selected_mod = normalize_mod_name(mod) if mod else ""
     if selected_mod:
         matched_roles = [role for role in roles if role.mod.lower() == selected_mod.lower()]
         if not matched_roles:
