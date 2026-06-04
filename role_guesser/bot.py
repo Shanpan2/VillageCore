@@ -37,7 +37,7 @@ FEATURE_QUESTIONS = {
     "team_crewmate": "その役職はクルー陣営ですか？",
     "team_impostor": "その役職はインポスター陣営ですか？",
     "team_neutral": "その役職は第三陣営ですか？",
-    "team_liberal": "その役職はリベラル陣営ですか？",
+    "team_liberal": "リベラル陣営ですか？（リーダー/ドーヴ/ミリタントで資金を貯めて勝つ第四陣営）",
     "modifier_role": "メイン役職に追加で付く属性・モディファイアですか？",
     "can_kill": "自分の操作で誰かを死亡させる能力がありますか？",
     "normal_kill": "普通のキルボタンでキルする役職ですか？",
@@ -104,7 +104,7 @@ QUIZ_HINTS = {
     "team_crewmate": "クルー陣営の役職です。",
     "team_impostor": "インポスター陣営の役職です。",
     "team_neutral": "第三陣営の役職です。",
-    "team_liberal": "リベラル陣営の役職です。",
+    "team_liberal": "リベラル陣営の役職です。リーダーを中心に、資金を貯めて勝利を目指します。",
     "modifier_role": "元の役職に追加される役職・属性です。",
     "can_kill": "キル能力に関わります。",
     "normal_kill": "通常キルに関わります。",
@@ -256,6 +256,7 @@ class GuessSession:
         self.selected_mod = selected_mod
         self.asked: set[str] = set()
         self.current_question: str | None = None
+        self.last_result_names: set[str] = set()
 
     def apply_answer(self, answer: bool | None) -> None:
         if not self.current_question:
@@ -310,6 +311,17 @@ class GuessSession:
         if key:
             self.asked.add(key)
         return key
+
+    def reject_last_result(self) -> None:
+        if not self.last_result_names:
+            return
+        rejected = self.last_result_names
+        self.candidates = [role for role in self.candidates if role.name not in rejected]
+        self.last_result_names = set()
+        self.current_question = None
+        # A wrong final guess usually means an earlier split was too brittle.
+        # Clear the history so the retry can reuse useful questions if needed.
+        self.asked.clear()
 
 
 sessions: dict[int, GuessSession] = {}
@@ -422,6 +434,16 @@ def single_group_result(roles: list[Role]) -> discord.Embed | None:
     )
 
 
+def single_group_roles(roles: list[Role]) -> list[Role] | None:
+    display_names = {role.display_name for role in roles}
+    if len(display_names) != 1:
+        return None
+    signatures = {feature_signature(role) for role in roles}
+    if len(signatures) != 1:
+        return None
+    return roles
+
+
 def indistinguishable_result(roles: list[Role]) -> discord.Embed | None:
     if len(roles) <= 1:
         return None
@@ -440,6 +462,7 @@ def indistinguishable_result(roles: list[Role]) -> discord.Embed | None:
 
 
 def session_embed(session: GuessSession) -> discord.Embed:
+    session.last_result_names = set()
     if len(session.candidates) == 0:
         return discord.Embed(
             title="役職当て",
@@ -447,9 +470,10 @@ def session_embed(session: GuessSession) -> discord.Embed:
             color=0xE74C3C,
         )
 
-    grouped_result = single_group_result(session.candidates)
-    if grouped_result:
-        return grouped_result
+    grouped_roles = single_group_roles(session.candidates)
+    if grouped_roles:
+        session.last_result_names = {role.name for role in grouped_roles}
+        return single_group_result(grouped_roles)
 
     indistinguishable = indistinguishable_result(session.candidates)
     if indistinguishable:
@@ -457,6 +481,7 @@ def session_embed(session: GuessSession) -> discord.Embed:
 
     if len(session.candidates) == 1:
         role = session.candidates[0]
+        session.last_result_names = {role.name}
         name_line = f"**{role.display_name}**"
         if role.display_name != role.name:
             name_line += f" (`{role.name}`)"
@@ -501,7 +526,7 @@ def session_embed(session: GuessSession) -> discord.Embed:
         ),
         color=0x3498DB,
     )
-    embed.set_footer(text="質問の意味が分からない、設定次第で変わる、どちらとも言えない時は「どちらでもない/不明」を選んでください。")
+    embed.set_footer(text="質問の意味や陣営名が分からない、設定次第で変わる、どちらとも言えない時は「どちらでもない/不明」を選んでください。")
     return embed
 
 
@@ -528,10 +553,11 @@ class GuessView(discord.ui.View):
         session.apply_answer(value)
         session.current_question = None
         embed = session_embed(session)
+        if session.last_result_names:
+            await interaction.response.edit_message(embed=embed, view=GuessResultView(self.user_id))
+            return
         finished = (
-            len(session.candidates) <= 1
-            or single_group_result(session.candidates) is not None
-            or indistinguishable_result(session.candidates) is not None
+            indistinguishable_result(session.candidates) is not None
             or "候補がなくなりました" in embed.description
             or "候補をすべて確認しました" in embed.description
         )
@@ -550,6 +576,53 @@ class GuessView(discord.ui.View):
     @discord.ui.button(label="どちらでもない/不明", style=discord.ButtonStyle.secondary)
     async def unknown(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.answer(interaction, None)
+
+    @discord.ui.button(label="中止", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sessions.pop(self.user_id, None)
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="役職当て", description="ゲームを中止しました。", color=0x95A5A6),
+            view=None,
+        )
+
+
+class GuessResultView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("このゲームを始めた人だけが操作できます。", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="正解", style=discord.ButtonStyle.success)
+    async def correct(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sessions.pop(self.user_id, None)
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="役職当て", description="当たってよかったです。ゲームを終了しました。", color=0x2ECC71),
+            view=None,
+        )
+
+    @discord.ui.button(label="違う、続ける", style=discord.ButtonStyle.danger)
+    async def retry(self, interaction: discord.Interaction, button: discord.ui.Button):
+        session = sessions.get(self.user_id)
+        if not session:
+            await interaction.response.edit_message(
+                embed=discord.Embed(title="役職当て", description="このゲームは終了しています。", color=0x95A5A6),
+                view=None,
+            )
+            return
+
+        session.reject_last_result()
+        embed = session_embed(session)
+        if len(session.candidates) == 0:
+            sessions.pop(self.user_id, None)
+            await interaction.response.edit_message(embed=embed, view=None)
+            return
+        view: discord.ui.View | None = GuessResultView(self.user_id) if session.last_result_names else GuessView(self.user_id)
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="中止", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -665,7 +738,9 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
 
     session = GuessSession(interaction.user.id, roles, selected_mod)
     sessions[interaction.user.id] = session
-    await interaction.response.send_message(embed=session_embed(session), view=GuessView(interaction.user.id))
+    embed = session_embed(session)
+    view: discord.ui.View = GuessResultView(interaction.user.id) if session.last_result_names else GuessView(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view)
 
 
 @role_bot.tree.command(name="quiz", description="Among Us系Modの役職クイズを出します")
