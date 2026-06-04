@@ -1,0 +1,15 @@
+[
+  {
+    "id": "sample_easy_001",
+    "level": "easy",
+    "title": "サンプル 1手詰め",
+    "side": "先手",
+    "sfen": "4k4/4s4/4R4/9/9/9/9/9/K8 b - 1",
+    "answer": "5c5b+",
+    "answer_text": "飛 5三→5二成",
+    "mate_moves": 1,
+    "explanation": "飛車を5三から5二へ成って、玉の逃げ道をふさぐ形です。",
+    "source": "original",
+    "license": "original"
+  }
+]

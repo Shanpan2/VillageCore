@@ -1,6 +1,8 @@
 import random
+import json
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -16,6 +18,7 @@ except ModuleNotFoundError:
 
 
 JST = timezone(timedelta(hours=9))
+PUZZLE_FILE = Path("assets/shogi/shogi_puzzles.json")
 
 LEVELS = {
     "easy": {"label": "初級", "reward": 2, "description": "1手詰め中心。まずは気軽に。"},
@@ -48,6 +51,7 @@ PUZZLES = [
         "side": "先手",
         "pieces": {
             (5, 1): ("gote", "K"),
+            (5, 2): ("gote", "S"),
             (5, 3): ("sente", "R"),
             (4, 2): ("sente", "G"),
             (6, 2): ("sente", "G"),
@@ -197,8 +201,43 @@ def jst_today() -> str:
 
 
 def puzzle_for_level(level: str) -> dict:
-    candidates = [puzzle for puzzle in PUZZLES if puzzle["level"] == level]
+    candidates = [puzzle for puzzle in load_puzzles() if puzzle["level"] == level]
+    if not candidates:
+        candidates = [puzzle for puzzle in PUZZLES if puzzle["level"] == level]
     return random.choice(candidates)
+
+
+def load_puzzles() -> list[dict]:
+    if not PUZZLE_FILE.exists() or PUZZLE_FILE.stat().st_size <= 0:
+        return PUZZLES
+    try:
+        raw = json.loads(PUZZLE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return PUZZLES
+    if not isinstance(raw, list):
+        return PUZZLES
+    puzzles = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        if not all(item.get(key) for key in ("id", "level", "title", "sfen", "answer")):
+            continue
+        puzzle = {
+            "id": str(item["id"]),
+            "level": str(item["level"]),
+            "title": str(item["title"]),
+            "side": str(item.get("side", "先手")),
+            "sfen": str(item["sfen"]),
+            "answer": str(item["answer"]),
+            "answer_text": str(item.get("answer_text") or item["answer"]),
+            "explanation": str(item.get("explanation", "解説はまだ登録されていません。")),
+            "source": str(item.get("source", "unknown")),
+            "license": str(item.get("license", "unknown")),
+        }
+        if isinstance(item.get("options"), list):
+            puzzle["options"] = item["options"]
+        puzzles.append(puzzle)
+    return puzzles or PUZZLES
 
 
 def load_font(size: int, bold: bool = False):
@@ -258,6 +297,67 @@ def answer_text(puzzle: dict) -> str:
     )
 
 
+def parse_sfen_piece(token: str) -> tuple[str, str]:
+    promoted = token.startswith("+")
+    if promoted:
+        token = token[1:]
+    owner = "sente" if token.isupper() else "gote"
+    piece = token.upper()
+    return owner, f"+{piece}" if promoted else piece
+
+
+def pieces_from_sfen(sfen: str) -> dict[tuple[int, int], tuple[str, str]]:
+    board_part = sfen.split()[0]
+    pieces = {}
+    for rank_index, row in enumerate(board_part.split("/"), start=1):
+        file_num = 9
+        index = 0
+        while index < len(row):
+            char = row[index]
+            if char.isdigit():
+                file_num -= int(char)
+                index += 1
+                continue
+            token = char
+            if char == "+" and index + 1 < len(row):
+                token = row[index:index + 2]
+                index += 2
+            else:
+                index += 1
+            pieces[(file_num, rank_index)] = parse_sfen_piece(token)
+            file_num -= 1
+    return pieces
+
+
+def hands_from_sfen(sfen: str) -> dict[str, list[str]]:
+    parts = sfen.split()
+    if len(parts) < 3 or parts[2] == "-":
+        return {"sente": [], "gote": []}
+    hands = {"sente": [], "gote": []}
+    count_text = ""
+    for char in parts[2]:
+        if char.isdigit():
+            count_text += char
+            continue
+        count = int(count_text or "1")
+        count_text = ""
+        owner = "sente" if char.isupper() else "gote"
+        hands[owner].extend([char.upper()] * count)
+    return hands
+
+
+def puzzle_pieces(puzzle: dict) -> dict[tuple[int, int], tuple[str, str]]:
+    if "pieces" in puzzle:
+        return puzzle["pieces"]
+    return pieces_from_sfen(puzzle["sfen"])
+
+
+def puzzle_hands(puzzle: dict) -> dict[str, list[str]]:
+    if "hands" in puzzle:
+        return puzzle["hands"]
+    return hands_from_sfen(puzzle["sfen"])
+
+
 RANK_TO_JA = {
     "a": "一",
     "b": "二",
@@ -292,7 +392,7 @@ def piece_at_usi_square(puzzle: dict, square: str) -> str:
         return ""
     file_num = int(square[0])
     rank = "abcdefghi".index(square[1]) + 1
-    item = puzzle["pieces"].get((file_num, rank))
+    item = puzzle_pieces(puzzle).get((file_num, rank))
     if not item:
         return ""
     return piece_text(item[1])
@@ -304,6 +404,18 @@ def move_source_key(move_value: str) -> str:
 
 def move_destination_key(move_value: str) -> str:
     return move_value[2:4] if "*" in move_value[:2] else move_value[2:4]
+
+
+def gote_king_square(puzzle: dict) -> str | None:
+    for (file_num, rank), (owner, piece) in puzzle_pieces(puzzle).items():
+        if owner == "gote" and piece == "K":
+            return f"{file_num}{'abcdefghi'[rank - 1]}"
+    return None
+
+
+def move_targets_gote_king(puzzle: dict, move_value: str) -> bool:
+    king_square = gote_king_square(puzzle)
+    return bool(king_square and move_destination_key(move_value) == king_square)
 
 
 def usi_square_to_coord(square: str) -> tuple[int, int] | None:
@@ -338,12 +450,12 @@ def fallback_move_values(puzzle: dict) -> list[str]:
 
 def legal_move_values(puzzle: dict) -> list[str]:
     if shogi is None:
-        return fallback_move_values(puzzle)
+        return [move for move in fallback_move_values(puzzle) if not move_targets_gote_king(puzzle, move)]
     try:
         board = shogi.Board(puzzle_sfen(puzzle))
-        return sorted({move.usi() for move in board.legal_moves})
+        return sorted({move.usi() for move in board.legal_moves if not move_targets_gote_king(puzzle, move.usi())})
     except Exception:
-        return fallback_move_values(puzzle)
+        return [move for move in fallback_move_values(puzzle) if not move_targets_gote_king(puzzle, move)]
 
 
 def source_options(puzzle: dict) -> list[discord.SelectOption]:
@@ -413,12 +525,14 @@ def sfen_hands(hands: dict) -> str:
 
 
 def puzzle_sfen(puzzle: dict) -> str:
+    if puzzle.get("sfen"):
+        return puzzle["sfen"]
     rows = []
     for rank in range(1, 10):
         empty = 0
         row_parts = []
         for file_num in range(9, 0, -1):
-            item = puzzle["pieces"].get((file_num, rank))
+            item = puzzle_pieces(puzzle).get((file_num, rank))
             if not item:
                 empty += 1
                 continue
@@ -430,10 +544,12 @@ def puzzle_sfen(puzzle: dict) -> str:
         if empty:
             row_parts.append(str(empty))
         rows.append("".join(row_parts))
-    return f"{'/'.join(rows)} b {sfen_hands(puzzle.get('hands', {}))} 1"
+    return f"{'/'.join(rows)} b {sfen_hands(puzzle_hands(puzzle))} 1"
 
 
 def analyze_move(puzzle: dict, move_value: str) -> tuple[bool | None, bool | None, str]:
+    if move_targets_gote_king(puzzle, move_value):
+        return False, False, "王を取る手は詰将棋の回答として扱いません。王を逃げられない状態にする手を選んでください。"
     if shogi is None:
         return None, None, ""
     try:
@@ -476,7 +592,7 @@ def render_puzzle_image(
     draw.text((34, 22), f"詰将棋 - {puzzle['title']}", fill=(255, 255, 255), font=title_font)
     draw.text((board_left + board_size + 36, 84), f"手番: {puzzle['side']}", fill=(255, 245, 210), font=small_font)
     draw.text((board_left + board_size + 36, 122), "持ち駒", fill=(255, 255, 255), font=small_font)
-    hand = puzzle.get("hands", {}).get("sente", [])
+    hand = puzzle_hands(puzzle).get("sente", [])
     hand_text = " ".join(piece_text(piece) for piece in hand) if hand else "なし"
     draw.text((board_left + board_size + 36, 154), hand_text, fill=(255, 245, 210), font=small_font)
     draw.text((board_left + board_size + 36, 216), "動かす駒と移動先を", fill=(220, 236, 222), font=small_font)
@@ -529,7 +645,7 @@ def render_puzzle_image(
             width=5,
         )
 
-    for (file_num, rank), (owner, piece) in puzzle["pieces"].items():
+    for (file_num, rank), (owner, piece) in puzzle_pieces(puzzle).items():
         col = 9 - file_num
         row = rank - 1
         x = board_left + col * cell + 8
