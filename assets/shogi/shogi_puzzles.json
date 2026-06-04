@@ -1,15 +1,67 @@
 [
   {
-    "id": "sample_easy_001",
+    "id": "ai_easy_001",
     "level": "easy",
-    "title": "サンプル 1手詰め",
+    "title": "AI自作 1手詰め 001",
     "side": "先手",
-    "sfen": "4k4/4s4/4R4/9/9/9/9/9/K8 b - 1",
+    "sfen": "4k4/9/4R4/9/9/9/9/9/K8 b G 1",
+    "answer": "G*5b",
+    "answer_text": "金打 5二",
+    "mate_moves": 1,
+    "explanation": "金を5二に打つと、玉の周囲を金が押さえます。5二の金は5三の飛車に守られているため、玉は取ることも逃げることもできません。",
+    "source": "ai_original",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_easy_002",
+    "level": "easy",
+    "title": "AI自作 1手詰め 002",
+    "side": "先手",
+    "sfen": "4k4/4s4/3GRG3/9/9/9/9/9/K8 b - 1",
     "answer": "5c5b+",
     "answer_text": "飛 5三→5二成",
     "mate_moves": 1,
-    "explanation": "飛車を5三から5二へ成って、玉の逃げ道をふさぐ形です。",
-    "source": "original",
-    "license": "original"
+    "explanation": "飛車で5二の銀を取りながら成ります。龍は4三と6三の金に守られているため、玉は龍を取れません。",
+    "source": "ai_original",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_easy_003",
+    "level": "easy",
+    "title": "AI自作 1手詰め 003",
+    "side": "先手",
+    "sfen": "2k6/9/2R6/9/9/9/9/9/K8 b G 1",
+    "answer": "G*7b",
+    "answer_text": "金打 7二",
+    "mate_moves": 1,
+    "explanation": "金を7二に打つと、8一・7一・6一・8二・6二を押さえます。7二の金は7三の飛車に守られています。",
+    "source": "ai_original",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_easy_004",
+    "level": "easy",
+    "title": "AI自作 1手詰め 004",
+    "side": "先手",
+    "sfen": "6k2/9/6R2/9/9/9/9/9/K8 b G 1",
+    "answer": "G*3b",
+    "answer_text": "金打 3二",
+    "mate_moves": 1,
+    "explanation": "金を3二に打つと、玉の逃げ道をまとめて押さえます。3二の金は3三の飛車に守られているため、玉は取れません。",
+    "source": "ai_original",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_easy_005",
+    "level": "easy",
+    "title": "AI自作 1手詰め 005",
+    "side": "先手",
+    "sfen": "1k7/9/1R7/9/9/9/9/9/K8 b G 1",
+    "answer": "G*8b",
+    "answer_text": "金打 8二",
+    "mate_moves": 1,
+    "explanation": "金を8二に打つと、玉の周囲を金が押さえます。8二の金は8三の飛車に守られているため、玉は取れません。",
+    "source": "ai_original",
+    "license": "original_for_villagecore"
   }
 ]

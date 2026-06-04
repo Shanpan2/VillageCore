@@ -135,6 +135,7 @@ async def load_cogs():
         "Features.poker",
         "Features.role_panel",
         "Features.sevens",
+        "Features.shogi",
         "Features.shogi_puzzle",
         "Features.ticket",
         "Features.uno",
@@ -162,6 +163,7 @@ def register_persistent_views():
     from views.ticket_views import ClosedTicketView, TicketButtonView, TicketControlView
     from views.role_panel_views import LegacyRolePanelView, RolePanelView
     from cogs.quick import GameControlView, GameMenuView, OthelloModeView
+    from Features.shogi import ShogiPanelView
     from Features.shogi_puzzle import ShogiPuzzleLevelView
     # ★ AttendanceView は attendance.py に統合したため削除
     bot.add_view(TicketButtonView(bot))
@@ -171,6 +173,7 @@ def register_persistent_views():
     bot.add_view(LegacyRolePanelView())
     bot.add_view(GameMenuView())
     bot.add_view(OthelloModeView())
+    bot.add_view(ShogiPanelView())
     bot.add_view(ShogiPuzzleLevelView())
     for game in ("uno", "sevens", "daifugo", "poker", "othello", "ito", "codenames", "werewolf"):
         bot.add_view(GameControlView(game))
@@ -442,9 +445,9 @@ async def handle_help_site(request):
               今後は個別コマンドより <code>/game</code> をメイン導線にしていきます。
             </p>
           </div>
-          <p>UNO、7並べ、大富豪、ポーカー、オセロ、詰将棋、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
+          <p>UNO、7並べ、大富豪、ポーカー、オセロ、将棋、詰将棋、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
-            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、詰将棋、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
+            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、将棋、詰将棋、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
             <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。手札と操作はDM、公開チャンネルは1つの進行メッセージを編集して場札だけを表示します。</div>
             <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届き、公開パネルにはカード名を表示しません。</div>
             <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。出せる候補はDMで確認できます。</div>
