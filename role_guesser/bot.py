@@ -23,7 +23,10 @@ FEATURE_QUESTIONS = {
     "can_kill": "その役職はキルできますか？",
     "normal_kill": "通常のキルボタンでキルできますか？",
     "special_kill": "特殊能力でキルできますか？",
+    "target_power": "特定の対象を選ぶことが能力や勝利条件に関わりますか？",
     "target_kill_power": "指定された対象をキルすることが勝利や能力条件ですか？",
+    "guard_piercing_power": "ガードや防御を貫通するキル能力に関わりますか？",
+    "wave_cannon_power": "波動砲やビームに関わる能力ですか？",
     "uses_vent": "その役職はベントを使えますか？",
     "can_win_alone": "その役職は単独勝利できますか？",
     "additional_win": "他陣営の勝利に便乗して追加勝利しますか？",
@@ -34,6 +37,7 @@ FEATURE_QUESTIONS = {
     "meeting_message": "会議中や会議後に専用メッセージが出ますか？",
     "has_tasks": "その役職にはタスクがありますか？",
     "task_based_power": "タスク進行で能力が強くなったり発動したりしますか？",
+    "extra_task_power": "追加タスクや専用タスクが割り当てられますか？",
     "death_trigger": "死亡したときに能力が発動しますか？",
     "scheduled_death": "特定のタイミングで自動的に死亡しますか？",
     "ghost_role": "死亡後や幽霊状態で使う役職ですか？",
@@ -44,13 +48,18 @@ FEATURE_QUESTIONS = {
     "role_info_power": "他人の役職や陣営を知る能力がありますか？",
     "public_identity": "自分の役職や存在が他のプレイヤーに分かりますか？",
     "fake_identity": "他人から別陣営や別役職のように見えますか？",
+    "dummy_power": "ダミーや分身を表示する能力がありますか？",
     "body_info_power": "死体・死因・死亡位置に関わる情報を得られますか？",
     "body_clear_power": "死体を消したり処理したりできますか？",
+    "body_move_power": "死体を運んだり別の場所へ動かしたりできますか？",
     "delayed_kill": "キルが遅れて発生したり、呪いのように間接的に発生しますか？",
     "disguise_or_invisible": "変身・透明化・姿を偽る能力がありますか？",
     "area_effect": "周囲や部屋全体に影響する能力がありますか？",
     "sabotage_power": "サボタージュに関わる特別な能力がありますか？",
+    "lights_sabotage_power": "停電サボタージュに特化した能力や制限がありますか？",
+    "critical_sabotage_power": "リアクター・O2などの緊急サボタージュに特化した能力や制限がありますか？",
     "door_power": "ドアを開閉する能力がありますか？",
+    "specific_door_power": "特定の場所や設備のドアだけに作用しますか？",
     "revenge_kill": "自分を殺した相手を道連れにできますか？",
     "suicide_risk": "能力の代償や条件で自滅する可能性がありますか？",
     "conversion_power": "陣営変更・指名・感染などで他人の状態を変えますか？",
@@ -61,6 +70,7 @@ FEATURE_QUESTIONS = {
     "control_power": "他人を操作する能力がありますか？",
     "restriction_power": "他人の行動や移動を制限する能力がありますか？",
     "ranged_power": "遠距離から能力やキルを使えますか？",
+    "wall_piercing_power": "壁や障害物越しに能力やキルを通せますか？",
     "teleport_power": "テレポートや位置入れ替えに関わる能力ですか？",
     "cooldown_power": "キルクールや能力クールダウンを変化させますか？",
     "speed_power": "移動速度を変化させる能力がありますか？",
@@ -208,13 +218,17 @@ class GuessSession:
 sessions: dict[int, GuessSession] = {}
 
 
+def feature_signature(role: Role) -> tuple[tuple[str, bool | None], ...]:
+    return tuple((key, role.features.get(key)) for key in FEATURE_QUESTIONS)
+
+
 def grouped_candidate_text(roles: list[Role], limit: int = 10) -> str:
-    grouped: dict[str, list[Role]] = {}
+    grouped: dict[tuple[str, tuple[tuple[str, bool | None], ...]], list[Role]] = {}
     for role in roles:
-        grouped.setdefault(role.display_name, []).append(role)
+        grouped.setdefault((role.display_name, feature_signature(role)), []).append(role)
 
     lines = []
-    for display_name, items in list(grouped.items())[:limit]:
+    for (display_name, _), items in list(grouped.items())[:limit]:
         mods = " / ".join(sorted({role.mod for role in items}))
         lines.append(f"- {display_name} ({mods})")
     remaining = len(grouped) - limit
@@ -226,6 +240,9 @@ def grouped_candidate_text(roles: list[Role], limit: int = 10) -> str:
 def single_group_result(roles: list[Role]) -> discord.Embed | None:
     display_names = {role.display_name for role in roles}
     if len(display_names) != 1:
+        return None
+    signatures = {feature_signature(role) for role in roles}
+    if len(signatures) != 1:
         return None
     display_name = next(iter(display_names))
     mods = " / ".join(sorted({role.mod for role in roles}))
@@ -239,10 +256,7 @@ def single_group_result(roles: list[Role]) -> discord.Embed | None:
 def indistinguishable_result(roles: list[Role]) -> discord.Embed | None:
     if len(roles) <= 1:
         return None
-    signatures = {
-        tuple((key, role.features.get(key)) for key in FEATURE_QUESTIONS)
-        for role in roles
-    }
+    signatures = {feature_signature(role) for role in roles}
     if len(signatures) != 1:
         return None
     return discord.Embed(
@@ -308,7 +322,7 @@ def session_embed(session: GuessSession) -> discord.Embed:
                 color=0x2ECC71,
             )
 
-    return discord.Embed(
+    embed = discord.Embed(
         title="役職当て",
         description=(
             f"{FEATURE_QUESTIONS[key]}\n\n"
@@ -316,6 +330,8 @@ def session_embed(session: GuessSession) -> discord.Embed:
         ),
         color=0x3498DB,
     )
+    embed.set_footer(text="質問の意味が分からない、設定次第で変わる、どちらとも言えない時は「どちらでもない/不明」を選んでください。")
+    return embed
 
 
 class GuessView(discord.ui.View):
