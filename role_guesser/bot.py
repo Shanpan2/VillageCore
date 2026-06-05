@@ -268,6 +268,7 @@ FEATURE_QUESTIONS = {
     "killer_freeze_on_death_power": "キルされた時、キルした相手を一定時間動けなくしますか？",
     "oil_douse_win_power": "全生存者にオイルを塗り、ベントに入ることで勝利しますか？",
     "egoist_power": "インポスターを認識しつつ、インポスター全滅後に勝利を狙いますか？",
+    "pavlov_owner_dog_power": "オーナーが犬を指名し、犬がキル役として行動する役職ですか？",
 }
 
 QUIZ_HINTS = {
@@ -479,6 +480,7 @@ QUIZ_HINTS = {
     "killer_freeze_on_death_power": "キルした相手を拘束します。",
     "oil_douse_win_power": "全員にオイルを塗ってベントに入る勝利条件です。",
     "egoist_power": "インポスターを認識するが、インポスターとは競合します。",
+    "pavlov_owner_dog_power": "オーナーが犬を作り、犬はキル能力を持ちます。",
 }
 
 
@@ -815,6 +817,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "stress_power",
         "impostor_kill_win_power",
         "sidekick_creation_power",
+        "pavlov_owner_dog_power",
         "promotion_power",
         "missionary_power",
         "forced_kill_misfire_power",
