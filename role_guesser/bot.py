@@ -269,6 +269,7 @@ FEATURE_QUESTIONS = {
     "oil_douse_win_power": "全生存者にオイルを塗り、ベントに入ることで勝利しますか？",
     "egoist_power": "インポスターを認識しつつ、インポスター全滅後に勝利を狙いますか？",
     "pavlov_owner_dog_power": "オーナーが犬を指名し、犬がキル役として行動する役職ですか？",
+    "schrodinger_cat_power": "キルされそうになると防御し、キルしてきた相手の陣営に所属しますか？",
 }
 
 QUIZ_HINTS = {
@@ -481,6 +482,7 @@ QUIZ_HINTS = {
     "oil_douse_win_power": "全員にオイルを塗ってベントに入る勝利条件です。",
     "egoist_power": "インポスターを認識するが、インポスターとは競合します。",
     "pavlov_owner_dog_power": "オーナーが犬を作り、犬はキル能力を持ちます。",
+    "schrodinger_cat_power": "特定のキルを防いで、その相手の陣営に変化します。",
 }
 
 
@@ -956,6 +958,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "blood_trail_power",
         "suicide_risk",
         "vote_zero_power",
+        "schrodinger_cat_power",
     ]
     hints = [
         QUIZ_HINTS[key]
