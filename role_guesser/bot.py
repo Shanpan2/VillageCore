@@ -38,13 +38,18 @@ FEATURE_QUESTIONS = {
     "team_impostor": "その役職はインポスター陣営ですか？",
     "team_neutral": "その役職は第三陣営ですか？",
     "team_liberal": "リベラル陣営ですか？（リーダー/ドーヴ/ミリタントで資金を貯めて勝つ第四陣営）",
+    "team_madmate": "マッドメイト陣営・狂人系チームですか？",
+    "team_jackal": "ジャッカル陣営ですか？",
     "modifier_role": "メイン役職に追加で付く属性・モディファイアですか？",
+    "buff_modifier_power": "?????????????????????????",
+    "debuff_modifier_power": "????????????????????????????",
     "evil_support_power": "マッドメイトやジャッカルフレンズなど、別陣営を助ける補助・狂人系役職ですか？",
     "host_observer_power": "ホスト専用の観戦・GM系役職ですか？",
     "plain_role_power": "特殊能力はほぼなく、共通設定や視界だけが変わる役職ですか？",
     "emergency_repair_power": "サボタージュを即座に修理する能力がありますか？",
     "no_task_role": "タスクを持たない役職ですか？",
     "utility_restriction_power": "アドミン・バイタル・カメラ・緊急会議などの機器使用が制限されますか？",
+    "sabotage_repair_restriction_power": "特定のサボタージュ修理ができない役職/属性ですか？",
     "limited_kill_power": "キル可能回数に上限がありますか？",
     "task_kill_charge_power": "タスク進捗でキル回数やキルCTが変わりますか？",
     "can_kill": "自分の操作で誰かを死亡させる能力がありますか？",
@@ -53,10 +58,13 @@ FEATURE_QUESTIONS = {
     "target_power": "特定の相手を選ぶ能力ですか？（例: 指名、恋人化、投獄、ターゲット指定）",
     "target_kill_power": "特定の相手を殺す/死なせることが目的や能力条件ですか？（例: 賞金首、復讐対象、推測キル）",
     "guard_piercing_power": "ガードやシールドを貫通するキル能力がありますか？",
+    "kill_range_modifier_power": "??????????????????????",
+    "kill_power_boost_power": "?????????????????????????????",
     "wave_cannon_power": "波動砲・レーザー・ビームのような直線攻撃ですか？",
     "uses_vent": "その役職はベントを使えますか？",
     "can_win_alone": "その役職は単独勝利できますか？",
     "additional_win": "他陣営の勝利に便乗して追加勝利しますか？",
+    "extra_win_condition_power": "?????????????????????",
     "can_protect": "誰かを守る能力がありますか？（例: ガード、バリア、キル防止）",
     "can_investigate": "情報を調べる能力がありますか？（例: 役職/陣営/死因/位置を調査）",
     "portable_security_power": "どこでもセキュリティカメラやドアログを見られますか？",
@@ -90,8 +98,10 @@ FEATURE_QUESTIONS = {
     "meeting_message": "会議中や会議後に専用メッセージが出ますか？（例: パン屋通知、生存通知、能力報告）",
     "has_tasks": "その役職にはタスクがありますか？",
     "task_based_power": "タスク進行で能力・勝利条件・覚醒が変わりますか？",
+    "task_progress_display_power": "????????????????????",
     "extra_task_power": "追加タスクや専用タスクが割り当てられますか？",
     "death_trigger": "自分や対象が死亡した時に能力が発動しますか？（例: 道連れ、後追い、通知、変化）",
+    "blood_trail_power": "??????????????????????????",
     "scheduled_death": "決まった条件やタイミングで自動的に死亡しますか？",
     "ghost_role": "死亡後・幽霊状態で使う役職ですか？",
     "ghost_power": "幽霊や死亡済みプレイヤーに関わる能力がありますか？（例: 霊視、蘇生、幽霊能力）",
@@ -130,6 +140,7 @@ FEATURE_QUESTIONS = {
     "role_info_power": "他人の役職や陣営を知る能力がありますか？",
     "omniscient_power": "全員の役職を常に見ることができますか？（例: 神の権能）",
     "public_identity": "自分の役職や存在が他のプレイヤーに分かりますか？",
+    "cursor_reveal_power": "????????????????????????",
     "fake_identity": "他人から別陣営・別役職・別人のように見える能力ですか？",
     "dummy_power": "ダミーや分身を表示する能力がありますか？",
     "body_info_power": "死体・死因・死亡位置に関する情報を得られますか？",
@@ -140,11 +151,13 @@ FEATURE_QUESTIONS = {
     "bomb_power": "爆弾を付与・設置して爆発させる能力ですか？",
     "marker_power": "マーカーや地点を指定して範囲を作る能力ですか？",
     "disguise_or_invisible": "変身・透明化・姿の偽装ができますか？",
+    "appearance_shuffle_power": "???????????????????????????",
     "area_effect": "周囲や部屋全体に影響しますか？（例: 範囲キル、爆発、全員の移動制限）",
     "sabotage_power": "サボタージュに関わる特別な能力がありますか？（例: 独自サボ、即修理、サボクール操作）",
     "lights_sabotage_power": "停電サボタージュに特化した能力や制限がありますか？",
     "critical_sabotage_power": "リアクター・O2などの緊急サボタージュに特化した能力や制限がありますか？",
     "door_power": "ドアを開閉・一括開放・妨害する能力がありますか？",
+    "room_door_open_power": "??????????????????????????",
     "specific_door_power": "特定の場所や設備のドアだけに作用しますか？（例: トイレ、特定部屋）",
     "revenge_kill": "自分を殺した相手を道連れにできますか？",
     "suicide_risk": "能力の代償や条件で自滅する可能性がありますか？",
@@ -152,7 +165,9 @@ FEATURE_QUESTIONS = {
     "appoint_power": "対象をシェリフなどの特定役職に任命・転職させますか？",
     "infection_power": "感染や拡散で他人の状態を広げますか？",
     "partner_power": "特定の相方・主人・対象とペアやチームになりますか？",
+    "trilemma_power": "3??????????????2???????????????",
     "lovers_power": "ラバーズや恋人関係を作ったり狙ったりしますか？",
+    "lovers_attribute_power": "他の役職と重複して付くラバーズ属性ですか？",
     "alignment_shift_power": "自分の陣営や勝利条件が途中で変わりますか？",
     "control_power": "他人の移動や行動を直接操作できますか？",
     "restriction_power": "他人の行動や移動を制限しますか？（例: 動けない、通報不可、能力不可、スキップ不可）",
@@ -166,6 +181,7 @@ FEATURE_QUESTIONS = {
     "environmental_death_power": "ドア・ベント・はしご・サボタージュなど環境要因で死亡しますか？",
     "report_power": "死体通報や緊急会議ボタンに干渉しますか？（例: 通報不可、強制会議、ポータブルボタン）",
     "vision_power": "視界を広げたり暗くしたりしますか？",
+    "vision_debuff_power": "????????????????????",
     "swap_power": "投票先・位置・役職などを入れ替えますか？",
     "fate_swap_power": "会議中に2人を選び、会議後に役職や票などを入れ替えますか？",
     "dance_power": "踊り・ダンスによって相手に効果や死亡条件を与えますか？",
@@ -224,6 +240,7 @@ FEATURE_QUESTIONS = {
     "speed_panel_power": "加速パネルなど、踏むと移動速度が変わる設置物を作りますか？",
     "skating_power": "氷上のように滑って加速する移動能力ですか？",
     "vote_swap_power": "会議中に2人の投票先や票を入れ替えますか？",
+    "balance_vote_power": "会議中に2人を天秤にかけ、どちらか又は両方を追放する能力ですか？",
     "traitor_cracking_power": "キル後にアドミン・カメラ・バイタルを遠隔で順番に使えますか？",
     "corpse_guard_charge_power": "死体を処理して誰かを守る回数を増やしますか？",
     "ambush_vent_kill_power": "ベント中やベント付近から特殊キルを行いますか？",
@@ -246,6 +263,11 @@ FEATURE_QUESTIONS = {
     "weapon_collect_power": "武器を拾ったり合成したりして複数の攻撃能力を使いますか？",
     "punch_launch_power": "相手を殴って吹き飛ばし、壁衝突などでキルしますか？",
     "vote_cancel_power": "会議で対象の得票を打ち消す能力ですか？",
+    "vote_zero_power": "投票数が0票になる役職/属性ですか？",
+    "task_meeting_time_power": "タスク完了によって会議時間を延長しますか？",
+    "killer_freeze_on_death_power": "キルされた時、キルした相手を一定時間動けなくしますか？",
+    "oil_douse_win_power": "全生存者にオイルを塗り、ベントに入ることで勝利しますか？",
+    "egoist_power": "インポスターを認識しつつ、インポスター全滅後に勝利を狙いますか？",
 }
 
 QUIZ_HINTS = {
@@ -253,6 +275,8 @@ QUIZ_HINTS = {
     "team_impostor": "インポスター陣営の役職です。",
     "team_neutral": "第三陣営の役職です。",
     "team_liberal": "リベラル陣営の役職です。リーダーを中心に、資金を貯めて勝利を目指します。",
+    "team_madmate": "マッドメイト陣営・狂人系チームです。",
+    "team_jackal": "ジャッカル陣営です。",
     "modifier_role": "元の役職に追加される役職・属性です。",
     "evil_support_power": "別陣営を助ける補助・狂人系役職です。",
     "host_observer_power": "ホスト専用の観戦・GM系役職です。",
@@ -342,6 +366,7 @@ QUIZ_HINTS = {
     "infection_power": "感染や拡散に関わります。",
     "partner_power": "特定の相手との関係に関わります。",
     "lovers_power": "ラバーズや恋人関係に関わります。",
+    "lovers_attribute_power": "他の役職に重複するラバーズ属性です。",
     "alignment_shift_power": "陣営や勝利条件が途中で変わります。",
     "control_power": "他人を操作できます。",
     "restriction_power": "他人の行動や移動を制限します。",
@@ -413,6 +438,7 @@ QUIZ_HINTS = {
     "speed_panel_power": "加速パネルを設置します。",
     "skating_power": "滑る移動能力に関わります。",
     "vote_swap_power": "会議中の票入れ替えに関わります。",
+    "balance_vote_power": "天秤投票で対象2人の追放に関わります。",
     "traitor_cracking_power": "キル後のクラッキングに関わります。",
     "corpse_guard_charge_power": "死体処理で防御回数を増やします。",
     "ambush_vent_kill_power": "ベントを使った奇襲キルに関わります。",
@@ -435,6 +461,24 @@ QUIZ_HINTS = {
     "weapon_collect_power": "武器の取得・合成に関わります。",
     "punch_launch_power": "相手を吹き飛ばしてキルします。",
     "vote_cancel_power": "対象の得票を打ち消します。",
+    "buff_modifier_power": "??????????????",
+    "debuff_modifier_power": "????????????????",
+    "sabotage_repair_restriction_power": "特定のサボタージュ修理が制限されます。",
+    "kill_range_modifier_power": "???????????",
+    "kill_power_boost_power": "??????????????",
+    "extra_win_condition_power": "?????????????",
+    "task_progress_display_power": "????????????",
+    "blood_trail_power": "???????????????????",
+    "cursor_reveal_power": "????????????????",
+    "appearance_shuffle_power": "?????????????",
+    "room_door_open_power": "???????????????",
+    "trilemma_power": "3???????????????",
+    "vision_debuff_power": "???????????????",
+    "vote_zero_power": "投票数が0票になります。",
+    "task_meeting_time_power": "タスク完了で会議時間が延びます。",
+    "killer_freeze_on_death_power": "キルした相手を拘束します。",
+    "oil_douse_win_power": "全員にオイルを塗ってベントに入る勝利条件です。",
+    "egoist_power": "インポスターを認識するが、インポスターとは競合します。",
 }
 
 
@@ -488,6 +532,8 @@ def load_roles() -> list[Role]:
             features["team_impostor"] = team == "impostor"
             features["team_neutral"] = team == "neutral"
             features["team_liberal"] = team == "liberal"
+            features["team_madmate"] = team == "madmate"
+            features["team_jackal"] = team == "jackal"
             mod = normalize_mod_name(row.get("mod"))
             roles.append(
                 Role(
@@ -531,6 +577,35 @@ class GuessSession:
         self.current_question: str | None = None
         self.last_result_names: set[str] = set()
         self.rejected_names: set[str] = set()
+        self.history: list[
+            tuple[list[Role], set[str], str | None, set[str], set[str]]
+        ] = []
+
+    def can_go_back(self) -> bool:
+        return bool(self.history)
+
+    def push_history(self) -> None:
+        self.history.append(
+            (
+                self.candidates[:],
+                set(self.asked),
+                self.current_question,
+                set(self.last_result_names),
+                set(self.rejected_names),
+            )
+        )
+
+    def go_back(self) -> bool:
+        if not self.history:
+            return False
+        (
+            self.candidates,
+            self.asked,
+            self.current_question,
+            self.last_result_names,
+            self.rejected_names,
+        ) = self.history.pop()
+        return True
 
     def apply_answer(self, answer: bool | None) -> None:
         if not self.current_question:
@@ -601,6 +676,7 @@ class GuessSession:
         # A wrong final guess usually means an earlier split was too brittle.
         # Clear the history so the retry can reuse useful questions if needed.
         self.asked.clear()
+        self.history.clear()
 
 
 sessions: dict[int, GuessSession] = {}
@@ -637,15 +713,20 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "team_impostor",
         "team_neutral",
         "team_liberal",
+        "team_madmate",
+        "team_jackal",
         "liberal_fund_power",
         "untargetable_power",
         "modifier_role",
+        "buff_modifier_power",
+        "debuff_modifier_power",
         "evil_support_power",
         "host_observer_power",
         "plain_role_power",
         "emergency_repair_power",
         "no_task_role",
         "utility_restriction_power",
+        "sabotage_repair_restriction_power",
         "limited_kill_power",
         "task_kill_charge_power",
         "ghost_role",
@@ -656,13 +737,17 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "normal_kill",
         "special_kill",
         "can_win_alone",
+        "oil_douse_win_power",
+        "egoist_power",
         "additional_win",
+        "extra_win_condition_power",
         "meeting_ability",
         "vote_power",
         "meeting_kill_power",
         "vote_cancel_power",
         "exile_win",
         "task_based_power",
+        "task_progress_display_power",
         "task_rollback_power",
         "global_task_replace_power",
         "live_task_win_power",
@@ -720,6 +805,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "variable_vote_power",
         "portal_power",
         "meeting_time_power",
+        "task_meeting_time_power",
         "meeting_time_steal_power",
         "noncrew_count_power",
         "forced_report_power",
@@ -733,6 +819,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "missionary_power",
         "forced_kill_misfire_power",
         "obsession_power",
+        "lovers_attribute_power",
         "shrine_power",
         "mine_power",
         "swallow_power",
@@ -761,6 +848,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "appoint_power",
         "infection_power",
         "partner_power",
+        "trilemma_power",
         "lovers_power",
         "combination_role_power",
         "assassin_merlin_power",
@@ -779,11 +867,13 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "speed_panel_power",
         "skating_power",
         "vote_swap_power",
+        "balance_vote_power",
         "traitor_cracking_power",
         "sabotage_power",
         "custom_sabotage_win_power",
         "mushroom_power",
         "door_power",
+        "room_door_open_power",
         "teleport_power",
         "hijack_vision_power",
         "map_device_fake_power",
@@ -795,6 +885,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "last_impostor_boost_power",
         "speed_power",
         "vision_power",
+        "vision_debuff_power",
         "restriction_power",
         "control_power",
         "ranged_power",
@@ -807,7 +898,10 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "punch_launch_power",
         "area_effect",
         "death_trigger",
+        "killer_freeze_on_death_power",
+        "blood_trail_power",
         "suicide_risk",
+        "vote_zero_power",
     ]
     hints = [
         QUIZ_HINTS[key]
@@ -948,10 +1042,18 @@ def session_embed(session: GuessSession) -> discord.Embed:
     return embed
 
 
+def set_back_button_disabled(view: discord.ui.View, disabled: bool) -> None:
+    for item in view.children:
+        if isinstance(item, discord.ui.Button) and item.label == "戻る":
+            item.disabled = disabled
+
+
 class GuessView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=180)
         self.user_id = user_id
+        session = sessions.get(user_id)
+        set_back_button_disabled(self, not (session and session.can_go_back()))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -968,6 +1070,7 @@ class GuessView(discord.ui.View):
             )
             return
 
+        session.push_history()
         session.apply_answer(value)
         session.current_question = None
         embed = session_embed(session)
@@ -980,8 +1083,13 @@ class GuessView(discord.ui.View):
             or "候補をすべて確認しました" in embed.description
         )
         if finished:
+            if session.can_go_back():
+                await interaction.response.edit_message(embed=embed, view=GuessBackView(self.user_id))
+                return
             sessions.pop(self.user_id, None)
-        await interaction.response.edit_message(embed=embed, view=None if finished else self)
+            await interaction.response.edit_message(embed=embed, view=None)
+            return
+        await interaction.response.edit_message(embed=embed, view=GuessView(self.user_id))
 
     @discord.ui.button(label="はい", style=discord.ButtonStyle.success)
     async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -994,6 +1102,10 @@ class GuessView(discord.ui.View):
     @discord.ui.button(label="どちらでもない/不明", style=discord.ButtonStyle.secondary)
     async def unknown(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.answer(interaction, None)
+
+    @discord.ui.button(label="戻る", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await go_back_one_question(interaction, self.user_id)
 
     @discord.ui.button(label="中止", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1008,6 +1120,8 @@ class GuessResultView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=180)
         self.user_id = user_id
+        session = sessions.get(user_id)
+        set_back_button_disabled(self, not (session and session.can_go_back()))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -1039,8 +1153,12 @@ class GuessResultView(discord.ui.View):
             sessions.pop(self.user_id, None)
             await interaction.response.edit_message(embed=embed, view=None)
             return
-        view: discord.ui.View | None = GuessResultView(self.user_id) if session.last_result_names else GuessView(self.user_id)
+        view = guess_view_for_session(session, self.user_id)
         await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="戻る", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await go_back_one_question(interaction, self.user_id)
 
     @discord.ui.button(label="中止", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1049,6 +1167,54 @@ class GuessResultView(discord.ui.View):
             embed=discord.Embed(title="役職当て", description="ゲームを中止しました。", color=0x95A5A6),
             view=None,
         )
+
+
+class GuessBackView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        session = sessions.get(user_id)
+        set_back_button_disabled(self, not (session and session.can_go_back()))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("このゲームを始めた人だけが操作できます。", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="戻る", style=discord.ButtonStyle.secondary)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await go_back_one_question(interaction, self.user_id)
+
+    @discord.ui.button(label="中止", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sessions.pop(self.user_id, None)
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="役職当て", description="ゲームを中止しました。", color=0x95A5A6),
+            view=None,
+        )
+
+
+def guess_view_for_session(session: GuessSession, user_id: int) -> discord.ui.View | None:
+    if session.last_result_names:
+        return GuessResultView(user_id)
+    if session.current_question:
+        return GuessView(user_id)
+    if session.can_go_back():
+        return GuessBackView(user_id)
+    return None
+
+
+async def go_back_one_question(interaction: discord.Interaction, user_id: int) -> None:
+    session = sessions.get(user_id)
+    if not session or not session.go_back():
+        await interaction.response.send_message("戻れる質問がありません。", ephemeral=True)
+        return
+    embed = session_embed(session)
+    await interaction.response.edit_message(
+        embed=embed,
+        view=guess_view_for_session(session, user_id),
+    )
 
 
 class QuizChoiceButton(discord.ui.Button):
