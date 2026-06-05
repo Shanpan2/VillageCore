@@ -475,6 +475,8 @@ def load_roles() -> list[Role]:
             name = (row.get("name") or "").strip()
             if not name:
                 continue
+            if parse_bool(row.get("hidden")) is True:
+                continue
             display_name = (row.get("display_name") or name).strip()
             team = (row.get("team") or "").strip().lower()
             features = {
