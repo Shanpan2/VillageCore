@@ -548,9 +548,52 @@ def load_roles() -> list[Role]:
     return roles
 
 
+QUESTION_PRIORITY_BONUS = {
+    "team_crewmate": 1.8,
+    "team_impostor": 1.8,
+    "team_neutral": 1.8,
+    "team_liberal": 1.8,
+    "team_madmate": 1.8,
+    "team_jackal": 1.8,
+    "ghost_role": 1.7,
+    "modifier_role": 1.6,
+    "host_observer_power": 1.6,
+    "can_kill": 1.5,
+    "can_win_alone": 1.5,
+    "meeting_ability": 1.2,
+    "vote_power": 1.2,
+    "special_vote_power": 1.35,
+    "balance_vote_power": 2.2,
+    "sidekick_creation_power": 1.7,
+    "pavlov_owner_dog_power": 2.2,
+    "oil_douse_win_power": 2.0,
+    "egoist_power": 2.0,
+    "forced_kill_misfire_power": 1.8,
+    "lovers_power": 1.6,
+    "queen_servant_power": 1.7,
+    "chimera_creation_power": 1.7,
+    "trash_layer_power": 1.7,
+    "weapon_collect_power": 1.6,
+    "ghost_crewmate_power": 1.5,
+    "ghost_impostor_power": 1.5,
+    "ghost_neutral_power": 1.5,
+}
+
+
+def priority_bonus(key: str) -> float:
+    explicit_bonus = QUESTION_PRIORITY_BONUS.get(key, 0)
+    try:
+        order_index = list(FEATURE_QUESTIONS).index(key)
+    except ValueError:
+        return explicit_bonus
+    # Keep CSV/dictionary order meaningful as a gentle tie-breaker, without
+    # overpowering the information-gain score or the random top-pool selection.
+    order_bonus = max(0, len(FEATURE_QUESTIONS) - order_index) * 0.003
+    return explicit_bonus + order_bonus
+
+
 def best_question(candidates: list[Role], asked: set[str]) -> str | None:
-    best_key = None
-    best_score = -1
+    scored: list[tuple[float, str]] = []
     for key in FEATURE_QUESTIONS:
         if key in asked:
             continue
@@ -562,11 +605,18 @@ def best_question(candidates: list[Role], asked: set[str]) -> str | None:
         balance = min(yes_count, no_count)
         coverage_bonus = known_count * 0.05
         one_sided_bonus = 0.25 if yes_count == 0 or no_count == 0 else 0
-        score = balance + coverage_bonus + one_sided_bonus
-        if score > best_score:
-            best_key = key
-            best_score = score
-    return best_key
+        score = balance + coverage_bonus + one_sided_bonus + priority_bonus(key)
+        scored.append((score, key))
+    if not scored:
+        return None
+
+    scored.sort(reverse=True)
+    best_score = scored[0][0]
+    tolerance = max(0.35, best_score * 0.08)
+    top_pool = [(score, key) for score, key in scored if best_score - score <= tolerance]
+    top_pool = top_pool[:6]
+    weights = [max(0.1, score - (best_score - tolerance) + 0.1) for score, _ in top_pool]
+    return random.choices([key for _, key in top_pool], weights=weights, k=1)[0]
 
 
 class GuessSession:
@@ -745,6 +795,8 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "extra_win_condition_power",
         "meeting_ability",
         "vote_power",
+        "special_vote_power",
+        "balance_vote_power",
         "meeting_kill_power",
         "vote_cancel_power",
         "exile_win",
@@ -870,7 +922,6 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "speed_panel_power",
         "skating_power",
         "vote_swap_power",
-        "balance_vote_power",
         "traitor_cracking_power",
         "sabotage_power",
         "custom_sabotage_win_power",
@@ -911,7 +962,14 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         for key in priority
         if role.features.get(key) is True and key in QUIZ_HINTS
     ]
-    return hints[:max_hints] or ["この役職は、まだ詳しいヒントが少ない役職です。"]
+    if len(hints) <= max_hints:
+        return hints or ["No detailed hint is available for this role yet."]
+
+    locked_count = min(2, max_hints)
+    locked = hints[:locked_count]
+    flexible = hints[locked_count:]
+    random.shuffle(flexible)
+    return locked + flexible[: max_hints - locked_count]
 
 
 def build_quiz_embed(answer: Role, choices: list[Role], selected_mod: str | None = None) -> discord.Embed:
