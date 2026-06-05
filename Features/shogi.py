@@ -276,6 +276,7 @@ def render_board_file(state: dict, selected_source: str | None = None, hints: se
     small_font = load_font(18)
     coord_font = load_font(16, True)
     piece_font = load_font(25, True)
+    owner_font = load_font(12, True)
 
     draw.text((34, 24), "将棋", fill=(255, 255, 255), font=title_font)
     draw.rectangle((left, top, left + board_size, top + board_size), fill=(226, 174, 96), outline=(64, 42, 24), width=3)
@@ -307,14 +308,23 @@ def render_board_file(state: dict, selected_source: str | None = None, hints: se
         col, row = 9 - file_num, rank - 1
         x, y = left + col * cell + 7, top + row * cell + 6
         points = [(x + 26, y), (x + 52, y + 14), (x + 47, y + 55), (x + 5, y + 55), (x, y + 14)]
+        owner_color = (56, 126, 214) if owner == "sente" else (218, 82, 82)
+        owner_label = "先" if owner == "sente" else "後"
         if owner == "gote":
             points = [(px, y + 55 - (py - y)) for px, py in points]
         draw.polygon(points, fill=(250, 222, 151), outline=(82, 54, 26))
+        draw.line(points + [points[0]], fill=owner_color, width=3)
+        draw.rounded_rectangle((x + 2, y + 2, x + 20, y + 20), radius=5, fill=owner_color)
+        draw.text((x + 5, y + 3), owner_label, fill=(255, 255, 255), font=owner_font)
         label = piece_text(piece)
         bbox = draw.textbbox((0, 0), label, font=piece_font)
         draw.text((x + 26 - (bbox[2] - bbox[0]) / 2, y + 28 - (bbox[3] - bbox[1]) / 2), label, fill=(34, 28, 22), font=piece_font)
 
     side_x = left + board_size + 34
+    draw.rounded_rectangle((side_x, top - 34, side_x + 64, top - 8), radius=8, fill=(56, 126, 214))
+    draw.text((side_x + 8, top - 31), "先手", fill=(255, 255, 255), font=small_font)
+    draw.rounded_rectangle((side_x + 76, top - 34, side_x + 140, top - 8), radius=8, fill=(218, 82, 82))
+    draw.text((side_x + 84, top - 31), "後手", fill=(255, 255, 255), font=small_font)
     draw.text((side_x, top + 8), "持ち駒", fill=(255, 255, 255), font=small_font)
     sente = " ".join(piece_text(piece) for piece in hands["sente"]) or "なし"
     gote = " ".join(piece_text(piece) for piece in hands["gote"]) or "なし"

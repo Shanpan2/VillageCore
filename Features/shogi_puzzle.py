@@ -238,6 +238,8 @@ def load_puzzles() -> list[dict]:
         }
         if isinstance(item.get("solution"), list):
             puzzle["solution"] = [str(move) for move in item["solution"] if move]
+        if isinstance(item.get("acceptable_answers"), list):
+            puzzle["acceptable_answers"] = [str(move) for move in item["acceptable_answers"] if move]
         if isinstance(item.get("options"), list):
             puzzle["options"] = item["options"]
         puzzles.append(puzzle)
@@ -325,6 +327,24 @@ def current_solution_move(puzzle: dict) -> str | None:
     if progress >= len(moves):
         return None
     return moves[progress]
+
+
+def current_acceptable_moves(puzzle: dict) -> list[str]:
+    expected = current_solution_move(puzzle) or puzzle.get("answer", "")
+    progress = int(puzzle.get("_progress", 0) or 0)
+    if progress == 0 and isinstance(puzzle.get("acceptable_answers"), list):
+        moves = [str(move) for move in puzzle["acceptable_answers"] if move]
+        if expected and expected not in moves:
+            moves.insert(0, expected)
+        return moves
+    return [expected] if expected else []
+
+
+def correct_text_for_current(puzzle: dict) -> str:
+    moves = current_acceptable_moves(puzzle)
+    if len(moves) <= 1:
+        return move_label(puzzle, moves[0]) if moves else answer_text(puzzle)
+    return " / ".join(move_label(puzzle, move) for move in moves[:4])
 
 
 def push_solution_move(puzzle: dict, move_value: str) -> tuple[bool, str]:
@@ -644,9 +664,14 @@ def render_puzzle_image(
     coord_font = load_font(16, bold=True)
     piece_font = load_font(28, bold=True)
     piece_short_font = load_font(13, bold=True)
+    owner_font = load_font(12, bold=True)
 
     draw.text((34, 22), f"詰将棋 - {puzzle['title']}", fill=(255, 255, 255), font=title_font)
     draw.text((board_left + board_size + 36, 84), f"手番: {puzzle['side']}", fill=(255, 245, 210), font=small_font)
+    draw.rounded_rectangle((board_left + board_size + 36, 38, board_left + board_size + 100, 64), radius=8, fill=(56, 126, 214))
+    draw.text((board_left + board_size + 44, 41), "先手", fill=(255, 255, 255), font=small_font)
+    draw.rounded_rectangle((board_left + board_size + 112, 38, board_left + board_size + 176, 64), radius=8, fill=(218, 82, 82))
+    draw.text((board_left + board_size + 120, 41), "後手", fill=(255, 255, 255), font=small_font)
     draw.text((board_left + board_size + 36, 122), "持ち駒", fill=(255, 255, 255), font=small_font)
     hand = puzzle_hands(puzzle).get("sente", [])
     hand_text = " ".join(piece_text(piece) for piece in hand) if hand else "なし"
@@ -716,9 +741,14 @@ def render_puzzle_image(
             (x + 6, y + 56),
             (x, y + 14),
         ]
+        owner_color = (56, 126, 214) if owner == "sente" else (218, 82, 82)
+        owner_label = "先" if owner == "sente" else "後"
         if owner == "gote":
             points = [(px, y + 56 - (py - y)) for px, py in points]
         draw.polygon(points, fill=fill, outline=outline)
+        draw.line(points + [points[0]], fill=owner_color, width=3)
+        draw.rounded_rectangle((x + 2, y + 2, x + 20, y + 20), radius=5, fill=owner_color)
+        draw.text((x + 5, y + 3), owner_label, fill=(255, 255, 255), font=owner_font)
         label = piece_text(piece)
         bbox = draw.textbbox((0, 0), label, font=piece_font)
         tw = bbox[2] - bbox[0]
@@ -836,8 +866,8 @@ class ShogiDestinationSelect(discord.ui.Select):
 
         puzzle = view.puzzle
         expected = current_solution_move(puzzle) or puzzle["answer"]
-        correct = selected == expected
-        correct_text = move_label(puzzle, expected)
+        correct = selected in current_acceptable_moves(puzzle)
+        correct_text = correct_text_for_current(puzzle)
         selected_text = move_label(puzzle, selected)
         legal, mate, analysis_text = analyze_move(puzzle, selected)
 

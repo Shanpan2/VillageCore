@@ -19,9 +19,14 @@
     "side": "先手",
     "sfen": "4k4/4s4/3GRG3/9/9/9/9/9/K8 b - 1",
     "answer": "5c5b+",
-    "answer_text": "飛 5三→5二成",
+    "answer_text": "飛 5三→5二成 / 金 4三→5二 / 金 6三→5二",
+    "acceptable_answers": [
+      "5c5b+",
+      "4c5b",
+      "6c5b"
+    ],
     "mate_moves": 1,
-    "explanation": "飛車で5二の銀を取りながら成ります。龍は4三と6三の金に守られているため、玉は龍を取れません。",
+    "explanation": "この局面は5二へ駒を密着させる手が急所です。飛車で銀を取りながら成る手だけでなく、左右どちらかの金を5二へ寄る手も詰みとして扱います。",
     "source": "ai_original",
     "license": "original_for_villagecore"
   },
@@ -62,6 +67,82 @@
     "mate_moves": 1,
     "explanation": "金を8二に打つと、玉の周囲を金が押さえます。8二の金は8三の飛車に守られているため、玉は取れません。",
     "source": "ai_original",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_normal_001",
+    "level": "normal",
+    "title": "AI自作 3手詰め 001",
+    "side": "先手",
+    "sfen": "9/4k4/3R5/3g5/9/4R4/9/9/K8 b R 1",
+    "answer": "R*7b",
+    "answer_text": "飛打 7二",
+    "solution": [
+      "R*7b",
+      "5b6c",
+      "5f5b+"
+    ],
+    "mate_moves": 3,
+    "explanation": "初手は7二飛打で王手します。玉が6三へ逃げたあと、5六の飛車を5二へ成って詰みです。相手の応手はBotが自動で進めます。",
+    "source": "ai_original_verified",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_normal_002",
+    "level": "normal",
+    "title": "AI自作 3手詰め 002",
+    "side": "先手",
+    "sfen": "4k1B2/4R4/2G6/9/9/9/9/9/K8 b B 1",
+    "answer": "7c6b",
+    "answer_text": "金 7三→6二",
+    "solution": [
+      "7c6b",
+      "5a4a",
+      "3a4b+"
+    ],
+    "mate_moves": 3,
+    "explanation": "金を6二へ寄せて逃げ道を狭めます。玉が4一へ逃げたあと、角を4二へ成って詰みです。",
+    "source": "ai_original_verified",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_hard_001",
+    "level": "hard",
+    "title": "AI自作 5手詰め 001",
+    "side": "先手",
+    "sfen": "9/4k1p2/4s4/2S6/4BR3/3G5/9/9/K8 b B 1",
+    "answer": "B*6c",
+    "answer_text": "角打 6三",
+    "solution": [
+      "B*6c",
+      "5b6b",
+      "7d7c+",
+      "6b5a",
+      "4e4a"
+    ],
+    "mate_moves": 5,
+    "explanation": "初手は6三角打。玉を6二、5一へ追いながら、銀成と飛車の利きで逃げ道をふさいで詰ませます。",
+    "source": "ai_original_verified",
+    "license": "original_for_villagecore"
+  },
+  {
+    "id": "ai_hard_002",
+    "level": "hard",
+    "title": "AI自作 5手詰め 002",
+    "side": "先手",
+    "sfen": "1Bk6/2B6/5R3/9/5B3/9/9/9/K8 b R 1",
+    "answer": "7b6a+",
+    "answer_text": "角 7二→6一成",
+    "solution": [
+      "7b6a+",
+      "7a8b",
+      "8a7b+",
+      "8b9b",
+      "7b8a"
+    ],
+    "mate_moves": 5,
+    "explanation": "角を成って玉を端へ追います。続けて馬を使い、最後は8一へ寄せて詰みです。",
+    "source": "ai_original_verified",
     "license": "original_for_villagecore"
   }
 ]
