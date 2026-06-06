@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 
@@ -153,9 +154,14 @@ def main() -> int:
         print("  python -m pip install python-shogi")
         return 2
 
-    puzzles = json.loads(PUZZLE_FILE.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description="Validate shogi puzzle JSON files.")
+    parser.add_argument("--file", type=Path, default=PUZZLE_FILE, help="Puzzle JSON file to validate.")
+    args = parser.parse_args()
+
+    puzzles = json.loads(args.file.read_text(encoding="utf-8"))
     ok, ng = validate(puzzles)
-    print(f"\n結果: {ok}問OK / {len(ng)}件NG\n")
+    print(f"\n対象: {args.file}")
+    print(f"結果: {ok}問OK / {len(ng)}件NG\n")
     for message in ng:
         print("NG:", message)
 
