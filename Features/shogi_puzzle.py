@@ -400,10 +400,10 @@ def undo_puzzle_move(puzzle: dict) -> bool:
 
 def forced_reply_mate_continuation(puzzle: dict, move_value: str) -> tuple[str, list[str]] | None:
     line = mate_line_after_attack(puzzle, move_value)
-    if not line or len(line) < 2:
+    if not line or len(line) < 3:
         return None
-    reply = line[0]
-    final_moves = [line[1]]
+    reply = line[1]
+    final_moves = [line[2]]
     return reply, final_moves
 
 
@@ -997,6 +997,8 @@ class ShogiDestinationSelect(discord.ui.Select):
             await interaction.response.send_message("この駒の移動先候補がありません。", ephemeral=True)
             return
 
+        await interaction.response.defer()
+
         puzzle = view.puzzle
         expected = current_solution_move(puzzle) or puzzle["answer"]
         correct = selected in current_acceptable_moves(puzzle)
@@ -1017,15 +1019,15 @@ class ShogiDestinationSelect(discord.ui.Select):
                 reply_label = move_label(puzzle, reply)
                 ok, error = push_solution_move(puzzle, selected)
                 if not ok:
-                    await interaction.response.send_message(error or "盤面の更新に失敗しました。", ephemeral=True)
+                    await interaction.followup.send(error or "盤面の更新に失敗しました。", ephemeral=True)
                     return
                 ok, error = push_solution_move(puzzle, reply)
                 if not ok:
-                    await interaction.response.send_message(error or "応手の更新に失敗しました。", ephemeral=True)
+                    await interaction.followup.send(error or "応手の更新に失敗しました。", ephemeral=True)
                     return
                 acceptable = puzzle.setdefault("_acceptable_moves_by_progress", {})
                 acceptable[str(int(puzzle.get("_progress", 0) or 0))] = final_moves
-                await interaction.response.edit_message(
+                await interaction.edit_original_response(
                     content=(
                         f"別解候補として進めます。 **{selected_text}**\n"
                         f"応手: **{reply_label}**\n\n"
@@ -1044,10 +1046,10 @@ class ShogiDestinationSelect(discord.ui.Select):
                 for item in view.children:
                     item.disabled = True
                 result += f"\n\n解説: {puzzle['explanation']}"
-                await interaction.response.edit_message(content=result, view=view)
+                await interaction.edit_original_response(content=result, view=view)
             else:
                 result += "\n\n複数手詰めの途中なので、同じ局面からもう一度選べます。必要なら「一手戻す」も使えます。"
-                await interaction.response.edit_message(
+                await interaction.edit_original_response(
                     content=result,
                     attachments=[render_puzzle_image(puzzle)],
                     view=ShogiPuzzleSourceView(puzzle, view.owner_id),
@@ -1058,7 +1060,7 @@ class ShogiDestinationSelect(discord.ui.Select):
         if not ok:
             for item in view.children:
                 item.disabled = True
-            await interaction.response.edit_message(content=f"正解手でしたが、局面更新に失敗しました。\n{error}", view=view)
+            await interaction.edit_original_response(content=f"正解手でしたが、局面更新に失敗しました。\n{error}", view=view)
             return
 
         moves = solution_moves(puzzle)
@@ -1070,7 +1072,7 @@ class ShogiDestinationSelect(discord.ui.Select):
             if analysis_text:
                 result += f"\n\n判定: {analysis_text}"
             result += f"\n\n解説: {puzzle['explanation']}"
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=result,
                 attachments=[render_puzzle_image(puzzle)],
                 view=view,
@@ -1084,7 +1086,7 @@ class ShogiDestinationSelect(discord.ui.Select):
             if not ok:
                 for item in view.children:
                     item.disabled = True
-                await interaction.response.edit_message(content=f"正解手でしたが、応手の局面更新に失敗しました。\n{error}", view=view)
+                await interaction.edit_original_response(content=f"正解手でしたが、応手の局面更新に失敗しました。\n{error}", view=view)
                 return
 
         if int(puzzle.get("_progress", 0) or 0) >= len(moves):
@@ -1092,10 +1094,10 @@ class ShogiDestinationSelect(discord.ui.Select):
                 item.disabled = True
             _, reward_text = await grant_reward(interaction, puzzle["level"])
             result = f"正解です！ **{selected_text}**\n{reward_text}\n\n解説: {puzzle['explanation']}"
-            await interaction.response.edit_message(content=result, attachments=[render_puzzle_image(puzzle)], view=view)
+            await interaction.edit_original_response(content=result, attachments=[render_puzzle_image(puzzle)], view=view)
             return
 
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=(
                 f"正解です。**{selected_text}**\n"
                 f"応手: **{reply_label}**\n\n"
