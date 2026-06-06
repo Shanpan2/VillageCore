@@ -28,9 +28,16 @@ def is_supported_sfen(sfen: str, allow_white: bool) -> bool:
     return allow_white or parts[1] == "b"
 
 
-def mate_search_pv(sfen: str, depth: int) -> list[str] | None:
+def mate_search_pv(sfen: str, depth: int, max_nodes: int) -> list[str] | None:
+    nodes = 0
+
     @lru_cache(maxsize=200_000)
     def can_mate(cached_sfen: str, remaining: int) -> tuple[bool, tuple[str, ...]]:
+        nonlocal nodes
+        nodes += 1
+        if max_nodes and nodes > max_nodes:
+            raise TimeoutError("node limit exceeded")
+
         board = shogi.Board(cached_sfen)
         if remaining <= 0:
             return board.is_checkmate(), ()
@@ -38,6 +45,8 @@ def mate_search_pv(sfen: str, depth: int) -> list[str] | None:
         for attack in board.legal_moves:
             after_attack = shogi.Board(cached_sfen)
             after_attack.push(attack)
+            if not after_attack.is_check():
+                continue
 
             if remaining == 1:
                 if after_attack.is_checkmate():
@@ -76,6 +85,7 @@ def convert_file(
     sample_size: int,
     allow_white: bool,
     max_checked: int,
+    max_nodes: int,
 ) -> list[dict]:
     if not input_path.exists():
         print(f"missing: {input_path}")
@@ -95,7 +105,7 @@ def convert_file(
             break
         checked += 1
         try:
-            solution = mate_search_pv(sfen, mate_moves)
+            solution = mate_search_pv(sfen, mate_moves, max_nodes)
         except Exception:
             continue
         if not solution:
@@ -137,6 +147,7 @@ def main() -> int:
         help="Levels to import. Use 'normal' for mate3 only, 'hard' for mate5 only.",
     )
     parser.add_argument("--max-checked", type=int, default=500, help="Maximum SFEN positions to check per level. Use 0 for no limit.")
+    parser.add_argument("--max-nodes", type=int, default=20_000, help="Maximum search nodes per position. Use 0 for no limit.")
     args = parser.parse_args()
 
     all_puzzles = []
@@ -145,7 +156,15 @@ def main() -> int:
             continue
         print(f"converting {filename} as {level} ({mate_moves} moves)")
         all_puzzles.extend(
-            convert_file(level, Path(filename), mate_moves, args.sample_size, args.allow_white, args.max_checked)
+            convert_file(
+                level,
+                Path(filename),
+                mate_moves,
+                args.sample_size,
+                args.allow_white,
+                args.max_checked,
+                args.max_nodes,
+            )
         )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
