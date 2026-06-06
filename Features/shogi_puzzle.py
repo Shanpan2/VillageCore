@@ -398,6 +398,31 @@ def undo_puzzle_move(puzzle: dict) -> bool:
     return True
 
 
+def undo_puzzle_turn(puzzle: dict) -> bool:
+    progress = int(puzzle.get("_progress", 0) or 0)
+    if progress <= 0:
+        return False
+    moves_to_undo = 1 if progress % 2 else 2
+    undone = 0
+    for _ in range(moves_to_undo):
+        if not undo_puzzle_move(puzzle):
+            break
+        undone += 1
+    while undone and int(puzzle.get("_progress", 0) or 0) % 2:
+        if not undo_puzzle_move(puzzle):
+            break
+    return undone > 0
+
+
+def puzzle_is_checkmate(puzzle: dict) -> bool:
+    if shogi is None:
+        return False
+    try:
+        return shogi.Board(puzzle_sfen(puzzle)).is_checkmate()
+    except Exception:
+        return False
+
+
 def forced_reply_mate_continuation(puzzle: dict, move_value: str) -> tuple[str, list[str]] | None:
     line = mate_line_after_attack(puzzle, move_value)
     if not line or len(line) < 3:
@@ -1065,7 +1090,7 @@ class ShogiDestinationSelect(discord.ui.Select):
             return
 
         moves = solution_moves(puzzle)
-        if int(puzzle.get("_progress", 0) or 0) >= len(moves):
+        if int(puzzle.get("_progress", 0) or 0) >= len(moves) or puzzle_is_checkmate(puzzle):
             for item in view.children:
                 item.disabled = True
             _, reward_text = await grant_reward(interaction, puzzle["level"])
@@ -1090,7 +1115,7 @@ class ShogiDestinationSelect(discord.ui.Select):
                 await interaction.edit_original_response(content=f"正解手でしたが、応手の局面更新に失敗しました。\n{error}", view=view)
                 return
 
-        if int(puzzle.get("_progress", 0) or 0) >= len(moves):
+        if int(puzzle.get("_progress", 0) or 0) >= len(moves) or puzzle_is_checkmate(puzzle):
             for item in view.children:
                 item.disabled = True
             _, reward_text = await grant_reward(interaction, puzzle["level"])
@@ -1150,7 +1175,7 @@ class ShogiPuzzleUndoButton(discord.ui.Button):
         if interaction.user.id != view.owner_id:
             await interaction.response.send_message("この詰将棋を操作できるのは開始した人だけです。", ephemeral=True)
             return
-        if not undo_puzzle_move(view.puzzle):
+        if not undo_puzzle_turn(view.puzzle):
             await interaction.response.send_message("戻せる手がありません。", ephemeral=True)
             return
         await interaction.response.edit_message(
