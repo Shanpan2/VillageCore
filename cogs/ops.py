@@ -7,6 +7,11 @@ from discord.ext import commands
 
 from database.config_db import db_get, db_get_all_config, db_set
 
+try:
+    import shogi
+except ModuleNotFoundError:
+    shogi = None
+
 
 JST = timezone(timedelta(hours=9))
 
@@ -35,6 +40,16 @@ def mention_channel(guild: discord.Guild, raw_id: str | int | None) -> str:
     except (TypeError, ValueError):
         channel = None
     return channel.mention if channel else f"不明: `{raw_id}`"
+
+
+def shogi_library_status() -> str:
+    if shogi is None:
+        return "NG: python-shogi 未導入"
+    try:
+        board = shogi.Board()
+        return f"OK: python-shogi / `{board.sfen()}`"
+    except Exception as exc:
+        return f"NG: {type(exc).__name__}"
 
 
 def read_json(raw: str | None, default):
@@ -161,6 +176,7 @@ class Ops(commands.Cog):
         embed.add_field(name="役職パネル数", value=str(role_panels), inline=True)
         embed.add_field(name="FAQ数", value=str(faq_count), inline=True)
         embed.add_field(name="メンテナンス", value="ON" if await db_get(maintenance_key(guild_id)) == "on" else "OFF", inline=True)
+        embed.add_field(name="将棋判定", value=shogi_library_status(), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="setup_wizard", description="導入時に必要な設定を案内します")

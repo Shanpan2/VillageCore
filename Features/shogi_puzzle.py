@@ -1127,6 +1127,11 @@ def shogi_puzzle_embed() -> discord.Embed:
     embed.add_field(name="初級", value="1手詰め中心 / 2コイン", inline=True)
     embed.add_field(name="中級", value="3手詰め中心 / 5コイン", inline=True)
     embed.add_field(name="上級", value="5手詰め中心 / 8コイン", inline=True)
+    embed.add_field(
+        name="将棋判定",
+        value="OK: python-shogi 有効" if shogi is not None else "NG: python-shogi 未導入",
+        inline=False,
+    )
     return embed
 
 

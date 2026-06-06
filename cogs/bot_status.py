@@ -7,6 +7,11 @@ from discord.ext import commands
 
 from database.config_db import db_get, use_postgres
 
+try:
+    import shogi
+except ModuleNotFoundError:
+    shogi = None
+
 
 class BotStatus(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -36,6 +41,8 @@ class BotStatus(commands.Cog):
         embed.add_field(name="Gemini API", value="OK" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "未設定", inline=True)
         embed.add_field(name="ffmpeg", value="OK" if shutil.which("ffmpeg") else "未検出", inline=True)
         embed.add_field(name="登録コマンド数", value=str(command_count), inline=True)
+
+        embed.add_field(name="python-shogi", value="OK" if shogi is not None else "未導入", inline=True)
 
         if me and perms:
             checks = {
