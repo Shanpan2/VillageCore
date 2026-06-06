@@ -12,6 +12,7 @@ cookies.txt
 *.sqlite3
 *.db
 *.log
+mate*.sfen
 .venv/
 venv/
 ticket_logs/
