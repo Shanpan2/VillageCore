@@ -146,6 +146,7 @@ async def load_cogs():
         "Features.daifugo",
         "Features.dice",
         "Features.google_search",
+        "Features.gomoku",
         "Features.ito",
         "Features.meigen",
         "Features.omikuji",
@@ -181,6 +182,7 @@ def register_persistent_views():
     from views.ticket_views import ClosedTicketView, TicketButtonView, TicketControlView
     from views.role_panel_views import LegacyRolePanelView, RolePanelView
     from cogs.quick import GameControlView, GameMenuView, OthelloModeView
+    from Features.gomoku import GomokuModeView
     from Features.shogi import ShogiPanelView
     from Features.shogi_puzzle import ShogiPuzzleLevelView
     # ★ AttendanceView は attendance.py に統合したため削除
@@ -191,9 +193,10 @@ def register_persistent_views():
     bot.add_view(LegacyRolePanelView())
     bot.add_view(GameMenuView())
     bot.add_view(OthelloModeView())
+    bot.add_view(GomokuModeView())
     bot.add_view(ShogiPanelView())
     bot.add_view(ShogiPuzzleLevelView())
-    for game in ("uno", "sevens", "daifugo", "poker", "othello", "ito", "codenames", "werewolf"):
+    for game in ("uno", "sevens", "daifugo", "poker", "othello", "gomoku", "ito", "codenames", "werewolf"):
         bot.add_view(GameControlView(game))
 
 

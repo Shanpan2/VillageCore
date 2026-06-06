@@ -24,6 +24,7 @@ from Features.daifugo import (
 )
 from Features.ito import ItoLobbyView, DEFAULT_TOPICS, begin_ito, delete_ito_game, ito_games, lobby_text as ito_lobby_text, save_ito_game
 from Features.omikuji import run_omikuji
+from Features.gomoku import GomokuModeView, delete_gomoku_game, gomoku_games, gomoku_mode_embed
 from Features.othello import (
     AI_DIFFICULTIES,
     AI_PLAYER_ID,
@@ -59,6 +60,7 @@ GAME_STORES = {
     "daifugo": ("大富豪", daifugo_games),
     "poker": ("ポーカー", poker_games),
     "othello": ("オセロ", othello_games),
+    "gomoku": ("五目並べ", gomoku_games),
     "ito": ("Ito", ito_games),
     "codenames": ("コードネーム", codenames_games),
     "werewolf": ("人狼", werewolf_games),
@@ -96,6 +98,10 @@ GAME_RULES = {
         "オセロは黒と白の石で相手の石を挟んで裏返すゲームです。"
         "置ける場所がない時は自動でパスされ、両方が置けなくなると終了します。"
         "最後に石が多いプレイヤーの勝ちです。"
+    ),
+    "gomoku": (
+        "五目並べは黒と白の石を交互に置き、縦・横・斜めのいずれかで先に5個並べた人が勝ちです。"
+        "行と列を選んでから「置く」を押します。AI戦は初級・中級・上級から選べます。"
     ),
     "ito": (
         "Itoは、配られた数字を直接言わずに例えで表現する協力ゲームです。"
@@ -427,6 +433,9 @@ class GameStartButton(discord.ui.Button):
         if self.game == "othello":
             await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
             return
+        if self.game == "gomoku":
+            await interaction.response.send_message(embed=gomoku_mode_embed(), view=GomokuModeView())
+            return
         text = creators[self.game](interaction)
         _, store = GAME_STORES[self.game]
         state = store.get(str(interaction.channel_id))
@@ -695,6 +704,9 @@ class GameActionButton(discord.ui.Button):
             if self.game == "othello":
                 await send_othello_lobby(interaction, text_on_error=True)
                 return
+            if self.game == "gomoku":
+                await interaction.response.send_message(embed=gomoku_mode_embed(), view=GomokuModeView())
+                return
             if self.game == "ito":
                 await interaction.response.send_modal(ItoTopicModal())
                 return
@@ -735,6 +747,9 @@ class GameActionButton(discord.ui.Button):
         elif self.action == "join":
             if self.game == "othello":
                 await interaction.response.send_message("オセロは作成された盤面の「参加する」ボタンから参加してください。", ephemeral=True)
+                return
+            if self.game == "gomoku":
+                await interaction.response.send_message("五目並べは作成された盤面の「参加する」ボタンから参加してください。", ephemeral=True)
                 return
             _, store = GAME_STORES[self.game]
             before_state = store.get(str(interaction.channel_id))
@@ -895,6 +910,7 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label="大富豪", value="daifugo", description="手札を早く出し切る定番トランプゲーム"),
             discord.SelectOption(label="ポーカー", value="poker", description="5枚の役で勝負するトランプゲーム"),
             discord.SelectOption(label="オセロ", value="othello", description="盤面に石を置いて相手の石を裏返すゲーム"),
+            discord.SelectOption(label="五目並べ", value="gomoku", description="先に5つ石を並べる定番盤面ゲーム"),
             discord.SelectOption(label="将棋", value="shogi", description="2人で対局する仮版の本将棋"),
             discord.SelectOption(label="詰将棋", value="shogi_puzzle", description="レベル別の詰将棋に挑戦してコインを獲得"),
             discord.SelectOption(label="Ito", value="ito", description="数字を言わずに例えで順番を当てる協力ゲーム"),
@@ -914,6 +930,9 @@ class GameSelect(discord.ui.Select):
         label, _ = GAME_STORES[game]
         if game == "othello":
             await interaction.response.send_message(embed=othello_mode_embed(), view=OthelloModeView())
+            return
+        if game == "gomoku":
+            await interaction.response.send_message(embed=gomoku_mode_embed(), view=GomokuModeView())
             return
         embed = discord.Embed(
             title=f"{label} パネル",
@@ -987,6 +1006,7 @@ class Quick(commands.Cog):
             app_commands.Choice(name="大富豪", value="daifugo"),
             app_commands.Choice(name="ポーカー", value="poker"),
             app_commands.Choice(name="オセロ", value="othello"),
+            app_commands.Choice(name="五目並べ", value="gomoku"),
             app_commands.Choice(name="Ito", value="ito"),
             app_commands.Choice(name="コードネーム", value="codenames"),
             app_commands.Choice(name="人狼", value="werewolf"),
@@ -1036,6 +1056,8 @@ class Quick(commands.Cog):
             await delete_codenames_game(interaction.guild_id or state.get("guild_id"), game_id)
         if game.value == "werewolf":
             await delete_werewolf_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "gomoku":
+            await delete_gomoku_game(interaction.guild_id or state.get("guild_id"), game_id)
         suffix = f"\n理由: {reason[:500]}" if reason else ""
         status = "強制終了" if already_started else "募集を中止"
         await interaction.response.send_message(f"{label}を{status}しました。{suffix}")
