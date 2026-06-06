@@ -383,16 +383,15 @@ async def on_ready():
 
     if TARGET_GUILD_ID:
         guild = discord.Object(id=TARGET_GUILD_ID)
-        # Keep slash commands guild-scoped so Discord does not show global + guild duplicates.
-        bot.tree.clear_commands(guild=guild)
-        print("🔄 Copying slash commands to target guild...", flush=True)
+        print("🔄 Syncing global slash commands...", flush=True)
+        global_synced = await bot.tree.sync()
+        print("🔄 Copying slash commands to target guild for fast local updates...", flush=True)
         bot.tree.copy_global_to(guild=guild)
-
-        print("🔄 Syncing current guild slash commands...", flush=True)
+        print("🔄 Syncing target guild slash commands...", flush=True)
         synced = await bot.tree.sync(guild=guild)
-        asyncio.create_task(clear_global_commands())
         COMMANDS_SYNCED = True
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
+        print(f"🔄 Synced {len(global_synced)} global slash commands", flush=True)
         print(f"🔄 Synced {len(synced)} slash commands to guild {GUILD_ID}", flush=True)
     else:
         synced = await bot.tree.sync()

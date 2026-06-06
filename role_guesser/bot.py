@@ -1362,12 +1362,16 @@ class RoleGuesserBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
+        synced = await self.tree.sync()
+        print(f"Roles Guesser global slash commands synced: {len(synced)}", flush=True)
         if TARGET_GUILD_ID:
             guild = discord.Object(id=TARGET_GUILD_ID)
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-        else:
-            await self.tree.sync()
+            guild_synced = await self.tree.sync(guild=guild)
+            print(
+                f"Roles Guesser guild slash commands synced: {len(guild_synced)} to {GUILD_ID}",
+                flush=True,
+            )
 
 
 role_bot = RoleGuesserBot()
@@ -1392,10 +1396,7 @@ async def mod_autocomplete(
     return choices[:25]
 
 
-@role_bot.tree.command(name="guess", description="Among Us系Modの役職当てを始めます")
-@app_commands.describe(mod="絞り込むMOD名。未指定なら全MODから当てます")
-@app_commands.autocomplete(mod=mod_autocomplete)
-async def guess(interaction: discord.Interaction, mod: str | None = None):
+async def start_guess_session(interaction: discord.Interaction, mod: str | None = None):
     roles = load_roles()
     if not roles:
         await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
@@ -1421,6 +1422,13 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
     embed = session_embed(session)
     view: discord.ui.View = GuessResultView(interaction.user.id) if session.last_result_names else GuessView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view)
+
+
+@role_bot.tree.command(name="guess", description="Among Us系Modの役職当てを始めます")
+@app_commands.describe(mod="絞り込むMOD名。未指定なら全MODから当てます")
+@app_commands.autocomplete(mod=mod_autocomplete)
+async def guess(interaction: discord.Interaction, mod: str | None = None):
+    await start_guess_session(interaction, mod)
 
 
 @role_bot.tree.command(name="quiz", description="Among Us系Modの役職クイズを出します")
