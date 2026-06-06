@@ -69,7 +69,14 @@ def mate_search_pv(sfen: str, depth: int) -> list[str] | None:
     return list(pv) if ok and len(pv) == depth else None
 
 
-def convert_file(level: str, input_path: Path, mate_moves: int, sample_size: int, allow_white: bool) -> list[dict]:
+def convert_file(
+    level: str,
+    input_path: Path,
+    mate_moves: int,
+    sample_size: int,
+    allow_white: bool,
+    max_checked: int,
+) -> list[dict]:
     if not input_path.exists():
         print(f"missing: {input_path}")
         return []
@@ -82,6 +89,9 @@ def convert_file(level: str, input_path: Path, mate_moves: int, sample_size: int
     checked = 0
     for sfen in sfens:
         if len(puzzles) >= sample_size:
+            break
+        if max_checked and checked >= max_checked:
+            print(f"{level}: stopped after checking {checked} positions")
             break
         checked += 1
         try:
@@ -119,12 +129,24 @@ def main() -> int:
     parser.add_argument("--sample-size", type=int, default=50, help="Number of puzzles per level.")
     parser.add_argument("--output", type=Path, default=OUTPUT_FILE)
     parser.add_argument("--allow-white", action="store_true", help="Also import positions where side to move is white/gote.")
+    parser.add_argument(
+        "--levels",
+        nargs="+",
+        choices=sorted(DEFAULT_INPUTS),
+        default=sorted(DEFAULT_INPUTS),
+        help="Levels to import. Use 'normal' for mate3 only, 'hard' for mate5 only.",
+    )
+    parser.add_argument("--max-checked", type=int, default=500, help="Maximum SFEN positions to check per level. Use 0 for no limit.")
     args = parser.parse_args()
 
     all_puzzles = []
     for level, (filename, mate_moves) in DEFAULT_INPUTS.items():
+        if level not in args.levels:
+            continue
         print(f"converting {filename} as {level} ({mate_moves} moves)")
-        all_puzzles.extend(convert_file(level, Path(filename), mate_moves, args.sample_size, args.allow_white))
+        all_puzzles.extend(
+            convert_file(level, Path(filename), mate_moves, args.sample_size, args.allow_white, args.max_checked)
+        )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(all_puzzles, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
