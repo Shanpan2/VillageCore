@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-import shogi
+try:
+    import shogi
+except ModuleNotFoundError:
+    shogi = None
 
 
 PUZZLE_FILE = Path("assets/shogi/shogi_puzzles.json")
@@ -76,12 +79,90 @@ def validate(puzzles: list[dict]) -> tuple[int, list[str]]:
     return ok, ng
 
 
+def mate_moves_after(board: "shogi.Board") -> list[str]:
+    moves = []
+    for move in board.legal_moves:
+        candidate = shogi.Board(board.sfen())
+        candidate.push(move)
+        if candidate.is_checkmate():
+            moves.append(move.usi())
+    return moves
+
+
+def forced_reply_continuations(board: "shogi.Board") -> list[tuple[str, list[str]]]:
+    continuations = []
+    replies = list(board.legal_moves)
+    if len(replies) != 1:
+        return continuations
+    reply = replies[0]
+    after_reply = shogi.Board(board.sfen())
+    after_reply.push(reply)
+    final_moves = mate_moves_after(after_reply)
+    if final_moves:
+        continuations.append((reply.usi(), final_moves))
+    return continuations
+
+
+def find_alternates(puzzles: list[dict]) -> list[str]:
+    messages: list[str] = []
+    for puzzle in puzzles:
+        pid = puzzle.get("id", "???")
+        sfen = str(puzzle.get("sfen", ""))
+        answer = str(puzzle.get("answer", ""))
+        mate_moves = int(puzzle.get("mate_moves") or 1)
+        solution = as_list(puzzle.get("solution"), [answer])
+        acceptable = set(as_list(puzzle.get("acceptable_answers"), [answer]))
+
+        try:
+            board = shogi.Board(sfen)
+        except Exception as exc:
+            messages.append(f"[{pid}] 別解検出をスキップ: SFEN読み込み失敗: {exc}")
+            continue
+
+        if mate_moves == 1:
+            mates = set(mate_moves_after(board))
+            extra = sorted(mates - acceptable)
+            if extra:
+                messages.append(f"[{pid}] 1手詰めの未登録別解: {', '.join(extra)}")
+            continue
+
+        if len(solution) >= 3:
+            first_answer = solution[0]
+            alternates = []
+            for move in board.legal_moves:
+                move_usi = move.usi()
+                if move_usi == first_answer:
+                    continue
+                candidate = shogi.Board(sfen)
+                candidate.push(move)
+                if not candidate.is_check():
+                    continue
+                for reply, final_moves in forced_reply_continuations(candidate):
+                    alternates.append(f"{move_usi} / {reply} / {', '.join(final_moves)}")
+            if alternates:
+                messages.append(f"[{pid}] 3手詰め相当の別解候補: " + " ; ".join(alternates))
+
+    return messages
+
+
 def main() -> int:
+    if shogi is None:
+        print("python-shogi がローカル環境に入っていません。")
+        print("次のどちらかでインストールしてから再実行してください。")
+        print("  py -m pip install python-shogi")
+        print("  python -m pip install python-shogi")
+        return 2
+
     puzzles = json.loads(PUZZLE_FILE.read_text(encoding="utf-8"))
     ok, ng = validate(puzzles)
     print(f"\n結果: {ok}問OK / {len(ng)}件NG\n")
     for message in ng:
         print("NG:", message)
+
+    alternates = find_alternates(puzzles)
+    print(f"\n別解チェック: {len(alternates)}件\n")
+    for message in alternates:
+        print("ALT:", message)
     return 1 if ng else 0
 
 
