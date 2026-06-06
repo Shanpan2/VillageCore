@@ -1005,7 +1005,7 @@ class ShogiDestinationSelect(discord.ui.Select):
         correct_text = correct_text_for_current(puzzle)
         selected_text = move_label(puzzle, selected)
         legal, mate, analysis_text = analyze_move(puzzle, selected)
-        forced_line = mate_line_after_attack(puzzle, selected) if len(solution_moves(puzzle)) > 1 else None
+        forced_line = mate_line_after_attack(puzzle, selected)
         if forced_line:
             correct = True
             next_progress = int(puzzle.get("_progress", 0) or 0) + 2
