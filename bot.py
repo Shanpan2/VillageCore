@@ -27,6 +27,23 @@ DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN")
 BOT_ACTIVITY_TEXT = os.getenv("BOT_ACTIVITY_TEXT", "/help | むらびと君")
 COMMANDS_SYNCED = False
 PERSISTENT_VIEWS_REGISTERED = False
+
+
+def parse_discord_id(value: str | None, name: str) -> int | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value.isdigit():
+        print(
+            f"⚠️ {name} must be a numeric Discord ID, not an invite URL or text: {value!r}",
+            flush=True,
+        )
+        return None
+    return int(value)
+
+
+TARGET_GUILD_ID = parse_discord_id(GUILD_ID, "GUILD_ID")
+TARGET_LEGACY_GUILD_ID = parse_discord_id(LEGACY_GUILD_ID, "LEGACY_GUILD_ID")
 DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.backup",
     "cogs.bot_status",
@@ -192,10 +209,10 @@ async def clear_global_commands():
 
 
 async def clear_legacy_guild_commands():
-    if not LEGACY_GUILD_ID:
+    if not TARGET_LEGACY_GUILD_ID:
         return
     try:
-        guild = discord.Object(id=int(LEGACY_GUILD_ID))
+        guild = discord.Object(id=TARGET_LEGACY_GUILD_ID)
         print(f"🔄 Clearing legacy guild slash commands: {LEGACY_GUILD_ID}", flush=True)
         bot.tree.clear_commands(guild=guild)
         synced = await bot.tree.sync(guild=guild)
@@ -364,8 +381,8 @@ async def on_ready():
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         return
 
-    if GUILD_ID:
-        guild = discord.Object(id=int(GUILD_ID))
+    if TARGET_GUILD_ID:
+        guild = discord.Object(id=TARGET_GUILD_ID)
         # Keep slash commands guild-scoped so Discord does not show global + guild duplicates.
         bot.tree.clear_commands(guild=guild)
         print("🔄 Copying slash commands to target guild...", flush=True)

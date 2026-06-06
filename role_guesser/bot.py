@@ -15,6 +15,22 @@ ROLE_GUESSER_TOKEN = os.getenv("ROLE_GUESSER_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
 DATA_PATH = Path(__file__).with_name("data") / "roles.csv"
 
+
+def parse_discord_id(value: str | None, name: str) -> int | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value.isdigit():
+        print(
+            f"⚠️ {name} must be a numeric Discord ID, not an invite URL or text: {value!r}",
+            flush=True,
+        )
+        return None
+    return int(value)
+
+
+TARGET_GUILD_ID = parse_discord_id(GUILD_ID, "GUILD_ID")
+
 MOD_ALIASES = {
     "vanilla": "Vanilla",
     "among us": "Vanilla",
@@ -54,6 +70,10 @@ FEATURE_QUESTIONS = {
     "task_kill_charge_power": "タスク進捗でキル回数やキルCTが変わりますか？",
     "can_kill": "自分の操作で誰かを死亡させる能力がありますか？",
     "normal_kill": "普通のキルボタンでキルする役職ですか？",
+    "sheriff_misfire_power": "キル不可対象を撃つと、誤爆として自分が死亡する役職ですか？",
+    "guess_misfire_power": "会議中の役職推測を外すと、自分が死亡しますか？",
+    "suicide_button_power": "自分から自決するボタンや能力を持ちますか？",
+    "target_mismatch_suicide_power": "能力対象の陣営や条件を間違えると自分が死亡しますか？",
     "special_kill": "普通のキルボタン以外で死亡させる能力がありますか？（例: 爆破、推測、ビーム、罠、会議キル）",
     "target_power": "特定の相手を選ぶ能力ですか？（例: 指名、恋人化、投獄、ターゲット指定）",
     "target_kill_power": "特定の相手を殺す/死なせることが目的や能力条件ですか？（例: 賞金首、復讐対象、推測キル）",
@@ -290,6 +310,10 @@ QUIZ_HINTS = {
     "task_kill_charge_power": "タスク進捗でキル回数やCTが変わります。",
     "can_kill": "キル能力に関わります。",
     "normal_kill": "通常キルに関わります。",
+    "sheriff_misfire_power": "キル不可対象を撃つと誤爆して自分が死亡します。",
+    "guess_misfire_power": "役職推測を外すと自分が死亡します。",
+    "suicide_button_power": "自分から自決できる能力があります。",
+    "target_mismatch_suicide_power": "能力対象を間違えると自分が死亡します。",
     "special_kill": "特殊キルに関わります。",
     "target_power": "特定の対象を選ぶ能力があります。",
     "target_kill_power": "指定対象のキルが能力や勝利条件に関わります。",
@@ -561,6 +585,10 @@ QUESTION_PRIORITY_BONUS = {
     "modifier_role": 1.6,
     "host_observer_power": 1.6,
     "can_kill": 1.5,
+    "sheriff_misfire_power": 1.9,
+    "guess_misfire_power": 1.9,
+    "suicide_button_power": 1.65,
+    "target_mismatch_suicide_power": 1.75,
     "can_win_alone": 1.5,
     "meeting_ability": 1.2,
     "vote_power": 1.2,
@@ -789,6 +817,10 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "ghost_neutral_power",
         "can_kill",
         "normal_kill",
+        "sheriff_misfire_power",
+        "guess_misfire_power",
+        "suicide_button_power",
+        "target_mismatch_suicide_power",
         "special_kill",
         "can_win_alone",
         "oil_douse_win_power",
@@ -1330,8 +1362,8 @@ class RoleGuesserBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
+        if TARGET_GUILD_ID:
+            guild = discord.Object(id=TARGET_GUILD_ID)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
         else:
