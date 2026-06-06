@@ -1,6 +1,7 @@
 config.json
 *.json
 !assets/shogi/shogi_puzzles.json
+!assets/shogi/shogi_puzzles_yaneura.json
 __pycache__/
 *.pyc
 .env

@@ -20,6 +20,9 @@ except ModuleNotFoundError:
 
 JST = timezone(timedelta(hours=9))
 PUZZLE_FILE = Path("assets/shogi/shogi_puzzles.json")
+EXTRA_PUZZLE_FILES = [
+    Path("assets/shogi/shogi_puzzles_yaneura.json"),
+]
 
 LEVELS = {
     "easy": {"label": "初級", "reward": 2, "description": "1手詰め中心。まずは気軽に。"},
@@ -208,15 +211,15 @@ def puzzle_for_level(level: str) -> dict:
     return random.choice(candidates)
 
 
-def load_puzzles() -> list[dict]:
-    if not PUZZLE_FILE.exists() or PUZZLE_FILE.stat().st_size <= 0:
-        return PUZZLES
+def load_puzzle_file(path: Path) -> list[dict]:
+    if not path.exists() or path.stat().st_size <= 0:
+        return []
     try:
-        raw = json.loads(PUZZLE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return PUZZLES
+        return []
     if not isinstance(raw, list):
-        return PUZZLES
+        return []
     puzzles = []
     for item in raw:
         if not isinstance(item, dict):
@@ -243,6 +246,13 @@ def load_puzzles() -> list[dict]:
         if isinstance(item.get("options"), list):
             puzzle["options"] = item["options"]
         puzzles.append(puzzle)
+    return puzzles
+
+
+def load_puzzles() -> list[dict]:
+    puzzles = load_puzzle_file(PUZZLE_FILE)
+    for path in EXTRA_PUZZLE_FILES:
+        puzzles.extend(load_puzzle_file(path))
     return puzzles or PUZZLES
 
 

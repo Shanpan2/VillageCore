@@ -1,0 +1,102 @@
+[
+  {
+    "id": "yaneura_hard_001",
+    "level": "hard",
+    "title": "やねうら王 5手詰め 001",
+    "side": "先手",
+    "sfen": "ln1g4l/1r1sG1+P2/p1p3+B2/3ppp2p/2N3k2/2P6/PP1PPPS1P/2GS5/LN2KG1NL b B2Prs2p 57",
+    "answer": "P*3f",
+    "answer_text": "P*3f",
+    "solution": [
+      "P*3f",
+      "3e4e",
+      "B*5f",
+      "4e5e",
+      "3g4f"
+    ],
+    "mate_moves": 5,
+    "explanation": "5手詰めです。手順: P*3f -> 3e4e -> B*5f -> 4e5e -> 3g4f",
+    "source": "yaneuraou_2020_mate_sfen",
+    "license": "no_copyright_claimed_by_author"
+  },
+  {
+    "id": "yaneura_hard_002",
+    "level": "hard",
+    "title": "やねうら王 5手詰め 002",
+    "side": "先手",
+    "sfen": "ln7/2k1+Bs3/5pp2/p1p1G3p/7N1/P1PB4P/3PPPP2/1P1g1KSp1/LN1r1G2L b GS4Prsnl 71",
+    "answer": "5d6c",
+    "answer_text": "5d6c",
+    "solution": [
+      "5d6c",
+      "7b7a",
+      "6f9c",
+      "9a9c",
+      "G*7b"
+    ],
+    "mate_moves": 5,
+    "explanation": "5手詰めです。手順: 5d6c -> 7b7a -> 6f9c -> 9a9c -> G*7b",
+    "source": "yaneuraou_2020_mate_sfen",
+    "license": "no_copyright_claimed_by_author"
+  },
+  {
+    "id": "yaneura_hard_003",
+    "level": "hard",
+    "title": "やねうら王 5手詰め 003",
+    "side": "先手",
+    "sfen": "lR1p1B1nl/4+N4/p3s4/4k1G1p/2n1s1Pp1/P1P2p2P/1PpSN4/1+r1G1KS2/L2P1G2L b G6Pb 103",
+    "answer": "8a8d+",
+    "answer_text": "8a8d+",
+    "solution": [
+      "8a8d+",
+      "5c6d",
+      "G*6e",
+      "5d6c",
+      "8d7d"
+    ],
+    "mate_moves": 5,
+    "explanation": "5手詰めです。手順: 8a8d+ -> 5c6d -> G*6e -> 5d6c -> 8d7d",
+    "source": "yaneuraou_2020_mate_sfen",
+    "license": "no_copyright_claimed_by_author"
+  },
+  {
+    "id": "yaneura_hard_004",
+    "level": "hard",
+    "title": "やねうら王 5手詰め 004",
+    "side": "先手",
+    "sfen": "ln1+P1G1S1/7+R1/p+R7/1pppN4/G1k1s1p1L/P5P2/1+bPPLP3/3GP1+n2/L1S1K2N1 b GS5Pbp 157",
+    "answer": "S*6f",
+    "answer_text": "S*6f",
+    "solution": [
+      "S*6f",
+      "5e6f",
+      "G*8e",
+      "8d8e",
+      "8c8e"
+    ],
+    "mate_moves": 5,
+    "explanation": "5手詰めです。手順: S*6f -> 5e6f -> G*8e -> 8d8e -> 8c8e",
+    "source": "yaneuraou_2020_mate_sfen",
+    "license": "no_copyright_claimed_by_author"
+  },
+  {
+    "id": "yaneura_hard_005",
+    "level": "hard",
+    "title": "やねうら王 5手詰め 005",
+    "side": "先手",
+    "sfen": "l4g2l/1g3ks2/p2pR3p/2p2p3/1p4S2/P3pN2P/BP1P1+s+p1N/2GS4+p/LNK2G3 b LPrbn4p 99",
+    "answer": "4f3d",
+    "answer_text": "4f3d",
+    "solution": [
+      "4f3d",
+      "4b3a",
+      "5c2c",
+      "6c6d",
+      "2c2b+"
+    ],
+    "mate_moves": 5,
+    "explanation": "5手詰めです。手順: 4f3d -> 4b3a -> 5c2c -> 6c6d -> 2c2b+",
+    "source": "yaneuraou_2020_mate_sfen",
+    "license": "no_copyright_claimed_by_author"
+  }
+]
