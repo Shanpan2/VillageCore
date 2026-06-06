@@ -330,9 +330,12 @@ async def send_gomoku_state(interaction: discord.Interaction, game_id: str, pref
     view = GomokuView(game_id, show_join=game.get("white_id") is None)
     if initial:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, file=file, view=view)
+            message = await interaction.followup.send(embed=embed, file=file, view=view, wait=True)
         else:
             await interaction.response.send_message(embed=embed, file=file, view=view)
+            message = await interaction.original_response()
+        game["message_id"] = message.id
+        await save_gomoku_game(interaction.guild_id or game.get("guild_id"), game_id, game)
     else:
         await interaction.message.edit(embed=embed, attachments=[file], view=view)
 
@@ -679,14 +682,15 @@ class Gomoku(commands.Cog):
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
             game = gomoku_games[game_id]
+            message_id = game.get("message_id") or "未保存"
             if not game.get("ai") and game.get("white_id") is None:
                 await interaction.response.send_message(
-                    "このチャンネルには未開始の五目並べ募集があります。既存パネルの「参加する」または「募集を中止」を使ってください。",
+                    f"このチャンネルには未開始の五目並べ募集があります。既存パネルの「参加する」または「募集を中止」を使ってください。\n対象メッセージID: `{message_id}`",
                     view=GomokuLobbyCleanupView(game_id),
                     ephemeral=True,
                 )
                 return
-            await interaction.response.send_message("このチャンネルにはすでに進行中の五目並べがあります。", ephemeral=True)
+            await interaction.response.send_message(f"このチャンネルにはすでに進行中の五目並べがあります。\n対象メッセージID: `{message_id}`", ephemeral=True)
             return
         game = {
             "board": new_board(),
@@ -706,6 +710,9 @@ class Gomoku(commands.Cog):
             file=render_gomoku_image(game["board"]),
             view=GomokuView(game_id, show_join=True),
         )
+        message = await interaction.original_response()
+        game["message_id"] = message.id
+        await save_gomoku_game(interaction.guild_id, game_id, game)
 
     async def start_ai(self, interaction: discord.Interaction, difficulty: str, bet: int = 0, first: str = "black"):
         if not interaction.guild_id:
@@ -714,14 +721,15 @@ class Gomoku(commands.Cog):
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
             game = gomoku_games[game_id]
+            message_id = game.get("message_id") or "未保存"
             if not game.get("ai") and game.get("white_id") is None:
                 await interaction.response.send_message(
-                    "このチャンネルには未開始の五目並べ募集があります。既存募集を中止してからAI戦を開始してください。",
+                    f"このチャンネルには未開始の五目並べ募集があります。既存募集を中止してからAI戦を開始してください。\n対象メッセージID: `{message_id}`",
                     view=GomokuLobbyCleanupView(game_id),
                     ephemeral=True,
                 )
                 return
-            await interaction.response.send_message("このチャンネルにはすでに進行中の五目並べがあります。", ephemeral=True)
+            await interaction.response.send_message(f"このチャンネルにはすでに進行中の五目並べがあります。\n対象メッセージID: `{message_id}`", ephemeral=True)
             return
         if bet < 0:
             await interaction.response.send_message("賭けコインは0以上にしてください。", ephemeral=True)

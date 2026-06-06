@@ -29,6 +29,7 @@ from Features.othello import (
     AI_DIFFICULTIES,
     AI_PLAYER_ID,
     generate_othello_image,
+    delete_othello_game,
     get_valid_moves,
     new_board,
     othello_games,
@@ -619,6 +620,36 @@ def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]
     return True, f"{label}を{status}しました。"
 
 
+async def delete_game_state(game: str, guild_id: int | None, game_id: str, state: dict):
+    if game == "poker":
+        await delete_poker_game(guild_id or state.get("guild_id"), game_id)
+    if game == "sevens":
+        await delete_sevens_game(guild_id or state.get("guild_id"), game_id)
+    if game == "daifugo":
+        await delete_daifugo_game(guild_id or state.get("guild_id"), game_id)
+    if game == "uno":
+        await delete_uno_game(guild_id or state.get("guild_id"), game_id)
+    if game == "ito":
+        await delete_ito_game(guild_id or state.get("guild_id"), game_id)
+    if game == "codenames":
+        await delete_codenames_game(guild_id or state.get("guild_id"), game_id)
+    if game == "werewolf":
+        await delete_werewolf_game(guild_id or state.get("guild_id"), game_id)
+    if game == "gomoku":
+        await delete_gomoku_game(guild_id or state.get("guild_id"), game_id)
+    if game == "othello":
+        await delete_othello_game(guild_id or state.get("guild_id"), game_id)
+
+
+def state_matches_message(state: dict, game_id: str, message_id: str) -> bool:
+    if game_id == message_id:
+        return True
+    for key in ("message_id", "channel_message_id", "lobby_message_id"):
+        if str(state.get(key) or "") == message_id:
+            return True
+    return False
+
+
 async def begin_game(interaction: discord.Interaction, game: str):
     if game == "poker":
         await start_poker_game(interaction, str(interaction.channel_id))
@@ -1060,9 +1091,121 @@ class Quick(commands.Cog):
             await delete_werewolf_game(interaction.guild_id or state.get("guild_id"), game_id)
         if game.value == "gomoku":
             await delete_gomoku_game(interaction.guild_id or state.get("guild_id"), game_id)
+        if game.value == "othello":
+            await delete_othello_game(interaction.guild_id or state.get("guild_id"), game_id)
         suffix = f"\n理由: {reason[:500]}" if reason else ""
         status = "強制終了" if already_started else "募集を中止"
         await interaction.response.send_message(f"{label}を{status}しました。{suffix}")
+
+    @app_commands.command(name="game_cancel_message", description="【管理者】メッセージIDを指定してゲームを強制キャンセルします")
+    @app_commands.describe(message_id="キャンセルしたいゲームパネルのメッセージID", reason="キャンセル理由")
+    @app_commands.default_permissions(manage_guild=True)
+    async def game_cancel_message(self, interaction: discord.Interaction, message_id: str, reason: str = ""):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("この操作にはサーバー管理権限が必要です。", ephemeral=True)
+            return
+        message_id = message_id.strip()
+        if not message_id.isdigit():
+            await interaction.response.send_message("メッセージIDは数字で指定してください。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        fetched_message = None
+        try:
+            fetched_message = await interaction.channel.fetch_message(int(message_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            fetched_message = None
+
+        matches: list[tuple[str, str, dict]] = []
+        seen: set[tuple[str, str]] = set()
+        for game_name, (_, store) in GAME_STORES.items():
+            for game_id, state in list(store.items()):
+                if not isinstance(state, dict):
+                    continue
+                state_guild_id = state.get("guild_id")
+                if state_guild_id and int(state_guild_id) != interaction.guild_id:
+                    continue
+                if state_matches_message(state, game_id, message_id):
+                    seen.add((game_name, game_id))
+                    matches.append((game_name, game_id, state))
+
+        if not matches and fetched_message:
+            channel_game_id = str(fetched_message.channel.id)
+            for game_name, (_, store) in GAME_STORES.items():
+                state = store.get(channel_game_id)
+                if not isinstance(state, dict):
+                    continue
+                state_guild_id = state.get("guild_id")
+                if state_guild_id and int(state_guild_id) != interaction.guild_id:
+                    continue
+                if (game_name, channel_game_id) not in seen:
+                    matches.append((game_name, channel_game_id, state))
+
+        if not matches:
+            if fetched_message:
+                try:
+                    await fetched_message.edit(content="このゲームパネルは管理者により無効化されました。", view=None, attachments=[])
+                    await interaction.followup.send("ゲーム状態は見つかりませんでしたが、指定メッセージのボタンを無効化しました。", ephemeral=True)
+                    return
+                except discord.HTTPException:
+                    pass
+            await interaction.followup.send("指定メッセージIDに紐づくゲームが見つかりませんでした。", ephemeral=True)
+            return
+
+        lines = []
+        for game_name, game_id, state in matches:
+            label, store = GAME_STORES[game_name]
+            store.pop(game_id, None)
+            await delete_game_state(game_name, interaction.guild_id, game_id, state)
+            lines.append(f"- {label}: `{game_id}`")
+
+        if fetched_message:
+            try:
+                suffix = f"\n理由: {reason[:500]}" if reason else ""
+                await fetched_message.edit(content=f"このゲームは管理者によりキャンセルされました。{suffix}", view=None, attachments=[])
+            except discord.HTTPException:
+                pass
+
+        suffix = f"\n理由: {reason[:500]}" if reason else ""
+        await interaction.followup.send("指定メッセージのゲームをキャンセルしました。\n" + "\n".join(lines) + suffix, ephemeral=True)
+
+    @app_commands.command(name="game_cancel_all", description="【管理者】このサーバー内の全ゲームを強制キャンセルします")
+    @app_commands.describe(reason="キャンセル理由")
+    @app_commands.default_permissions(manage_guild=True)
+    async def game_cancel_all(self, interaction: discord.Interaction, reason: str = ""):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("この操作にはサーバー管理権限が必要です。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        counts: list[str] = []
+        total = 0
+        for game_name, (label, store) in GAME_STORES.items():
+            removed = 0
+            for game_id, state in list(store.items()):
+                if not isinstance(state, dict):
+                    continue
+                state_guild_id = state.get("guild_id")
+                if state_guild_id and int(state_guild_id) != interaction.guild_id:
+                    continue
+                store.pop(game_id, None)
+                await delete_game_state(game_name, interaction.guild_id, game_id, state)
+                removed += 1
+                total += 1
+            if removed:
+                counts.append(f"- {label}: {removed}件")
+
+        if not total:
+            await interaction.followup.send("このサーバー内にキャンセル対象のゲームはありませんでした。", ephemeral=True)
+            return
+        suffix = f"\n理由: {reason[:500]}" if reason else ""
+        await interaction.followup.send("このサーバー内のゲームをすべてキャンセルしました。\n" + "\n".join(counts) + suffix, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
