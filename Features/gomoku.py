@@ -469,6 +469,7 @@ class GomokuJoinButton(discord.ui.Button):
             await interaction.followup.send("作成者は後手に参加できません。", ephemeral=True)
             return
         game["white_id"] = interaction.user.id
+        game["started"] = True
         await send_gomoku_state(interaction, self.game_id, f"{interaction.user.mention} が白番で参加しました。")
         await interaction.followup.send("参加しました。", ephemeral=True)
 
@@ -493,19 +494,64 @@ class GomokuSurrenderButton(discord.ui.Button):
         await finish_gomoku_game(interaction, self.game_id, winner, f"{interaction.user.mention} が降参しました。")
 
 
+class GomokuCancelButton(discord.ui.Button):
+    def __init__(self, game_id: str):
+        super().__init__(label="募集を中止", style=discord.ButtonStyle.danger, custom_id=f"gomoku_cancel_{game_id}", row=2)
+        self.game_id = game_id
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await safe_defer(interaction, ephemeral=True, thinking=True):
+            return
+        game = gomoku_games.get(self.game_id)
+        if not game:
+            await interaction.followup.send("ゲームが見つかりません。", ephemeral=True)
+            return
+        if game.get("white_id") is not None:
+            await interaction.followup.send("対戦開始後は「降参」を使ってください。", ephemeral=True)
+            return
+        is_creator = interaction.user.id == game.get("creator_id") or interaction.user.id == game.get("black_id")
+        is_admin = bool(getattr(interaction.user, "guild_permissions", None) and interaction.user.guild_permissions.manage_guild)
+        if not is_creator and not is_admin:
+            await interaction.followup.send("募集を中止できるのは作成者または管理者だけです。", ephemeral=True)
+            return
+        guild_id = interaction.guild_id or game.get("guild_id")
+        await delete_gomoku_game(guild_id, self.game_id)
+        gomoku_games.pop(self.game_id, None)
+        try:
+            await interaction.message.edit(
+                embed=discord.Embed(
+                    title="五目並べ 募集中止",
+                    description=f"{interaction.user.mention} が五目並べ募集を中止しました。",
+                    color=0x95A5A6,
+                ),
+                attachments=[],
+                view=None,
+            )
+        except Exception:
+            pass
+        await interaction.followup.send("五目並べ募集を中止しました。", ephemeral=True)
+
+
 class GomokuView(discord.ui.View):
     def __init__(self, game_id: str, show_join: bool = False):
         super().__init__(timeout=None)
         self.game_id = game_id
         self.selected_x: int | None = None
         self.selected_y: int | None = None
-        self.add_item(GomokuRowSelect(game_id))
-        self.add_item(GomokuColSelect(game_id))
-        self.add_item(GomokuPlaceButton(game_id))
         if show_join:
             self.add_item(GomokuJoinButton(game_id))
+            self.add_item(GomokuCancelButton(game_id))
         else:
+            self.add_item(GomokuRowSelect(game_id))
+            self.add_item(GomokuColSelect(game_id))
+            self.add_item(GomokuPlaceButton(game_id))
             self.add_item(GomokuSurrenderButton(game_id))
+
+
+class GomokuLobbyCleanupView(discord.ui.View):
+    def __init__(self, game_id: str):
+        super().__init__(timeout=300)
+        self.add_item(GomokuCancelButton(game_id))
 
 
 def gomoku_mode_embed() -> discord.Embed:
@@ -538,7 +584,11 @@ class GomokuModeButton(discord.ui.Button):
         if self.mode == "pvp":
             await cog.start_pvp(interaction)
             return
-        await cog.start_ai(interaction, self.difficulty or "normal", 0, "black")
+        await interaction.response.send_message(
+            embed=gomoku_first_embed(self.difficulty or "normal"),
+            view=GomokuFirstView(self.difficulty or "normal"),
+            ephemeral=True,
+        )
 
 
 class GomokuModeView(discord.ui.View):
@@ -548,6 +598,64 @@ class GomokuModeView(discord.ui.View):
         self.add_item(GomokuModeButton("AI: 初級", "ai", "easy", row=0))
         self.add_item(GomokuModeButton("AI: 中級", "ai", "normal", row=0))
         self.add_item(GomokuModeButton("AI: 上級", "ai", "hard", row=1))
+        self.add_item(GomokuRulesButton(row=1))
+
+
+class GomokuRulesButton(discord.ui.Button):
+    def __init__(self, row: int = 1):
+        super().__init__(label="ルール", style=discord.ButtonStyle.secondary, custom_id="game_gomoku_rules", row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="五目並べのルール",
+            description=(
+                "黒と白が交互に石を置き、先に縦・横・斜めのどれかで **5個連続** に並べた人が勝ちです。\n\n"
+                "**操作方法**\n"
+                "行と列を選んでから「置く」を押します。すでに石がある場所には置けません。\n\n"
+                "**対人戦**\n"
+                "作成者が黒番、参加者が白番です。参加者が入るまで石は置けません。\n\n"
+                "**AI戦**\n"
+                "初級・中級・上級を選び、先手/後手/ランダムを選んで開始します。"
+            ),
+            color=0xD6A84F,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+def gomoku_first_embed(difficulty: str) -> discord.Embed:
+    label = AI_DIFFICULTIES.get(difficulty, AI_DIFFICULTIES["normal"])["label"]
+    return discord.Embed(
+        title="五目並べ AI対戦",
+        description=f"難易度: **{label}**\n先手・後手を選んでください。",
+        color=0xD6A84F,
+    )
+
+
+class GomokuFirstButton(discord.ui.Button):
+    def __init__(self, label: str, difficulty: str, first: str, row: int = 0):
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"game_gomoku_first_{difficulty}_{first}",
+            row=row,
+        )
+        self.difficulty = difficulty
+        self.first = first
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Gomoku")
+        if not cog:
+            await interaction.response.send_message("五目並べは現在利用できません。", ephemeral=True)
+            return
+        await cog.start_ai(interaction, self.difficulty, 0, self.first)
+
+
+class GomokuFirstView(discord.ui.View):
+    def __init__(self, difficulty: str):
+        super().__init__(timeout=None)
+        self.add_item(GomokuFirstButton("先手（黒）", difficulty, "black", row=0))
+        self.add_item(GomokuFirstButton("後手（白）", difficulty, "white", row=0))
+        self.add_item(GomokuFirstButton("ランダム", difficulty, "random", row=0))
 
 
 class Gomoku(commands.Cog):
@@ -570,7 +678,15 @@ class Gomoku(commands.Cog):
     async def start_pvp(self, interaction: discord.Interaction):
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
-            await interaction.response.send_message("このチャンネルにはすでに五目並べがあります。", ephemeral=True)
+            game = gomoku_games[game_id]
+            if not game.get("ai") and game.get("white_id") is None:
+                await interaction.response.send_message(
+                    "このチャンネルには未開始の五目並べ募集があります。既存パネルの「参加する」または「募集を中止」を使ってください。",
+                    view=GomokuLobbyCleanupView(game_id),
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message("このチャンネルにはすでに進行中の五目並べがあります。", ephemeral=True)
             return
         game = {
             "board": new_board(),
@@ -580,6 +696,7 @@ class Gomoku(commands.Cog):
             "creator_id": interaction.user.id,
             "guild_id": interaction.guild_id,
             "ai": False,
+            "started": False,
         }
         gomoku_games[game_id] = game
         await save_gomoku_game(interaction.guild_id, game_id, game)
@@ -596,7 +713,15 @@ class Gomoku(commands.Cog):
             return
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
-            await interaction.response.send_message("このチャンネルにはすでに五目並べがあります。", ephemeral=True)
+            game = gomoku_games[game_id]
+            if not game.get("ai") and game.get("white_id") is None:
+                await interaction.response.send_message(
+                    "このチャンネルには未開始の五目並べ募集があります。既存募集を中止してからAI戦を開始してください。",
+                    view=GomokuLobbyCleanupView(game_id),
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message("このチャンネルにはすでに進行中の五目並べがあります。", ephemeral=True)
             return
         if bet < 0:
             await interaction.response.send_message("賭けコインは0以上にしてください。", ephemeral=True)
@@ -620,6 +745,7 @@ class Gomoku(commands.Cog):
             "creator_id": interaction.user.id,
             "guild_id": interaction.guild_id,
             "ai": True,
+            "started": True,
             "human_id": interaction.user.id,
             "human_color": human_color,
             "ai_color": ai_color,

@@ -130,7 +130,7 @@ def quick_embed() -> discord.Embed:
     )
     embed.add_field(
         name="ゲーム",
-        value="ゲームボタンから、UNO / 7並べ / 大富豪 / ポーカー / オセロ / 将棋 / 詰将棋 / Ito / コードネーム / 人狼を選べます。",
+        value="ゲームボタンから、UNO / 7並べ / 大富豪 / ポーカー / オセロ / 五目並べ / 将棋 / 詰将棋 / Ito / コードネーム / 人狼を選べます。",
         inline=False,
     )
     embed.add_field(
@@ -1033,6 +1033,8 @@ class Quick(commands.Cog):
         creator_id = state.get("creator_id") or (state.get("players") or [None])[0]
         is_creator = interaction.user.id == creator_id
         already_started = bool(state.get("started") or state.get("hands"))
+        if game.value == "gomoku":
+            already_started = bool(already_started or state.get("ai") or state.get("white_id") is not None)
 
         if already_started and not is_admin:
             await interaction.response.send_message("開始済みのゲームを終了できるのは管理者だけです。", ephemeral=True)

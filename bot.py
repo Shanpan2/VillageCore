@@ -182,7 +182,7 @@ def register_persistent_views():
     from views.ticket_views import ClosedTicketView, TicketButtonView, TicketControlView
     from views.role_panel_views import LegacyRolePanelView, RolePanelView
     from cogs.quick import GameControlView, GameMenuView, OthelloModeView
-    from Features.gomoku import GomokuModeView
+    from Features.gomoku import GomokuFirstView, GomokuModeView
     from Features.shogi import ShogiPanelView
     from Features.shogi_puzzle import ShogiPuzzleLevelView
     # ★ AttendanceView は attendance.py に統合したため削除
@@ -194,6 +194,8 @@ def register_persistent_views():
     bot.add_view(GameMenuView())
     bot.add_view(OthelloModeView())
     bot.add_view(GomokuModeView())
+    for difficulty in ("easy", "normal", "hard"):
+        bot.add_view(GomokuFirstView(difficulty))
     bot.add_view(ShogiPanelView())
     bot.add_view(ShogiPuzzleLevelView())
     for game in ("uno", "sevens", "daifugo", "poker", "othello", "gomoku", "ito", "codenames", "werewolf"):
@@ -629,18 +631,19 @@ async def handle_help_site(request):
           <div class="notice">
             <p><strong>おすすめの使い方</strong><br>
               ゲームは <code>/game</code> から選ぶのがおすすめです。
-              UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼の募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。
+              UNO、7並べ、大富豪、ポーカー、オセロ、五目並べ、Ito、コードネーム、人狼の募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。
               今後は個別コマンドより <code>/game</code> をメイン導線にしていきます。
             </p>
           </div>
-          <p>UNO、7並べ、大富豪、ポーカー、オセロ、将棋、詰将棋、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
+          <p>UNO、7並べ、大富豪、ポーカー、オセロ、五目並べ、将棋、詰将棋、Ito、コードネーム、人狼、じゃんけん、おみくじ、ダイスに対応しています。</p>
           <div class="grid">
-            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、将棋、詰将棋、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
+            <div class="tile"><strong>ゲームパネル</strong><code>/game</code> からUNO、7並べ、大富豪、ポーカー、オセロ、五目並べ、将棋、詰将棋、Ito、コードネーム、人狼を選べます。募集作成、参加、抜ける、開始、中止、ルール確認をボタンで操作できます。</div>
             <div class="tile"><strong>UNO</strong><code>/game</code> でUNOを選びます。手札と操作はDM、公開チャンネルは1つの進行メッセージを編集して場札だけを表示します。</div>
             <div class="tile"><strong>7並べ</strong><code>/game</code> で7並べを選びます。7を中心に同じマークのカードを順番につなげます。手札はDM画像で届き、公開パネルにはカード名を表示しません。</div>
             <div class="tile"><strong>大富豪</strong><code>/game</code> で大富豪を選びます。前の人より強いカードを出し、先に手札をなくした人が上がりです。出せる候補はDMで確認できます。</div>
             <div class="tile"><strong>ポーカー</strong><code>/game</code> でポーカーを選びます。DMで届いた5枚の手札から交換し、役の強さで勝負します。最終結果はトランプ画像付きで表示されます。</div>
             <div class="tile"><strong>オセロ</strong><code>/game</code> でオセロを選びます。対人戦またはAI対戦の難易度を選んで開始できます。</div>
+            <div class="tile"><strong>五目並べ</strong><code>/game</code> で五目並べを選びます。対人戦またはAI対戦を選び、AI戦では初級/中級/上級と先手/後手/ランダムを選べます。</div>
             <div class="tile"><strong>詰将棋</strong><code>/game</code> で詰将棋を選びます。初級/中級/上級から選び、正解するとコインを獲得できます。</div>
             <div class="tile"><strong>Ito</strong><code>/game</code> でItoを選びます。主催者がお題を入力でき、空欄ならランダムお題で始められます。</div>
             <div class="tile"><strong>コードネーム</strong><code>/game</code> でコードネームを選びます。赤/青チーム参加とスパイマスター設定をボタンで行えます。</div>
@@ -650,7 +653,7 @@ async def handle_help_site(request):
           </div>
           <div class="notice">
             <p><strong>ゲーム募集の中止</strong><br>
-              UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼の募集中止は <code>/game</code> の「中止」ボタンから行えます。
+              UNO、7並べ、大富豪、ポーカー、オセロ、五目並べ、Ito、コードネーム、人狼の募集中止は <code>/game</code> の「中止」ボタンから行えます。
               募集作成者または管理者が実行できます。開始済みのゲームを終了する場合は管理者権限が必要です。
             </p>
             <p><strong>ゲームの保存</strong><br>
@@ -673,6 +676,10 @@ async def handle_help_site(request):
               5枚の手札がDMで届きます。交換したいカードを選び、全員の交換が終わると役の強さで勝敗が決まります。
               強い順は、ストレートフラッシュ、フォーカード、フルハウス、フラッシュ、ストレート、スリーカード、ツーペア、ワンペア、ハイカードです。
             </p>
+            <p><strong>五目並べのルール</strong><br>
+              黒と白が交互に石を置き、縦・横・斜めのどれかで先に5個連続に並べた人が勝ちです。
+              行と列を選んでから「置く」を押します。対人戦とAI対戦に対応し、AI戦では難易度と先手/後手/ランダムを選べます。
+            </p>
             <p><strong>Itoのルール</strong><br>
               1から100の数字がDMで配られます。数字を直接言わず、お題に沿った例えで表現し、最後に小さい順へ並べます。
             </p>
@@ -683,7 +690,7 @@ async def handle_help_site(request):
               村人陣営は人狼を全員追放すれば勝ち、人狼陣営は人狼の数が村人陣営以上になれば勝ちです。
             </p>
           </div>
-          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "ito", "codenames", "werewolf", "janken", "omikuji", "dice"))}
+          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "gomoku", "gomoku_ai", "ito", "codenames", "werewolf", "janken", "omikuji", "dice"))}
         </section>
         <section id="coin-note">
           <h2>コイン遊びのメモ</h2>
