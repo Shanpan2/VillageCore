@@ -4,7 +4,7 @@ Among Us MOD役職向けのアキネーター・クイズ機能です。
 
 
 ## VillageCore
-VillageCoreの各種説明や概要は [こちら](README.md)
+VillageCoreの各種説明や概要は [こちら](../README.md)
 
 
 ## 概要

@@ -542,15 +542,16 @@ async def handle_help_site(request):
         <section id="roles-guesser">
           <h2>Roles Guesser</h2>
           <div class="notice">
-            <p><strong>Among Us MOD role guesser and quiz bot</strong><br>
-              Roles Guesser is a helper bot for guessing and learning Among Us MOD roles. It converts role behavior into feature tags and asks original yes/no questions instead of reproducing wiki text.
-              To reduce copyright risk, it does not copy wiki articles, tables, tips, Q&A, or images.
+            <p><strong>Among Us MOD役職向けのアキネーター・クイズBOT</strong><br>
+              Roles Guesserは、Among Us MODの役職を推測したり、特徴から役職を覚えたりするための補助BOTです。
+              Wiki本文をそのまま掲載するのではなく、役職の挙動を特徴タグに分解し、BOT用の独自質問・ヒントとして扱います。
+              著作権リスクを抑えるため、Wiki本文、表、Tips、Q&A、画像などは転載しません。
             </p>
           </div>
           <div class="grid">
-            <div class="tile"><strong>Role Akinator</strong><code>/guess</code> Answer questions to narrow down candidate roles. MOD filtering is supported.</div>
-            <div class="tile"><strong>Role Quiz</strong><code>/quiz</code> Choose the matching role from feature hints.</div>
-            <div class="tile"><strong>Data policy</strong> Role descriptions are not copied. <code>roles.csv</code> stores names, MODs, teams, and feature tags.</div>
+            <div class="tile"><strong>役職アキネーター</strong><code>/guess</code> 質問に答えて候補の役職を絞り込みます。MODでの絞り込みにも対応しています。</div>
+            <div class="tile"><strong>役職クイズ</strong><code>/quiz</code> 表示された特徴ヒントから、該当する役職を選ぶクイズです。</div>
+            <div class="tile"><strong>データ方針</strong> 役職説明文は転載せず、<code>roles.csv</code> には役職名、MOD名、陣営、特徴タグを中心に保存します。</div>
           </div>
         </section>
         <section id="daily">
