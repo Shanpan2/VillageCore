@@ -897,7 +897,8 @@ async def grant_reward(interaction: discord.Interaction, level: str) -> tuple[in
     today = jst_today()
     daily_key = shogi_daily_key(interaction.guild_id, interaction.user.id, level)
     if await db_get(daily_key) == today:
-        return 0, "このレベルの今日の報酬は受け取り済みです。"
+        level_label = LEVELS.get(level, {}).get("label", "このレベル")
+        return 0, f"{level_label}の今日の報酬は受け取り済みです。クリア扱いですが、獲得コインは **0** です。"
 
     reward = LEVELS[level]["reward"]
     key = coin_key(interaction.guild_id, interaction.user.id)
