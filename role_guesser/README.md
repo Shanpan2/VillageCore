@@ -2,6 +2,11 @@
 
 Among Us MOD役職向けのアキネーター・クイズ機能です。
 
+
+## VillageCore
+VillageCoreの各種説明や概要は [こちら](README.md)
+
+
 ## 概要
 
 - `/guess` で役職アキネーターを開始します。
@@ -12,6 +17,7 @@ Among Us MOD役職向けのアキネーター・クイズ機能です。
 ## むらびと君からの案内
 
 むらびと君のヘルプページには、`Roles Guesser` の案内セクションを追加しています。
+webサイトは[こちら](https://worker-production-9aed.up.railway.app/help#roles-guesser)から
 
 - むらびと君本体の案内ページから `Roles Guesser` の概要を確認できます。
 - `/guess` と `/quiz` の使い道を簡単に案内します。
@@ -37,22 +43,11 @@ Wiki本文、Tips、Q&A、オプション表、画像などの長文・表現・
 
 このBOTの役職データは、Wiki本文の丸写しではなく、役職仕様をもとにした独自の分類データです。
 
-ただし、役職名・MOD名・能力名などは各MODに由来します。公開運用や配布を行う場合は、各MODやWikiの利用条件・ライセンスを確認し、必要に応じて参考元を明記してください。
+## 参考にさせて頂いた各種MODのリンクはこちら
 
-説明文を追加する場合も、Wikiの文章をそのままコピーせず、短い独自要約かリンク参照にしてください。
-
-## ダッシュボード
-
-本体BOTの `/dashboard` は、BOTが導入されているDiscordサーバー数やサーバー一覧を確認するための非公開管理画面です。
-
-- `DASHBOARD_TOKEN` が設定されている場合のみ利用できます。
-- URLの `token` クエリで認証します。
-- 公開ページとして運用する想定ではありません。
-- 既存サーバーの本当の導入日時はDiscord APIから後追い取得できないため、初回確認時刻を `first_seen_at` として保存します。
-
-## 編集時の注意
-
-- 新しい特徴列を追加した場合は、`role_guesser/bot.py` の `FEATURE_QUESTIONS` に質問文も追加してください。
-- クイズでヒントに出したい特徴は、`QUIZ_HINTS` にも追加してください。
-- 役職説明を長文でCSVに入れないでください。
-- 同名役職はMODごとの差分をタグで表現してください。
+[Town Of Host](https://github.com/tukasa0001/TownOfHost)
+[Town Of Host K](https://github.com/KYMario/TownOfHost-K)
+[Super New Roles](https://github.com/SuperNewRoles/SuperNewRoles)
+[Nebula on the Ship](https://github.com/Dolly1016/Nebula)
+[ExtreameRoles](https://github.com/yukieiji/ExtremeRoles)
+[The Other Roles GMIA](https://github.com/GMIA-Nexus/TheOtherRolesGMIA)
