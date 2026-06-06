@@ -3,11 +3,13 @@ import sys
 import discord
 from discord.ext import commands
 import asyncio
+import json
+from datetime import datetime, timezone
 from html import escape
 from aiohttp import web
 
 from bot_instance import bot
-from database.config_db import db_get_all_config, db_init, use_postgres
+from database.config_db import db_get, db_get_all_config, db_init, db_set, use_postgres
 from role_guesser.bot import start_role_guesser_bot
 
 try:
@@ -202,6 +204,94 @@ async def clear_legacy_guild_commands():
         print(f"⚠️ Legacy guild command cleanup failed: {type(e).__name__}: {e}", flush=True)
 
 
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def guild_record_key(guild_id: int) -> str:
+    return f"bot_guild:{guild_id}"
+
+
+async def load_guild_record(guild_id: int) -> dict:
+    raw = await db_get(guild_record_key(guild_id))
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def upsert_guild_record(guild: discord.Guild, joined: bool = False) -> None:
+    now = utc_now_iso()
+    data = await load_guild_record(guild.id)
+    data.setdefault("first_seen_at", now)
+    if joined:
+        data["joined_at"] = now
+        data.pop("left_at", None)
+    data.update(
+        {
+            "id": str(guild.id),
+            "name": guild.name,
+            "owner_id": str(guild.owner_id) if guild.owner_id else "",
+            "member_count": guild.member_count,
+            "last_seen_at": now,
+        }
+    )
+    await db_set(guild_record_key(guild.id), json.dumps(data, ensure_ascii=False))
+
+
+async def mark_guild_removed(guild: discord.Guild) -> None:
+    data = await load_guild_record(guild.id)
+    now = utc_now_iso()
+    data.setdefault("first_seen_at", now)
+    data.update(
+        {
+            "id": str(guild.id),
+            "name": guild.name,
+            "owner_id": str(guild.owner_id) if guild.owner_id else "",
+            "member_count": guild.member_count,
+            "left_at": now,
+            "last_seen_at": now,
+        }
+    )
+    await db_set(guild_record_key(guild.id), json.dumps(data, ensure_ascii=False))
+
+
+async def record_current_guilds() -> None:
+    for guild in bot.guilds:
+        await upsert_guild_record(guild)
+
+
+def format_dt(value: str | None) -> str:
+    if not value:
+        return "-"
+    return escape(value.replace("T", " ").replace("+00:00", " UTC"))
+
+
+def bot_permission_summary(guild: discord.Guild) -> tuple[str, str]:
+    me = guild.me
+    if not me:
+        return "不明", "unknown"
+    perms = me.guild_permissions
+    if perms.administrator:
+        return "管理者", "ok"
+    important = [
+        perms.manage_roles,
+        perms.manage_channels,
+        perms.send_messages,
+        perms.embed_links,
+        perms.attach_files,
+        perms.read_message_history,
+    ]
+    if all(important):
+        return "主要権限OK", "ok"
+    if perms.send_messages:
+        return "一部不足", "warn"
+    return "送信不可の可能性", "bad"
+
+
 # ==========================
 # on_ready
 # ==========================
@@ -221,6 +311,11 @@ async def on_ready():
             PERSISTENT_VIEWS_REGISTERED = True
     except Exception as e:
         print(f"⚠️ register_persistent_views エラー: {e}")
+
+    try:
+        await record_current_guilds()
+    except Exception as e:
+        print(f"?? guild dashboard record failed: {type(e).__name__}: {e}", flush=True)
 
     if COMMANDS_SYNCED:
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
@@ -246,6 +341,22 @@ async def on_ready():
         print(f"✅ Bot ready: {bot.user} ({bot.user.id})", flush=True)
         print(f"🔄 Synced {len(synced)} global slash commands", flush=True)
 
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    try:
+        await upsert_guild_record(guild, joined=True)
+    except Exception as e:
+        print(f"?? guild join record failed: {guild.id} {type(e).__name__}: {e}", flush=True)
+
+
+@bot.event
+async def on_guild_remove(guild: discord.Guild):
+    try:
+        await mark_guild_removed(guild)
+    except Exception as e:
+        print(f"?? guild remove record failed: {guild.id} {type(e).__name__}: {e}", flush=True)
 
 async def handle_ping(request):
     return web.Response(text="OK")
@@ -410,6 +521,7 @@ async def handle_help_site(request):
       <nav>
         <div class="wrap">
           <a href="#start">はじめに</a>
+          <a href="#roles-guesser">Roles Guesser</a>
           <a href="#daily">日常</a>
           <a href="#games">ゲーム</a>
           <a href="#coin-note">コイン遊び</a>
@@ -425,6 +537,20 @@ async def handle_help_site(request):
             <div class="tile"><strong>まず使う</strong><code>/quick</code> で日常用メニューを開けます。</div>
             <div class="tile"><strong>設定確認</strong><code>/settings_status</code> で通知先やログ先を確認できます。</div>
             <div class="tile"><strong>権限確認</strong><code>/permission_audit</code> でBot権限を診断できます。</div>
+          </div>
+        </section>
+        <section id="roles-guesser">
+          <h2>Roles Guesser</h2>
+          <div class="notice">
+            <p><strong>Among Us MOD role guesser and quiz bot</strong><br>
+              Roles Guesser is a helper bot for guessing and learning Among Us MOD roles. It converts role behavior into feature tags and asks original yes/no questions instead of reproducing wiki text.
+              To reduce copyright risk, it does not copy wiki articles, tables, tips, Q&A, or images.
+            </p>
+          </div>
+          <div class="grid">
+            <div class="tile"><strong>Role Akinator</strong><code>/guess</code> Answer questions to narrow down candidate roles. MOD filtering is supported.</div>
+            <div class="tile"><strong>Role Quiz</strong><code>/quiz</code> Choose the matching role from feature hints.</div>
+            <div class="tile"><strong>Data policy</strong> Role descriptions are not copied. <code>roles.csv</code> stores names, MODs, teams, and feature tags.</div>
           </div>
         </section>
         <section id="daily">
@@ -566,14 +692,14 @@ async def handle_dashboard(request: web.Request):
     if not DASHBOARD_TOKEN:
         return web.Response(
             text=(
-                "<h1>VillageCore ダッシュボード</h1>"
-                "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>"
+                "<h1>VillageCore Dashboard</h1>"
+                "<p>Dashboard is disabled. Set <code>DASHBOARD_TOKEN</code>.</p>"
             ),
             content_type="text/html",
         )
 
     if not dashboard_auth_ok(request):
-        return web.Response(status=401, text="認証に失敗しました")
+        return web.Response(status=401, text="Unauthorized")
 
     try:
         config = await db_get_all_config()
@@ -582,13 +708,49 @@ async def handle_dashboard(request: web.Request):
         config = {}
         db_status = f"NG: {type(e).__name__}"
 
+    guild_records = {
+        key.removeprefix("bot_guild:"): value
+        for key, value in config.items()
+        if key.startswith("bot_guild:")
+    }
     command_count = len([c for c in bot.tree.walk_commands() if c.parent is None])
-    guild_rows = "".join(
-        f"<tr><td>{escape(guild.name)}</td><td>{guild.id}</td><td>{guild.member_count or '-'}</td></tr>"
-        for guild in bot.guilds
-    )
+    sorted_guilds = sorted(bot.guilds, key=lambda item: item.name.casefold())
+    total_members = sum(guild.member_count or 0 for guild in sorted_guilds)
+
+    guild_rows = []
+    for guild in sorted_guilds:
+        record = {}
+        raw_record = guild_records.get(str(guild.id))
+        if raw_record:
+            try:
+                record = json.loads(raw_record)
+            except Exception:
+                record = {}
+        owner = guild.owner
+        me = guild.me
+        permission_text, permission_class = bot_permission_summary(guild)
+        icon = guild.icon.url if guild.icon else ""
+        icon_html = (
+            f'<img class="guild-icon" src="{escape(icon)}" alt="">'
+            if icon
+            else '<span class="guild-icon placeholder">?</span>'
+        )
+        search_text = f"{guild.name} {guild.id} {owner.name if owner else ''}".casefold()
+        guild_rows.append(
+            f'<tr data-search="{escape(search_text)}">'
+            f'<td><div class="guild-cell">{icon_html}<div><strong>{escape(guild.name)}</strong>'
+            f'<small>{guild.id}</small></div></div></td>'
+            f'<td>{guild.member_count or "-"}</td>'
+            f'<td>{escape(owner.name) if owner else escape(str(guild.owner_id or "-"))}</td>'
+            f'<td>{format_dt(record.get("first_seen_at"))}</td>'
+            f'<td>{format_dt(record.get("last_seen_at"))}</td>'
+            f'<td><span class="pill {permission_class}">{escape(permission_text)}</span></td>'
+            f'<td>{"Yes" if me and me.guild_permissions.create_instant_invite else "No"}</td>'
+            '</tr>'
+        )
+
     env_rows = "".join(
-        f"<tr><td>{name}</td><td>{'設定済み' if os.getenv(name) else '未設定'}</td></tr>"
+        f"<tr><td>{name}</td><td>{'Set' if os.getenv(name) else 'Missing'}</td></tr>"
         for name in ("DISCORD_TOKEN", "DATABASE_URL", "GEMINI_API_KEY", "YOUTUBE_API_KEY")
     )
 
@@ -598,39 +760,87 @@ async def handle_dashboard(request: web.Request):
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>VillageCore ダッシュボード</title>
+      <title>VillageCore Dashboard</title>
       <style>
-        body {{ font-family: system-ui, sans-serif; margin: 32px; background: #f6f7f9; color: #20242a; }}
-        main {{ max-width: 960px; margin: auto; }}
+        body {{ font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #20242a; }}
+        main {{ max-width: 1180px; margin: auto; padding: 28px; }}
         section {{ background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; padding: 18px; margin: 16px 0; }}
         h1, h2 {{ margin-top: 0; }}
+        .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
+        .metric {{ background: #f9fafb; border: 1px solid #edf0f2; border-radius: 8px; padding: 12px; }}
+        .metric strong {{ display: block; font-size: 1.7rem; }}
+        .toolbar {{ display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }}
+        input[type="search"] {{ min-width: 260px; flex: 1; padding: 10px 12px; border: 1px solid #cfd6dd; border-radius: 6px; }}
         table {{ width: 100%; border-collapse: collapse; }}
-        th, td {{ text-align: left; border-bottom: 1px solid #edf0f2; padding: 8px; }}
+        th, td {{ text-align: left; border-bottom: 1px solid #edf0f2; padding: 10px 8px; vertical-align: middle; }}
+        th {{ font-size: .86rem; color: #53606b; background: #fbfcfd; position: sticky; top: 0; }}
+        small {{ display: block; color: #66727f; }}
         .ok {{ color: #16794c; font-weight: 700; }}
+        .pill {{ border-radius: 999px; padding: 3px 8px; font-size: .82rem; font-weight: 700; white-space: nowrap; }}
+        .pill.ok {{ color: #16794c; background: #eaf7f0; }}
+        .pill.warn {{ color: #8a5a00; background: #fff4d8; }}
+        .pill.bad, .pill.unknown {{ color: #9a2f22; background: #fdecea; }}
+        .guild-cell {{ display: flex; align-items: center; gap: 10px; }}
+        .guild-icon {{ width: 34px; height: 34px; border-radius: 8px; object-fit: cover; background: #e8edf2; display: inline-grid; place-items: center; color: #6b7785; font-weight: 800; }}
+        .table-wrap {{ overflow-x: auto; max-height: 70vh; }}
       </style>
     </head>
     <body>
       <main>
-        <h1>VillageCore ダッシュボード</h1>
+        <h1>VillageCore Dashboard</h1>
         <section>
-          <h2>状態</h2>
-          <p>Bot: <span class="ok">{escape(str(bot.user)) if bot.user else "起動中"}</span></p>
-          <p>データベース: {escape("PostgreSQL" if use_postgres() else "SQLite")} / {escape(db_status)}</p>
-          <p>参加サーバー数: {len(bot.guilds)}</p>
-          <p>スラッシュコマンド数: {command_count}</p>
-          <p>保存済み設定キー数: {len(config)}</p>
+          <h2>Status</h2>
+          <div class="summary">
+            <div class="metric"><span>Bot</span><strong>{escape(str(bot.user)) if bot.user else "Starting"}</strong></div>
+            <div class="metric"><span>Installed servers</span><strong>{len(sorted_guilds)}</strong></div>
+            <div class="metric"><span>Total members</span><strong>{total_members}</strong></div>
+            <div class="metric"><span>Slash commands</span><strong>{command_count}</strong></div>
+          </div>
+          <p>Database: {escape("PostgreSQL" if use_postgres() else "SQLite")} / {escape(db_status)}</p>
+          <p>Stored config keys: {len(config)}</p>
         </section>
         <section>
-          <h2>環境変数</h2>
+          <h2>Environment</h2>
           <table><tbody>{env_rows}</tbody></table>
         </section>
         <section>
-          <h2>参加サーバー</h2>
-          <table>
-            <thead><tr><th>サーバー名</th><th>ID</th><th>メンバー数</th></tr></thead>
-            <tbody>{guild_rows or "<tr><td colspan='3'>参加サーバーがありません</td></tr>"}</tbody>
+          <h2>Installed Servers</h2>
+          <div class="toolbar">
+            <input id="guildSearch" type="search" placeholder="Search server name / ID / owner">
+            <span id="guildCount">{len(sorted_guilds)} servers</span>
+          </div>
+          <div class="table-wrap">
+          <table id="guildTable">
+            <thead>
+              <tr>
+                <th>Server</th>
+                <th>Members</th>
+                <th>Owner</th>
+                <th>First seen</th>
+                <th>Last seen</th>
+                <th>Bot permissions</th>
+                <th>Can create invite</th>
+              </tr>
+            </thead>
+            <tbody>{''.join(guild_rows) or "<tr><td colspan='7'>No installed servers</td></tr>"}</tbody>
           </table>
+          </div>
         </section>
+        <script>
+          const input = document.getElementById('guildSearch');
+          const rows = Array.from(document.querySelectorAll('#guildTable tbody tr'));
+          const count = document.getElementById('guildCount');
+          input?.addEventListener('input', () => {{
+            const q = input.value.trim().toLowerCase();
+            let visible = 0;
+            for (const row of rows) {{
+              const ok = !q || (row.dataset.search || '').includes(q);
+              row.style.display = ok ? '' : 'none';
+              if (ok) visible += 1;
+            }}
+            count.textContent = `${{visible}} servers`;
+          }});
+        </script>
       </main>
     </body>
     </html>
