@@ -332,6 +332,9 @@ def current_solution_move(puzzle: dict) -> str | None:
 def current_acceptable_moves(puzzle: dict) -> list[str]:
     expected = current_solution_move(puzzle) or puzzle.get("answer", "")
     progress = int(puzzle.get("_progress", 0) or 0)
+    dynamic = puzzle.get("_acceptable_moves_by_progress", {}).get(str(progress))
+    if isinstance(dynamic, list) and dynamic:
+        return [str(move) for move in dynamic if move]
     if progress == 0 and isinstance(puzzle.get("acceptable_answers"), list):
         moves = [str(move) for move in puzzle["acceptable_answers"] if move]
         if expected and expected not in moves:
@@ -364,6 +367,36 @@ def push_solution_move(puzzle: dict, move_value: str) -> tuple[bool, str]:
     puzzle["sfen"] = board.sfen()
     puzzle["_progress"] = int(puzzle.get("_progress", 0) or 0) + 1
     return True, ""
+
+
+def forced_reply_mate_continuation(puzzle: dict, move_value: str) -> tuple[str, list[str]] | None:
+    if shogi is None:
+        return None
+    progress = int(puzzle.get("_progress", 0) or 0)
+    remaining = len(solution_moves(puzzle)) - progress
+    if remaining != 3:
+        return None
+    try:
+        board = shogi.Board(puzzle_sfen(puzzle))
+        move = shogi.Move.from_usi(move_value)
+    except Exception:
+        return None
+    if not any(move == legal_move for legal_move in board.legal_moves):
+        return None
+    board.push(move)
+    if not board.is_check() or board.is_checkmate():
+        return None
+    replies = list(board.legal_moves)
+    if len(replies) != 1:
+        return None
+    board.push(replies[0])
+    final_moves = []
+    for final_move in board.legal_moves:
+        candidate = shogi.Board(board.sfen())
+        candidate.push(final_move)
+        if candidate.is_checkmate():
+            final_moves.append(final_move.usi())
+    return (replies[0].usi(), final_moves) if final_moves else None
 
 
 def solution_progress_text(puzzle: dict) -> str:
@@ -883,6 +916,30 @@ class ShogiDestinationSelect(discord.ui.Select):
         legal, mate, analysis_text = analyze_move(puzzle, selected)
 
         if not correct:
+            alternate = forced_reply_mate_continuation(puzzle, selected)
+            if alternate:
+                reply, final_moves = alternate
+                reply_label = move_label(puzzle, reply)
+                ok, error = push_solution_move(puzzle, selected)
+                if not ok:
+                    await interaction.response.send_message(error or "盤面の更新に失敗しました。", ephemeral=True)
+                    return
+                ok, error = push_solution_move(puzzle, reply)
+                if not ok:
+                    await interaction.response.send_message(error or "応手の更新に失敗しました。", ephemeral=True)
+                    return
+                acceptable = puzzle.setdefault("_acceptable_moves_by_progress", {})
+                acceptable[str(int(puzzle.get("_progress", 0) or 0))] = final_moves
+                await interaction.response.edit_message(
+                    content=(
+                        f"別解候補として進めます。 **{selected_text}**\n"
+                        f"応手: **{reply_label}**\n\n"
+                        f"次の一手を選んでください。({solution_progress_text(puzzle)})"
+                    ),
+                    attachments=[render_puzzle_image(puzzle)],
+                    view=ShogiPuzzleSourceView(puzzle, view.owner_id),
+                )
+                return
             for item in view.children:
                 item.disabled = True
             result = f"惜しいです。選んだ手は **{selected_text}** です。\nこの局面の正解は **{correct_text}** です。"
@@ -890,7 +947,10 @@ class ShogiDestinationSelect(discord.ui.Select):
                 result += f"\n\n判定: {analysis_text}"
             if legal and mate:
                 result += "\n選んだ手も詰み判定になりました。問題側の正解候補を見直す必要があります。"
-            result += f"\n\n解説: {puzzle['explanation']}"
+            if len(solution_moves(puzzle)) <= 1:
+                result += f"\n\n解説: {puzzle['explanation']}"
+            else:
+                result += "\n\n複数手詰めの途中なので、解説は最後まで進んだ時に表示します。"
             await interaction.response.edit_message(content=result, view=view)
             return
 
