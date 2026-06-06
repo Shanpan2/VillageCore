@@ -413,14 +413,20 @@ class ShogiLobbyView(discord.ui.View):
 
 
 class ShogiMoveView(discord.ui.View):
-    def __init__(self, game_id: str, source: str | None = None):
+    def __init__(self, game_id: str, source: str | None = None, dest_page: int = 0):
         super().__init__(timeout=None)
         self.game_id = game_id
         state = shogi_games.get(game_id)
         if not state:
             return
         if source:
-            self.add_item(ShogiDestinationSelect(game_id, source))
+            source_moves = [move for move in legal_moves(state) if move_source_key(move) == source]
+            max_page = max((len(source_moves) - 1) // 25, 0)
+            dest_page = max(0, min(dest_page, max_page))
+            self.add_item(ShogiDestinationSelect(game_id, source, dest_page))
+            if max_page > 0:
+                self.add_item(ShogiDestinationPageButton(game_id, source, dest_page - 1, "Prev", dest_page <= 0))
+                self.add_item(ShogiDestinationPageButton(game_id, source, dest_page + 1, "Next", dest_page >= max_page))
             self.add_item(ShogiBackButton(game_id))
         else:
             self.add_item(ShogiSourceSelect(game_id))
@@ -465,10 +471,12 @@ class ShogiSourceSelect(discord.ui.Select):
 
 
 class ShogiDestinationSelect(discord.ui.Select):
-    def __init__(self, game_id: str, source: str):
+    def __init__(self, game_id: str, source: str, page: int = 0):
         state = shogi_games.get(game_id, {})
         moves = [move for move in legal_moves(state) if move_source_key(move) == source]
-        options = [discord.SelectOption(label=move_label(state.get("sfen", ""), move)[:100], value=move) for move in moves[:25]]
+        start = max(page, 0) * 25
+        page_moves = moves[start:start + 25]
+        options = [discord.SelectOption(label=move_label(state.get("sfen", ""), move)[:100], value=move) for move in page_moves]
         options = options or [discord.SelectOption(label="候補なし", value="none")]
         super().__init__(placeholder="移動先を選んでください", options=options, custom_id=f"shogi_dest_{game_id}_{source}")
         self.game_id = game_id
@@ -511,6 +519,36 @@ class ShogiDestinationSelect(discord.ui.Select):
             content=status_text(state, f"{interaction.user.mention} が **{label}** を指しました。"),
             attachments=[render_board_file(state)],
             view=ShogiMoveView(self.game_id),
+        )
+
+
+class ShogiDestinationPageButton(discord.ui.Button):
+    def __init__(self, game_id: str, source: str, page: int, label: str, disabled: bool):
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.secondary,
+            disabled=disabled,
+            row=1,
+            custom_id=f"shogi_dest_page_{game_id}_{source}_{page}",
+        )
+        self.game_id = game_id
+        self.source = source
+        self.page = page
+
+    async def callback(self, interaction: discord.Interaction):
+        state = shogi_games.get(self.game_id)
+        if not state:
+            await interaction.response.send_message("対局が見つかりません。", ephemeral=True)
+            return
+        if interaction.user.id != current_player_id(state):
+            await interaction.response.send_message("あなたの手番ではありません。", ephemeral=True)
+            return
+        hints = {usi_square_to_coord(move_destination_key(move)) for move in legal_moves(state) if move_source_key(move) == self.source}
+        hints = {coord for coord in hints if coord}
+        await interaction.response.edit_message(
+            content=f"移動元: **{move_source_label(state['sfen'], self.source)}**\n移動先を選んでください。",
+            attachments=[render_board_file(state, selected_source=self.source, hints=hints)],
+            view=ShogiMoveView(self.game_id, self.source, self.page),
         )
 
 

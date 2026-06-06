@@ -553,10 +553,11 @@ def source_options(puzzle: dict) -> list[discord.SelectOption]:
     return options[:25]
 
 
-def destination_options(puzzle: dict, source: str) -> list[discord.SelectOption]:
+def destination_options(puzzle: dict, source: str, page: int = 0) -> list[discord.SelectOption]:
     moves = [move for move in legal_move_values(puzzle) if move_source_key(move) == source]
     options = []
-    for move in moves[:25]:
+    start = max(page, 0) * 25
+    for move in moves[start:start + 25]:
         options.append(
             discord.SelectOption(
                 label=move_label(puzzle, move)[:100],
@@ -565,6 +566,11 @@ def destination_options(puzzle: dict, source: str) -> list[discord.SelectOption]
             )
         )
     return options
+
+
+def destination_page_count(puzzle: dict, source: str) -> int:
+    moves = [move for move in legal_move_values(puzzle) if move_source_key(move) == source]
+    return max((len(moves) - 1) // 25 + 1, 1)
 
 
 def destination_squares_for_source(puzzle: dict, source: str) -> set[tuple[int, int]]:
@@ -833,18 +839,23 @@ class ShogiSourceSelect(discord.ui.Select):
 
 
 class ShogiPuzzleDestinationView(discord.ui.View):
-    def __init__(self, puzzle: dict, owner_id: int, source: str):
+    def __init__(self, puzzle: dict, owner_id: int, source: str, page: int = 0):
         super().__init__(timeout=600)
         self.puzzle = puzzle
         self.owner_id = owner_id
         self.source = source
-        self.add_item(ShogiDestinationSelect(puzzle, source))
+        page_count = destination_page_count(puzzle, source)
+        page = max(0, min(page, page_count - 1))
+        self.add_item(ShogiDestinationSelect(puzzle, source, page))
+        if page_count > 1:
+            self.add_item(ShogiPuzzleDestinationPageButton(puzzle, owner_id, source, page - 1, "Prev", page <= 0))
+            self.add_item(ShogiPuzzleDestinationPageButton(puzzle, owner_id, source, page + 1, "Next", page >= page_count - 1))
         self.add_item(ShogiBackButton())
 
 
 class ShogiDestinationSelect(discord.ui.Select):
-    def __init__(self, puzzle: dict, source: str):
-        options = destination_options(puzzle, source)
+    def __init__(self, puzzle: dict, source: str, page: int = 0):
+        options = destination_options(puzzle, source, page)
         if not options:
             options = [discord.SelectOption(label="候補なし", value="none", description="この駒の移動先候補がありません。")]
         super().__init__(
@@ -932,6 +943,35 @@ class ShogiDestinationSelect(discord.ui.Select):
             ),
             attachments=[render_puzzle_image(puzzle)],
             view=ShogiPuzzleSourceView(puzzle, view.owner_id),
+        )
+
+
+class ShogiPuzzleDestinationPageButton(discord.ui.Button):
+    def __init__(self, puzzle: dict, owner_id: int, source: str, page: int, label: str, disabled: bool):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, disabled=disabled, row=1)
+        self.puzzle = puzzle
+        self.owner_id = owner_id
+        self.source = source
+        self.page = page
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("この詰将棋に回答できるのは開始した人だけです。", ephemeral=True)
+            return
+        hints = destination_squares_for_source(self.puzzle, self.source)
+        await interaction.response.edit_message(
+            content=(
+                f"移動元: **{move_source_label(self.puzzle, self.source)}** ({solution_progress_text(self.puzzle)})\n"
+                "青いマスが移動できる候補です。移動先を選んでください。"
+            ),
+            attachments=[
+                render_puzzle_image(
+                    self.puzzle,
+                    selected_source=self.source,
+                    destination_hints=hints,
+                )
+            ],
+            view=ShogiPuzzleDestinationView(self.puzzle, self.owner_id, self.source, self.page),
         )
 
 
