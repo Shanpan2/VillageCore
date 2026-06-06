@@ -317,6 +317,7 @@ def runtime_puzzle(puzzle: dict) -> dict:
     state = deepcopy(puzzle)
     state["_initial_sfen"] = state.get("sfen", "")
     state["_progress"] = 0
+    state["_history"] = []
     if "solution" not in state:
         state["solution"] = [state["answer"]]
     if not state.get("mate_moves"):
@@ -373,18 +374,90 @@ def push_solution_move(puzzle: dict, move_value: str) -> tuple[bool, str]:
         return False, f"局面または手の解析に失敗しました: {exc}"
     if not any(move == legal_move for legal_move in board.legal_moves):
         return False, "手順内の手が現在の局面では合法手ではありません。問題データを確認してください。"
+    puzzle.setdefault("_history", []).append(
+        {
+            "sfen": puzzle.get("sfen", ""),
+            "progress": int(puzzle.get("_progress", 0) or 0),
+            "acceptable": deepcopy(puzzle.get("_acceptable_moves_by_progress", {})),
+        }
+    )
     board.push(move)
     puzzle["sfen"] = board.sfen()
     puzzle["_progress"] = int(puzzle.get("_progress", 0) or 0) + 1
     return True, ""
 
 
+def undo_puzzle_move(puzzle: dict) -> bool:
+    history = puzzle.get("_history")
+    if not isinstance(history, list) or not history:
+        return False
+    previous = history.pop()
+    puzzle["sfen"] = previous.get("sfen", puzzle.get("_initial_sfen", puzzle.get("sfen", "")))
+    puzzle["_progress"] = int(previous.get("progress", 0) or 0)
+    puzzle["_acceptable_moves_by_progress"] = previous.get("acceptable", {})
+    return True
+
+
 def forced_reply_mate_continuation(puzzle: dict, move_value: str) -> tuple[str, list[str]] | None:
+    line = mate_line_after_attack(puzzle, move_value)
+    if not line or len(line) < 2:
+        return None
+    reply = line[0]
+    final_moves = [line[1]]
+    return reply, final_moves
+
+
+def mate_line_from_board(board, remaining: int, max_nodes: int = 20000) -> list[str] | None:
+    nodes = 0
+
+    def can_mate(sfen: str, depth: int) -> tuple[bool, list[str]]:
+        nonlocal nodes
+        nodes += 1
+        if max_nodes and nodes > max_nodes:
+            raise TimeoutError("mate search node limit exceeded")
+        current = shogi.Board(sfen)
+        if depth <= 0:
+            return current.is_checkmate(), []
+        for attack in current.legal_moves:
+            after_attack = shogi.Board(sfen)
+            after_attack.push(attack)
+            if not after_attack.is_check():
+                continue
+            if depth == 1:
+                if after_attack.is_checkmate():
+                    return True, [attack.usi()]
+                continue
+            replies = list(after_attack.legal_moves)
+            if not replies:
+                continue
+            chosen_line = None
+            all_replies_mated = True
+            for reply in replies:
+                after_reply = shogi.Board(after_attack.sfen())
+                after_reply.push(reply)
+                ok, tail = can_mate(after_reply.sfen(), depth - 2)
+                if not ok:
+                    all_replies_mated = False
+                    break
+                if chosen_line is None:
+                    chosen_line = [attack.usi(), reply.usi(), *tail]
+            if all_replies_mated and chosen_line:
+                return True, chosen_line
+        return False, []
+
+    try:
+        ok, line = can_mate(board.sfen(), remaining)
+    except TimeoutError:
+        return None
+    return line if ok else None
+
+
+def mate_line_after_attack(puzzle: dict, move_value: str) -> list[str] | None:
     if shogi is None:
         return None
     progress = int(puzzle.get("_progress", 0) or 0)
     remaining = len(solution_moves(puzzle)) - progress
-    if remaining != 3:
+    if remaining <= 0:
         return None
     try:
         board = shogi.Board(puzzle_sfen(puzzle))
@@ -394,19 +467,23 @@ def forced_reply_mate_continuation(puzzle: dict, move_value: str) -> tuple[str, 
     if not any(move == legal_move for legal_move in board.legal_moves):
         return None
     board.push(move)
-    if not board.is_check() or board.is_checkmate():
+    if not board.is_check():
         return None
+    if remaining == 1:
+        return [move_value] if board.is_checkmate() else None
     replies = list(board.legal_moves)
-    if len(replies) != 1:
+    if not replies:
         return None
-    board.push(replies[0])
-    final_moves = []
-    for final_move in board.legal_moves:
-        candidate = shogi.Board(board.sfen())
-        candidate.push(final_move)
-        if candidate.is_checkmate():
-            final_moves.append(final_move.usi())
-    return (replies[0].usi(), final_moves) if final_moves else None
+    chosen_line = None
+    for reply in replies:
+        after_reply = shogi.Board(board.sfen())
+        after_reply.push(reply)
+        tail = mate_line_from_board(after_reply, remaining - 2)
+        if not tail:
+            return None
+        if chosen_line is None:
+            chosen_line = [move_value, reply.usi(), *tail]
+    return chosen_line
 
 
 def solution_progress_text(puzzle: dict) -> str:
@@ -841,6 +918,7 @@ class ShogiPuzzleSourceView(discord.ui.View):
         self.puzzle = puzzle
         self.owner_id = owner_id
         self.add_item(ShogiSourceSelect(puzzle))
+        self.add_item(ShogiPuzzleUndoButton())
 
 
 class ShogiSourceSelect(discord.ui.Select):
@@ -894,6 +972,7 @@ class ShogiPuzzleDestinationView(discord.ui.View):
             self.add_item(ShogiPuzzleDestinationPageButton(puzzle, owner_id, source, page - 1, "Prev", page <= 0))
             self.add_item(ShogiPuzzleDestinationPageButton(puzzle, owner_id, source, page + 1, "Next", page >= page_count - 1))
         self.add_item(ShogiBackButton())
+        self.add_item(ShogiPuzzleUndoButton())
 
 
 class ShogiDestinationSelect(discord.ui.Select):
@@ -924,6 +1003,12 @@ class ShogiDestinationSelect(discord.ui.Select):
         correct_text = correct_text_for_current(puzzle)
         selected_text = move_label(puzzle, selected)
         legal, mate, analysis_text = analyze_move(puzzle, selected)
+        forced_line = mate_line_after_attack(puzzle, selected) if len(solution_moves(puzzle)) > 1 else None
+        if forced_line:
+            correct = True
+            next_progress = int(puzzle.get("_progress", 0) or 0) + 2
+            if len(forced_line) > 2:
+                puzzle.setdefault("_acceptable_moves_by_progress", {})[str(next_progress)] = [forced_line[2]]
 
         if not correct:
             alternate = forced_reply_mate_continuation(puzzle, selected)
@@ -950,18 +1035,23 @@ class ShogiDestinationSelect(discord.ui.Select):
                     view=ShogiPuzzleSourceView(puzzle, view.owner_id),
                 )
                 return
-            for item in view.children:
-                item.disabled = True
             result = f"惜しいです。選んだ手は **{selected_text}** です。\nこの局面の正解は **{correct_text}** です。"
             if analysis_text:
                 result += f"\n\n判定: {analysis_text}"
             if legal and mate:
                 result += "\n選んだ手も詰み判定になりました。問題側の正解候補を見直す必要があります。"
             if len(solution_moves(puzzle)) <= 1:
+                for item in view.children:
+                    item.disabled = True
                 result += f"\n\n解説: {puzzle['explanation']}"
+                await interaction.response.edit_message(content=result, view=view)
             else:
-                result += "\n\n複数手詰めの途中なので、解説は最後まで進んだ時に表示します。"
-            await interaction.response.edit_message(content=result, view=view)
+                result += "\n\n複数手詰めの途中なので、同じ局面からもう一度選べます。必要なら「一手戻す」も使えます。"
+                await interaction.response.edit_message(
+                    content=result,
+                    attachments=[render_puzzle_image(puzzle)],
+                    view=ShogiPuzzleSourceView(puzzle, view.owner_id),
+                )
             return
 
         ok, error = push_solution_move(puzzle, selected)
@@ -987,7 +1077,7 @@ class ShogiDestinationSelect(discord.ui.Select):
             )
             return
 
-        reply = current_solution_move(puzzle)
+        reply = forced_line[1] if forced_line and len(forced_line) > 1 else current_solution_move(puzzle)
         reply_label = move_label(puzzle, reply) if reply else ""
         if reply:
             ok, error = push_solution_move(puzzle, reply)
@@ -1042,6 +1132,28 @@ class ShogiPuzzleDestinationPageButton(discord.ui.Button):
                 )
             ],
             view=ShogiPuzzleDestinationView(self.puzzle, self.owner_id, self.source, self.page),
+        )
+
+
+class ShogiPuzzleUndoButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="一手戻す", style=discord.ButtonStyle.secondary, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if not isinstance(view, (ShogiPuzzleSourceView, ShogiPuzzleDestinationView)):
+            await interaction.response.send_message("この画面では戻せません。", ephemeral=True)
+            return
+        if interaction.user.id != view.owner_id:
+            await interaction.response.send_message("この詰将棋を操作できるのは開始した人だけです。", ephemeral=True)
+            return
+        if not undo_puzzle_move(view.puzzle):
+            await interaction.response.send_message("戻せる手がありません。", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content=f"一手戻しました。動かす駒を選んでください。({solution_progress_text(view.puzzle)})",
+            attachments=[render_puzzle_image(view.puzzle)],
+            view=ShogiPuzzleSourceView(view.puzzle, view.owner_id),
         )
 
 
