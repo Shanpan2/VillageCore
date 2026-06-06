@@ -1,12 +1,21 @@
 import random
 import datetime
+import json
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.community import apply_coin_rewards, badges_key, coin_key, get_json, set_json
-from database.config_db import db_get, db_set
+from cogs.community import (
+    add_unique_json_value,
+    apply_coin_rewards,
+    badges_key,
+    coin_key,
+    get_json,
+    set_json,
+    titles_key,
+)
+from database.config_db import db_get, db_get_all_config, db_set
 
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
@@ -70,6 +79,13 @@ LUCKY_ITEMS = [
     "早めの睡眠",
 ]
 
+OMIKUJI_STREAK_TITLES = [
+    (7, "おみくじ習慣"),
+    (14, "二週間の運試し"),
+    (30, "月間おみくじ民"),
+    (100, "百日の運守り"),
+]
+
 
 def omikuji_last_key(guild_id: int, user_id: int) -> str:
     return f"omikuji_last_{guild_id}_{user_id}"
@@ -81,6 +97,37 @@ def omikuji_streak_key(guild_id: int, user_id: int) -> str:
 
 def choose_fortune() -> dict:
     return random.choices(FORTUNES, weights=[item["weight"] for item in FORTUNES], k=1)[0]
+
+
+async def grant_omikuji_streak_titles(guild_id: int, user_id: int, streak: int) -> list[str]:
+    notes = []
+    for required_days, title in OMIKUJI_STREAK_TITLES:
+        if streak < required_days:
+            continue
+        added = await add_unique_json_value(titles_key(guild_id, user_id), title)
+        if added:
+            notes.append(f"{required_days}日連続ボーナス: 称号「{title}」を獲得")
+    return notes
+
+
+async def backfill_omikuji_streak_titles() -> int:
+    all_config = await db_get_all_config()
+    granted = 0
+    for key, raw in all_config.items():
+        if not key.startswith("omikuji_streak:"):
+            continue
+        parts = key.split(":")
+        if len(parts) != 3:
+            continue
+        try:
+            guild_id = int(parts[1])
+            user_id = int(parts[2])
+            data = json.loads(raw or "{}")
+            streak = int(data.get("count", 0) or 0)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        granted += len(await grant_omikuji_streak_titles(guild_id, user_id, streak))
+    return granted
 
 
 async def run_omikuji(interaction: discord.Interaction, *, deferred: bool = False):
@@ -124,6 +171,8 @@ async def run_omikuji(interaction: discord.Interaction, *, deferred: bool = Fals
             await set_json(badges_key(interaction.guild.id, interaction.user.id), badges[:30])
             notes.append(f"バッジ「{badge}」を獲得")
 
+    notes.extend(await grant_omikuji_streak_titles(interaction.guild.id, interaction.user.id, streak))
+
     rewards = await apply_coin_rewards(interaction.guild, interaction.user, new_balance)
     notes.extend(rewards)
 
@@ -145,6 +194,19 @@ async def run_omikuji(interaction: discord.Interaction, *, deferred: bool = Fals
 class Omikuji(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._streak_backfill_done = False
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self._streak_backfill_done:
+            return
+        self._streak_backfill_done = True
+        try:
+            granted = await backfill_omikuji_streak_titles()
+            if granted:
+                print(f"[Omikuji] backfilled {granted} streak title rewards", flush=True)
+        except Exception as exc:
+            print(f"[Omikuji] streak title backfill failed: {exc}", flush=True)
 
     @app_commands.command(name="omikuji", description="おみくじを引きます")
     async def omikuji(self, interaction: discord.Interaction):
