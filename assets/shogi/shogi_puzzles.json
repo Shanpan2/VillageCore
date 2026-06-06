@@ -92,16 +92,16 @@
     "level": "normal",
     "title": "AI自作 3手詰め 002",
     "side": "先手",
-    "sfen": "4k1B2/4R4/2G6/9/9/9/9/9/K8 b B 1",
-    "answer": "7c6b",
-    "answer_text": "金 7三→6二",
+    "sfen": "9/3S3Bs/6kBG/9/9/9/9/9/K8 b R 1",
+    "answer": "R*4e",
+    "answer_text": "飛打 4五",
     "solution": [
-      "7c6b",
-      "5a4a",
-      "3a4b+"
+      "R*4e",
+      "3c2d",
+      "1c1d"
     ],
     "mate_moves": 3,
-    "explanation": "金を6二へ寄せて逃げ道を狭めます。玉が4一へ逃げたあと、角を4二へ成って詰みです。",
+    "explanation": "飛車を4五に打って王手します。玉が2四へ逃げたあと、金を1四へ寄せて詰みです。",
     "source": "ai_original_verified",
     "license": "original_for_villagecore"
   },
