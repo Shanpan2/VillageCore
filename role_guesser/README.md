@@ -8,6 +8,8 @@
 
 # Roles Guesser
 
+![Roles Guesser](assets/roles-guesser-hero.png)
+
 Among Us MOD役職向けのアキネーター・クイズ機能です。
 
 
