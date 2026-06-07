@@ -624,6 +624,7 @@ async def handle_help_site(request):
             <div class="tile"><strong>音楽</strong><code>/music</code> で音楽パネルを開き、再生、停止、スキップ、キュー確認をボタンで操作できます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
             <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code> でコインを賭けられます。</div>
+            <div class="tile"><strong>Bot報告</strong><code>/report</code> でバグ、要望、不正利用、表示崩れなどをBot開発者へ送れます。</div>
           </div>
         </section>
         <section id="games">
@@ -735,6 +736,7 @@ async def handle_help_site(request):
             <p><strong>YouTube通知が止まる</strong><br>YouTube Data APIのクォータ上限です。Botは一定時間チェックを休止します。</p>
             <p><strong>音楽が再生されない</strong><br>cookie、yt-dlp、Deno、動画側の制限を確認してください。</p>
             <p><strong>ロール付与できない</strong><br>Botのロールを付与対象ロールより上に置いてください。</p>
+            <p><strong>Botの不具合や要望を送りたい</strong><br><code>/report</code> で種類を選んで送信してください。開発者DMと、設定済みなら報告チャンネルへ届きます。</p>
           </div>
         </section>
         <section id="commands">

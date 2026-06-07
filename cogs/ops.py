@@ -81,7 +81,7 @@ class SetupGuideView(discord.ui.View):
     async def community(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "`/topic_channel`\n"
-            "`/report_channel`\n"
+            "`/report_channel`（Bot報告の控え先）\n"
             "`/rule_set`\n"
             "`/faq_set`\n"
             "`/role_panel_setup`",
@@ -164,7 +164,7 @@ class Ops(commands.Cog):
             "YouTube通知": await db_get(f"youtube_notify_channel_id:{guild_id}"),
             "誕生日通知": birthday.get("channel_id"),
             "出席通知": attendance.get("notify_channel_id"),
-            "相談/通報": await db_get(f"community_report_channel:{guild_id}"),
+            "Bot報告控え": await db_get(f"community_report_channel:{guild_id}"),
             "今日のお題": topic.get("channel_id"),
             "エラー通知": await db_get(error_channel_key(guild_id)),
             "利用ログ": await db_get(command_log_channel_key(guild_id)),

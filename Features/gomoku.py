@@ -20,6 +20,7 @@ AI_DIFFICULTIES = {
     "normal": {"label": "中級", "mistake": 0.18, "profit": 0.50},
     "hard": {"label": "上級", "mistake": 0.04, "profit": 1.00},
 }
+RANDOMIZER = random.SystemRandom()
 
 
 def coin_key(guild_id: int, user_id: int) -> str:
@@ -224,6 +225,12 @@ def choose_ai_move(board: list[list[int]], ai_color: int, difficulty: str) -> tu
     if difficulty == "normal" and len(scored) > 1:
         return random.choice(scored[:2])[1:]
     return scored[0][1], scored[0][2]
+
+
+def resolve_first_choice(first: str) -> tuple[str, bool]:
+    if first in {"black", "white"}:
+        return first, False
+    return RANDOMIZER.choice(["black", "white"]), True
 
 
 async def settle_ai_coins(game: dict, guild_id: int | None, winner_color: int | None) -> str:
@@ -655,7 +662,7 @@ def gomoku_first_embed(difficulty: str) -> discord.Embed:
     label = AI_DIFFICULTIES.get(difficulty, AI_DIFFICULTIES["normal"])["label"]
     return discord.Embed(
         title="五目並べ AI対戦",
-        description=f"難易度: **{label}**\n先手・後手を選んでください。",
+        description=f"難易度: **{label}**\n先手・後手・ランダムを選んでください。",
         color=0xD6A84F,
     )
 
@@ -772,7 +779,7 @@ class Gomoku(commands.Cog):
             await set_coin_balance(interaction.guild_id, interaction.user.id, balance - bet)
         await interaction.response.defer()
 
-        player_first = first if first in {"black", "white"} else random.choice(["black", "white"])
+        player_first, was_random = resolve_first_choice(first)
         human_color = 1 if player_first == "black" else 2
         ai_color = opponent(human_color)
         game = {
@@ -792,7 +799,10 @@ class Gomoku(commands.Cog):
             "coin_settled": False,
         }
         gomoku_games[game_id] = game
-        prefix = f"AI対戦を開始しました。難易度: **{AI_DIFFICULTIES[difficulty]['label']}**"
+        first_text = "先手（黒）" if human_color == 1 else "後手（白）"
+        prefix = f"AI対戦を開始しました。難易度: **{AI_DIFFICULTIES[difficulty]['label']}**\nあなたは **{first_text}** です。"
+        if was_random:
+            prefix += "\nランダム抽選で決定しました。"
         ai_note = await run_ai_turn(game)
         if ai_note:
             prefix += "\n" + ai_note
@@ -803,7 +813,7 @@ class Gomoku(commands.Cog):
         await self.start_pvp(interaction)
 
     @app_commands.command(name="gomoku_ai", description="AIと五目並べで対戦します")
-    @app_commands.describe(difficulty="AIの難易度", bet="賭けるコイン数。0で賭けなし", first="先手/後手")
+    @app_commands.describe(difficulty="AIの難易度", bet="賭けるコイン数。0で賭けなし", first="先手/後手。未指定ならランダム")
     @app_commands.choices(
         difficulty=[
             app_commands.Choice(name="初級", value="easy"),
@@ -823,7 +833,7 @@ class Gomoku(commands.Cog):
         bet: int = 0,
         first: app_commands.Choice[str] | None = None,
     ):
-        await self.start_ai(interaction, difficulty.value, bet, first.value if first else "black")
+        await self.start_ai(interaction, difficulty.value, bet, first.value if first else "random")
 
 
 async def setup(bot: commands.Bot):

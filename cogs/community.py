@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -103,6 +104,19 @@ COIN_MILESTONES = [
     {"coins": 1000, "kind": "title_role", "name": "村の富豪"},
     {"coins": 2000, "kind": "badge", "name": "伝説の資産家"},
 ]
+REPORT_COOLDOWN_SECONDS = int(os.getenv("REPORT_COOLDOWN_SECONDS", "300"))
+REPORT_DEVELOPER_USER_ID = (
+    os.getenv("REPORT_DEVELOPER_USER_ID")
+    or os.getenv("BOT_DEVELOPER_USER_ID")
+    or os.getenv("DEVELOPER_USER_ID")
+)
+REPORT_KIND_LABELS = {
+    "bug": "バグ",
+    "request": "要望",
+    "abuse": "不正利用",
+    "display": "表示崩れ",
+    "other": "その他",
+}
 
 COIN_SHOP_ITEMS = {
     "red": {"label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
@@ -278,6 +292,62 @@ def rule_key(guild_id: int) -> str:
 
 def report_channel_key(guild_id: int) -> str:
     return f"community_report_channel:{guild_id}"
+
+
+def report_cooldown_key(guild_id: int, user_id: int) -> str:
+    return f"community_report_cooldown:{guild_id}:{user_id}"
+
+
+def parse_user_id(value: str | None) -> int | None:
+    if not value:
+        return None
+    value = value.strip()
+    return int(value) if value.isdigit() else None
+
+
+async def get_report_developer_user(bot: commands.Bot) -> discord.User | None:
+    developer_id = parse_user_id(REPORT_DEVELOPER_USER_ID)
+    if developer_id:
+        user = bot.get_user(developer_id)
+        if user:
+            return user
+        try:
+            return await bot.fetch_user(developer_id)
+        except discord.HTTPException:
+            return None
+    try:
+        app_info = await bot.application_info()
+        owner = app_info.owner
+        if isinstance(owner, discord.Team):
+            return None
+        return owner
+    except discord.HTTPException:
+        return None
+
+
+def build_report_embed(
+    interaction: discord.Interaction,
+    kind_label: str,
+    content: str,
+    *,
+    anonymous: bool,
+    for_developer: bool,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"Bot報告 / {kind_label}",
+        description=content[:1800],
+        color=0xE74C3C,
+        timestamp=datetime.now(timezone.utc),
+    )
+    sender_value = "匿名" if anonymous and not for_developer else f"{interaction.user.mention}\nID: `{interaction.user.id}`"
+    embed.add_field(name="送信者", value=sender_value, inline=False)
+    if interaction.guild:
+        embed.add_field(name="サーバー", value=f"{interaction.guild.name}\nID: `{interaction.guild.id}`", inline=False)
+    if interaction.channel:
+        channel_name = getattr(interaction.channel, "mention", None) or getattr(interaction.channel, "name", "不明")
+        embed.add_field(name="チャンネル", value=f"{channel_name}\nID: `{interaction.channel_id}`", inline=False)
+    embed.set_footer(text="VillageCore / report")
+    return embed
 
 
 def event_embed(data: dict) -> discord.Embed:
@@ -804,23 +874,99 @@ class Community(commands.Cog):
         text = await db_get(rule_key(interaction.guild_id))
         await interaction.response.send_message(text or "サーバールールはまだ登録されていません。", ephemeral=not bool(text))
 
-    @app_commands.command(name="report_channel", description="【管理者】相談/通報の送信先を現在のチャンネルに設定します")
+    @app_commands.command(name="report_channel", description="【管理者】Bot報告の控え送信先を現在のチャンネルに設定します")
     @app_commands.default_permissions(manage_guild=True)
     async def report_channel(self, interaction: discord.Interaction):
         await db_set(report_channel_key(interaction.guild_id), str(interaction.channel_id))
-        await interaction.response.send_message(f"相談/通報先を {interaction.channel.mention} に設定しました。", ephemeral=True)
+        await interaction.response.send_message(f"Bot報告の控え送信先を {interaction.channel.mention} に設定しました。", ephemeral=True)
 
-    @app_commands.command(name="report", description="管理者へ相談/通報を送ります")
-    async def report(self, interaction: discord.Interaction, content: str, anonymous: bool = True):
+    @app_commands.command(name="report", description="Bot開発者へバグ報告・要望・通報を送ります")
+    @app_commands.describe(
+        kind="報告の種類",
+        content="報告内容。発生したコマンド、状況、表示されたエラーなどを書くと助かります",
+        anonymous="サーバー内の控えチャンネルでは匿名にします。開発者には確認用に送信者IDが届きます",
+    )
+    @app_commands.choices(
+        kind=[
+            app_commands.Choice(name="バグ", value="bug"),
+            app_commands.Choice(name="要望", value="request"),
+            app_commands.Choice(name="不正利用", value="abuse"),
+            app_commands.Choice(name="表示崩れ", value="display"),
+            app_commands.Choice(name="その他", value="other"),
+        ]
+    )
+    async def report(
+        self,
+        interaction: discord.Interaction,
+        kind: app_commands.Choice[str],
+        content: str,
+        anonymous: bool = False,
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+
+        text = content.strip()
+        if len(text) < 5:
+            await interaction.response.send_message("報告内容は5文字以上で入力してください。", ephemeral=True)
+            return
+
+        cooldown_key = report_cooldown_key(interaction.guild_id, interaction.user.id)
+        locked_until = parse_utc(await db_get(cooldown_key))
+        now = datetime.now(timezone.utc)
+        if locked_until and locked_until > now:
+            await interaction.response.send_message(
+                f"連続送信防止のため、あと **{format_remaining(locked_until - now)}** 待ってから送信してください。",
+                ephemeral=True,
+            )
+            return
+
+        kind_label = REPORT_KIND_LABELS.get(kind.value, "その他")
+        developer_embed = build_report_embed(
+            interaction,
+            kind_label,
+            text,
+            anonymous=anonymous,
+            for_developer=True,
+        )
+        channel_embed = build_report_embed(
+            interaction,
+            kind_label,
+            text,
+            anonymous=anonymous,
+            for_developer=False,
+        )
+
+        sent_to = []
+        developer = await get_report_developer_user(self.bot)
+        if developer:
+            try:
+                await developer.send(embed=developer_embed)
+                sent_to.append("開発者DM")
+            except discord.HTTPException:
+                pass
+
         channel_id = int(await db_get(report_channel_key(interaction.guild_id)) or "0")
         channel = self.bot.get_channel(channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("相談/通報先が未設定です。", ephemeral=True)
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.send(embed=channel_embed)
+                sent_to.append("報告チャンネル")
+            except discord.HTTPException:
+                pass
+
+        if not sent_to:
+            await interaction.response.send_message(
+                "報告を送信できませんでした。開発者DMが閉じている、または `/report_channel` が未設定の可能性があります。",
+                ephemeral=True,
+            )
             return
-        embed = discord.Embed(title="相談/通報", description=content[:1800], color=0xE74C3C, timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="送信者", value="匿名" if anonymous else interaction.user.mention, inline=False)
-        await channel.send(embed=embed)
-        await interaction.response.send_message("管理者へ送信しました。", ephemeral=True)
+
+        await db_set(cooldown_key, (now + timedelta(seconds=REPORT_COOLDOWN_SECONDS)).isoformat())
+        await interaction.response.send_message(
+            f"報告を送信しました。送信先: **{', '.join(sent_to)}**",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="archive_old_events", description="【管理者】古いイベント記録を整理します")
     @app_commands.default_permissions(manage_guild=True)
