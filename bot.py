@@ -624,6 +624,7 @@ async def handle_help_site(request):
             <div class="tile"><strong>音楽</strong><code>/music</code> で音楽パネルを開き、再生、停止、スキップ、キュー確認をボタンで操作できます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
             <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code> でコインを賭けられます。</div>
+            <div class="tile"><strong>誕生日</strong>登録済みの誕生日には通知と一緒に、年1回の誕生日コインボーナスが付与されます。</div>
             <div class="tile"><strong>Bot報告</strong><code>/report</code> でバグ、要望、不正利用、表示崩れなどをBot開発者へ送れます。</div>
           </div>
         </section>

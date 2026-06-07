@@ -704,6 +704,8 @@ def team_answer_matches(role: Role, key: str, answer: bool | None) -> bool:
         return True
     if answer is not True:
         return False
+    if role.features.get("modifier_role") is True:
+        return key != "team_liberal"
     if key == "team_impostor" and role.features.get("team_madmate") is True:
         return True
     if key == "team_neutral" and role.features.get("team_jackal") is True:

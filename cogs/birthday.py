@@ -1,5 +1,6 @@
 import calendar
 import json
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -8,13 +9,19 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database.config_db import db_get, db_set
+from cogs.community import apply_coin_rewards, coin_key
 
 
 JST = ZoneInfo("Asia/Tokyo")
+BIRTHDAY_COIN_BONUS = int(os.getenv("BIRTHDAY_COIN_BONUS", "50"))
 
 
 def birthday_key(guild_id: int) -> str:
     return f"birthday_settings:{guild_id}"
+
+
+def birthday_bonus_key(guild_id: int, user_id: int, year: int) -> str:
+    return f"birthday_bonus:{guild_id}:{user_id}:{year}"
 
 
 def default_settings() -> dict:
@@ -23,6 +30,22 @@ def default_settings() -> dict:
         "birthdays": {},
         "last_sent": {},
     }
+
+
+async def grant_birthday_coin_bonus(guild: discord.Guild, member: discord.Member, year: int) -> tuple[bool, int, list[str]]:
+    if BIRTHDAY_COIN_BONUS <= 0:
+        return False, 0, []
+    bonus_key = birthday_bonus_key(guild.id, member.id, year)
+    if await db_get(bonus_key):
+        current = int(await db_get(coin_key(guild.id, member.id)) or "0")
+        return False, current, []
+    balance_key = coin_key(guild.id, member.id)
+    current = int(await db_get(balance_key) or "0")
+    new_balance = current + BIRTHDAY_COIN_BONUS
+    await db_set(balance_key, str(new_balance))
+    await db_set(bonus_key, "1")
+    rewards = await apply_coin_rewards(guild, member, new_balance)
+    return True, new_balance, rewards
 
 
 def validate_month_day(month: int, day: int):
@@ -115,11 +138,20 @@ class Birthday(commands.Cog):
             member = guild.get_member(int(user_id))
             mention = member.mention if member else f"<@{user_id}>"
             name = member.display_name if member else entry.get("name", "member")
+            bonus_text = ""
+            reward_lines = []
+            if member:
+                granted, new_balance, rewards = await grant_birthday_coin_bonus(guild, member, now.year)
+                if granted:
+                    bonus_text = f"\n誕生日ボーナスとして **{BIRTHDAY_COIN_BONUS}コイン** をプレゼントしました。現在 **{new_balance}コイン** です。"
+                    reward_lines = rewards
             embed = discord.Embed(
                 title="誕生日おめでとうございます！",
-                description=f"{mention} さん、素敵な一年になりますように。\n星座: **{zodiac_sign(now.month, now.day)}**",
+                description=f"{mention} さん、素敵な一年になりますように。\n星座: **{zodiac_sign(now.month, now.day)}**{bonus_text}",
                 color=0xF7B731,
             )
+            if reward_lines:
+                embed.add_field(name="獲得", value="\n".join(f"🎖 {message}" for message in reward_lines)[:1024], inline=False)
             embed.set_footer(text=f"{name} / {now.month}月{now.day}日")
             await channel.send(content=f"今日は {mention} さんの誕生日です！", embed=embed)
             settings["last_sent"][user_id] = today_key
@@ -141,7 +173,7 @@ class Birthday(commands.Cog):
         await self.save_settings(interaction.guild_id, settings)
         await interaction.response.send_message(f"誕生日通知先を {interaction.channel.mention} に設定しました。", ephemeral=True)
 
-    @app_commands.command(name="birthday_add", description="【管理者】メンバーの誕生日を登録します")
+    @app_commands.command(name="birthday_add", description="【管理者】メンバーの誕生日を登録/修正します")
     @app_commands.describe(member="対象メンバー", month="月", day="日")
     @app_commands.default_permissions(administrator=True)
     async def add_birthday(self, interaction: discord.Interaction, member: discord.Member, month: int, day: int):
