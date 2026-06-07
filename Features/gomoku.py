@@ -82,12 +82,38 @@ async def load_gomoku_games_for_guild(bot: commands.Bot, guild: discord.Guild):
             game = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        if isinstance(game.get("board"), list) and not game.get("finished"):
+        if isinstance(game.get("board"), list) and not game.get("finished") and game.get("message_id"):
             gomoku_games[game_id] = game
             bot.add_view(GomokuView(game_id, show_join=game.get("white_id") is None))
             active.append(game_id)
     if active != index:
         await db_set(gomoku_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+
+
+async def cleanup_stale_gomoku_game(interaction: discord.Interaction, game_id: str) -> bool:
+    game = gomoku_games.get(game_id)
+    if not game:
+        return True
+
+    guild_id = interaction.guild_id or game.get("guild_id")
+    message_id = game.get("message_id")
+    if not message_id:
+        await delete_gomoku_game(guild_id, game_id)
+        gomoku_games.pop(game_id, None)
+        return True
+
+    channel = interaction.channel
+    if not channel or not hasattr(channel, "fetch_message"):
+        return False
+    try:
+        await channel.fetch_message(int(message_id))
+        return False
+    except discord.NotFound:
+        await delete_gomoku_game(guild_id, game_id)
+        gomoku_games.pop(game_id, None)
+        return True
+    except (discord.Forbidden, discord.HTTPException, ValueError):
+        return False
 
 
 def new_board() -> list[list[int]]:
@@ -681,6 +707,8 @@ class Gomoku(commands.Cog):
     async def start_pvp(self, interaction: discord.Interaction):
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
+            if await cleanup_stale_gomoku_game(interaction, game_id):
+                return await self.start_pvp(interaction)
             game = gomoku_games[game_id]
             message_id = game.get("message_id") or "未保存"
             if not game.get("ai") and game.get("white_id") is None:
@@ -720,6 +748,8 @@ class Gomoku(commands.Cog):
             return
         game_id = str(interaction.channel_id)
         if game_id in gomoku_games:
+            if await cleanup_stale_gomoku_game(interaction, game_id):
+                return await self.start_ai(interaction, difficulty, bet, first)
             game = gomoku_games[game_id]
             message_id = game.get("message_id") or "未保存"
             if not game.get("ai") and game.get("white_id") is None:
