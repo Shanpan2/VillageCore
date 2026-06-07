@@ -591,6 +591,16 @@ def normalize_mod_name(value: str | None) -> str:
     return MOD_ALIASES.get(key) or MOD_ALIASES.get(compact_key) or raw
 
 
+TEAM_QUESTION_KEYS = {
+    "team_crewmate",
+    "team_impostor",
+    "team_neutral",
+    "team_liberal",
+    "team_madmate",
+    "team_jackal",
+}
+
+
 def load_roles() -> list[Role]:
     if not DATA_PATH.exists():
         return []
@@ -616,6 +626,10 @@ def load_roles() -> list[Role]:
             features["team_liberal"] = team == "liberal"
             features["team_madmate"] = team == "madmate"
             features["team_jackal"] = team == "jackal"
+            for team_key in TEAM_QUESTION_KEYS:
+                explicit_team_value = parse_bool(row.get(team_key))
+                if explicit_team_value is not None:
+                    features[team_key] = explicit_team_value
             mod = normalize_mod_name(row.get("mod"))
             roles.append(
                 Role(
@@ -672,6 +686,36 @@ QUESTION_PRIORITY_BONUS = {
 }
 
 
+def team_questions_to_skip(answered_key: str) -> set[str]:
+    if answered_key == "team_crewmate":
+        # Some support roles are presented like crewmates in play, so leave
+        # these two follow-up team checks available after a crewmate "yes".
+        return TEAM_QUESTION_KEYS - {"team_madmate", "team_jackal"}
+    if answered_key == "team_impostor":
+        return TEAM_QUESTION_KEYS - {"team_madmate"}
+    if answered_key == "team_neutral":
+        return TEAM_QUESTION_KEYS - {"team_jackal"}
+    return set(TEAM_QUESTION_KEYS)
+
+
+def team_answer_matches(role: Role, key: str, answer: bool | None) -> bool:
+    feature = role.features.get(key)
+    if feature == answer:
+        return True
+    if answer is not True:
+        return False
+    if key == "team_impostor" and role.features.get("team_madmate") is True:
+        return True
+    if key == "team_neutral" and role.features.get("team_jackal") is True:
+        return True
+    if key == "team_crewmate" and (
+        role.features.get("team_madmate") is True
+        or role.features.get("team_jackal") is True
+    ):
+        return True
+    return False
+
+
 def priority_bonus(key: str) -> float:
     explicit_bonus = QUESTION_PRIORITY_BONUS.get(key, 0)
     try:
@@ -691,11 +735,16 @@ def best_question(candidates: list[Role], asked: set[str]) -> str | None:
             continue
         yes_count = sum(1 for role in candidates if role.features.get(key) is True)
         no_count = sum(1 for role in candidates if role.features.get(key) is False)
-        known_count = yes_count + no_count
-        if known_count == 0:
+        if yes_count == 0 and no_count == 0:
             continue
-        balance = min(yes_count, no_count)
-        coverage_bonus = known_count * 0.05
+        # Blank feature cells are treated flexibly on answer application: a "no"
+        # keeps unknown roles, while a "yes" keeps only explicit positives.
+        # Score questions by that effective split so rare but distinctive
+        # positive tags, such as balance_vote_power, are not buried forever.
+        effective_no_count = len(candidates) - yes_count if yes_count else no_count
+        effective_known_count = len(candidates) if yes_count else no_count
+        balance = min(yes_count, effective_no_count)
+        coverage_bonus = effective_known_count * 0.05
         one_sided_bonus = 0.25 if yes_count == 0 or no_count == 0 else 0
         score = balance + coverage_bonus + one_sided_bonus + priority_bonus(key)
         scored.append((score, key))
@@ -765,8 +814,14 @@ class GuessSession:
                 self.candidates = [role for role in self.candidates if role.name != guessed_name]
             return
 
+        if answer is True and key in TEAM_QUESTION_KEYS:
+            self.asked.update(team_questions_to_skip(key))
+
         matched = []
         for role in self.candidates:
+            if key in TEAM_QUESTION_KEYS and team_answer_matches(role, key, answer):
+                matched.append(role)
+                continue
             feature = role.features.get(key)
             if feature == answer:
                 matched.append(role)
@@ -827,7 +882,10 @@ sessions: dict[int, GuessSession] = {}
 
 
 def feature_signature(role: Role) -> tuple[tuple[str, bool | None], ...]:
-    return tuple((key, role.features.get(key)) for key in FEATURE_QUESTIONS)
+    # Imported data often leaves non-applicable features blank. For final
+    # grouping, treat blank like "no" so equivalent cross-mod roles are shown
+    # together instead of asking a long tail of one-sided negative questions.
+    return tuple((key, role.features.get(key) is True) for key in FEATURE_QUESTIONS)
 
 
 def grouped_candidate_text(roles: list[Role], limit: int = 10) -> str:
