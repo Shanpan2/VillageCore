@@ -63,6 +63,6 @@ Wiki本文、Tips、Q&A、オプション表、画像などの長文・表現・
 
 ・[Nebula on the Ship](https://github.com/Dolly1016/Nebula)
 
-・[ExtreameRoles](https://github.com/yukieiji/ExtremeRoles)
+・[ExtremeRoles](https://github.com/yukieiji/ExtremeRoles)
 
 ・[The Other Roles GMIA](https://github.com/GMIA-Nexus/TheOtherRolesGMIA)
