@@ -12,7 +12,7 @@ Among Usの役職アキネーター・クイズ:Roles Guesser Botは[こちら](
 ## リンク
 
 - Bot 招待: https://discord.com/oauth2/authorize?client_id=1501521359963033741&permissions=1119110818992&integration_type=0&scope=bot+applications.commands
-- ヘルプサイト: https://worker-production-9aed.up.railway.app/help
+- ヘルプサイト: https://shanpan2.github.io/VillageCore/
 
 ## 主な機能
 

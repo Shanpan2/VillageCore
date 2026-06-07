@@ -9,7 +9,7 @@ Japanese README: [README.md](README.md)
 ## Links
 
 - Bot Invite: https://discord.com/oauth2/authorize?client_id=1501521359963033741&permissions=1119110818992&integration_type=0&scope=bot+applications.commands
-- Help Site: https://worker-production-9aed.up.railway.app/help
+- Help Site: https://shanpan2.github.io/VillageCore/
 
 ## Features
 

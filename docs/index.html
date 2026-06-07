@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Discord Bot むらびと君 / VillageCore のヘルプサイトです。">
+  <title>むらびと君 ヘルプ | VillageCore</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17211b;
+      --muted: #627069;
+      --line: #d9e0dc;
+      --paper: #fbfcfa;
+      --panel: #ffffff;
+      --green: #2f7d57;
+      --green-dark: #1f5f41;
+      --gold: #d6a84f;
+      --blue: #426bb0;
+      --red: #b94f48;
+      --shadow: 0 16px 40px rgba(37, 55, 45, 0.10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(47, 125, 87, 0.10), rgba(255, 255, 255, 0) 360px),
+        var(--paper);
+      line-height: 1.75;
+    }
+    a { color: var(--green-dark); text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid rgba(217, 224, 220, 0.9);
+      background: rgba(251, 252, 250, 0.92);
+      backdrop-filter: blur(12px);
+    }
+    .nav {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: conic-gradient(from 130deg, #2f7d57, #d6a84f, #426bb0, #2f7d57);
+      color: white;
+      box-shadow: inset 0 0 0 3px rgba(255,255,255,0.72);
+      font-size: 17px;
+    }
+    nav {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      font-size: 14px;
+    }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--green-dark); }
+    main { max-width: 1120px; margin: 0 auto; padding: 34px 20px 56px; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
+      gap: 28px;
+      align-items: center;
+      min-height: 420px;
+    }
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(34px, 6vw, 68px);
+      line-height: 1.06;
+      letter-spacing: 0;
+    }
+    .lead {
+      margin: 0 0 24px;
+      max-width: 720px;
+      color: #34433b;
+      font-size: 18px;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 42px;
+      padding: 9px 15px;
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      background: var(--green);
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .button.secondary {
+      background: white;
+      color: var(--green-dark);
+    }
+    .console {
+      background: #17211b;
+      color: #e9f2ea;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+      min-height: 310px;
+      position: relative;
+      overflow: hidden;
+    }
+    .console::before {
+      content: "";
+      position: absolute;
+      inset: auto -40px -70px auto;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: rgba(214, 168, 79, 0.22);
+    }
+    .console-title {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+    .dot:nth-child(2) { background: var(--gold); }
+    .dot:nth-child(3) { background: #4fb073; }
+    .command {
+      margin: 10px 0;
+      padding: 9px 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 7px;
+      background: rgba(255,255,255,0.06);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 14px;
+    }
+    section { padding: 34px 0; border-top: 1px solid var(--line); }
+    h2 { margin: 0 0 12px; font-size: 28px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: 0; }
+    .section-head { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin-bottom: 18px; }
+    .section-head p { margin: 0; color: var(--muted); max-width: 680px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .tile {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 142px;
+      box-shadow: 0 8px 24px rgba(37, 55, 45, 0.04);
+    }
+    .tile p { margin: 0; color: var(--muted); }
+    code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: #eef5ef;
+      color: #135c38;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    .wide {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .notice {
+      border-left: 4px solid var(--gold);
+      background: #fff8e8;
+      padding: 14px 16px;
+      border-radius: 8px;
+      color: #5c4820;
+    }
+    .list {
+      margin: 0;
+      padding-left: 1.1em;
+      color: var(--muted);
+    }
+    .list li { margin: 6px 0; }
+    footer {
+      padding: 28px 20px 42px;
+      border-top: 1px solid var(--line);
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    @media (max-width: 840px) {
+      .hero, .wide { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+      nav { display: none; }
+      main { padding-top: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <div class="brand"><span class="mark">村</span><span>むらびと君 / VillageCore</span></div>
+      <nav aria-label="ページ内メニュー">
+        <a href="#start">はじめに</a>
+        <a href="#games">ゲーム</a>
+        <a href="#community">日常機能</a>
+        <a href="#admin">管理</a>
+        <a href="#trouble">困った時</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="start">
+      <div>
+        <h1>むらびと君 ヘルプ</h1>
+        <p class="lead">
+          VillageCore は、Discord サーバー運営と日常の遊びをまとめて支える多機能Botです。
+          ゲーム、音楽、チケット、役職パネル、出席管理、投票、AI応答、YouTube通知、ログ管理などを扱えます。
+        </p>
+        <div class="actions">
+          <a class="button" href="https://discord.com/oauth2/authorize?client_id=1501521359963033741&amp;permissions=1119110818992&amp;integration_type=0&amp;scope=bot+applications.commands">Botを招待</a>
+          <a class="button secondary" href="https://github.com/Shanpan2/VillageCore">GitHubを見る</a>
+        </div>
+      </div>
+      <aside class="console" aria-label="おすすめコマンド">
+        <div class="console-title"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        <div class="command">/help</div>
+        <div class="command">/quick</div>
+        <div class="command">/game</div>
+        <div class="command">/music panel</div>
+        <div class="command">/ticket setup</div>
+        <p>迷ったら <code>/quick</code> と <code>/game</code> から始めるのがおすすめです。</p>
+      </aside>
+    </section>
+
+    <section id="games">
+      <div class="section-head">
+        <div>
+          <h2>ゲーム</h2>
+          <p>基本は <code>/game</code> から選びます。募集、参加、抜ける、開始、中止、ルール確認をパネルで操作できます。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <article class="tile"><h3>ゲームパネル</h3><p><code>/game</code> でUNO、7並べ、大富豪、ポーカー、オセロ、五目並べ、詰将棋、将棋、Ito、コードネーム、人狼を選べます。</p></article>
+        <article class="tile"><h3>UNO</h3><p>手札と操作はDM、公開チャンネルは進行メッセージを編集して場札を表示します。</p></article>
+        <article class="tile"><h3>7並べ</h3><p>手札はDM画像で届きます。7を中心に同じマークのカードを順番につなげます。</p></article>
+        <article class="tile"><h3>大富豪</h3><p>前の人より強いカードを出して、先に手札をなくした人が上がりです。</p></article>
+        <article class="tile"><h3>ポーカー</h3><p>DMで届いた5枚の手札から交換し、役の強さで勝負します。コイン対応あり。</p></article>
+        <article class="tile"><h3>オセロ</h3><p>対人戦とAI対戦に対応。盤面画像で進行し、勝者はユーザー名で表示されます。</p></article>
+        <article class="tile"><h3>五目並べ</h3><p>対人戦とAI対戦に対応。先手、後手、ランダムを選び、先に5個並べると勝ちです。</p></article>
+        <article class="tile"><h3>詰将棋</h3><p>初級、中級、上級から選択。正解すると難易度ごとにコインを獲得できます。</p></article>
+        <article class="tile"><h3>Ito / コードネーム / 人狼</h3><p>会話系ゲームもパネル中心で進行できます。Itoは主催者がお題を決められます。</p></article>
+      </div>
+    </section>
+
+    <section id="community">
+      <div class="section-head">
+        <div>
+          <h2>日常機能</h2>
+          <p>サーバーで毎日使いやすい機能をまとめています。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <article class="tile"><h3>クイック</h3><p><code>/quick</code> からゲーム作成、おみくじ、ダイス、じゃんけんなどをすぐ実行できます。</p></article>
+        <article class="tile"><h3>おみくじ</h3><p><code>/omikuji</code> で1日1回引けます。連続日数や一部結果で称号、バッジ、コインを獲得できます。</p></article>
+        <article class="tile"><h3>プロフィール</h3><p>称号、バッジ、自己紹介、SNSなどを登録してプロフィール表示できます。</p></article>
+        <article class="tile"><h3>AI応答</h3><p>Botへのメンションや返信でAIが応答します。利用制限時は時間を空けてください。</p></article>
+        <article class="tile"><h3>名言</h3><p>メッセージを名言画像にしたり、登録済み名言を一覧表示できます。</p></article>
+        <article class="tile"><h3>検索</h3><p>DuckDuckGoベースの検索機能で、Discord内から調べものができます。</p></article>
+      </div>
+    </section>
+
+    <section id="admin">
+      <div class="section-head">
+        <div>
+          <h2>管理・運営</h2>
+          <p>サーバー運営者向けの設定機能です。権限が必要な操作は管理者のみ実行できます。</p>
+        </div>
+      </div>
+      <div class="wide">
+        <article class="tile"><h3>チケット</h3><p>問い合わせ用チャンネルを作成し、ログ保存、再オープン、削除ボタンに対応しています。</p></article>
+        <article class="tile"><h3>役職パネル</h3><p>複数ロール付与や削除後の再追加に対応。既存パネルもできるだけ有効化されます。</p></article>
+        <article class="tile"><h3>出席管理</h3><p>メンバーとポイントを保存し、再デプロイ後も継続できます。</p></article>
+        <article class="tile"><h3>ログ管理</h3><p>削除ログ、VC入退室、BAN、キックなどの記録に対応できます。</p></article>
+      </div>
+    </section>
+
+    <section id="music">
+      <div class="section-head">
+        <div>
+          <h2>音楽</h2>
+          <p>YouTubeの仕様変更やCookie期限切れの影響を受けることがあります。</p>
+        </div>
+      </div>
+      <div class="notice">
+        音楽が途切れる、403/429が出る、Cookieが無効と表示される場合は、Cookieの再設定、yt-dlp更新、時間を空けた再試行が必要になることがあります。
+      </div>
+    </section>
+
+    <section id="trouble">
+      <div class="section-head">
+        <div>
+          <h2>困った時</h2>
+          <p>よくある原因を先に確認してください。</p>
+        </div>
+      </div>
+      <ul class="list">
+        <li>コマンドが出ない: Botの招待スコープに <code>applications.commands</code> があるか確認してください。</li>
+        <li>権限不足: Botロールが対象ロールやチャンネルより上にあるか確認してください。</li>
+        <li>AIが返らない: Gemini APIの無料枠、429、503、モデル設定を確認してください。</li>
+        <li>YouTube通知が止まる: YouTube Data APIのクォータ上限に達している可能性があります。</li>
+        <li>ゲームが残っている: 管理者は <code>/game_cancel_message</code> や <code>/game_cancel_all</code> を使えます。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    むらびと君 / VillageCore Help<br>
+    このページにはToken、APIキー、Cookieなどの秘密情報を載せないでください。
+  </footer>
+</body>
+</html>
