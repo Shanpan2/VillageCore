@@ -110,6 +110,8 @@ FEATURE_QUESTIONS = {
     "survival_requirement_power": "生存やタスク進捗が自分の勝利に影響しますか？",
     "photo_power": "写真や記録として位置情報を後で確認できますか？",
     "random_teleport_power": "対象をランダムな場所や別プレイヤーの位置へ飛ばしますか？",
+    "mass_teleport_power": "生存者全員を誰かの位置へ集合テレポートさせますか？",
+    "teleport_kill_swap_power": "対象と位置を入れ替えながら、その対象をキルできますか？",
     "self_resurrection_power": "自分が死んだ後に復活できますか？",
     "variable_vote_power": "自分の投票数がランダムや設定値で変動しますか？",
     "portal_power": "2点間を移動できるポータルを設置しますか？",
@@ -171,6 +173,7 @@ FEATURE_QUESTIONS = {
     "role_info_power": "他人の役職や陣営を知る能力がありますか？",
     "omniscient_power": "全員の役職を常に見ることができますか？（例: 神の権能）",
     "public_identity": "自分の役職や存在が他のプレイヤーに分かりますか？",
+    "star_visual_power": "スター系のように、名前色・画面発光・色変化などで目立つ役職ですか？",
     "cursor_reveal_power": "会議中のカーソル位置など、操作情報が他人に見えますか？",
     "fake_identity": "他人から別陣営・別役職・別人のように見える能力ですか？",
     "dummy_power": "ダミーや分身を表示する能力がありますか？",
@@ -179,6 +182,7 @@ FEATURE_QUESTIONS = {
     "body_move_power": "死体を運んだり別の場所へ動かしたりできますか？",
     "corpse_consumption_power": "死体を食べる・消すことで勝利や能力に関わりますか？",
     "delayed_kill": "能力を使ってから遅れて死亡しますか？（例: 呪い、時限爆弾、後で発動するキル）",
+    "collision_kill_power": "一定時間後、すれ違った相手を接触でキルできますか？",
     "bomb_power": "爆弾を付与・設置して爆発させる能力ですか？",
     "marker_power": "マーカーや地点を指定して範囲を作る能力ですか？",
     "disguise_or_invisible": "変身・透明化・姿の偽装ができますか？",
@@ -276,6 +280,9 @@ FEATURE_QUESTIONS = {
     "skating_power": "氷上のように滑って加速する移動能力ですか？",
     "vote_swap_power": "会議中に2人の投票先や票を入れ替えますか？",
     "balance_vote_power": "会議中に2人を天秤にかけ、どちらか又は両方を追放する能力ですか？",
+    "balance_self_vote_mode_power": "会議で自分に投票してから、天秤にかける2人を選ぶ役職ですか？",
+    "balance_self_target_option_power": "設定により、自分自身を審判や天秤の対象にできますか？",
+    "balance_restrict_other_abilities_power": "天秤会議中、対象者以外への能力使用を制限する設定がありますか？",
     "traitor_cracking_power": "キル後にアドミン・カメラ・バイタルを遠隔で順番に使えますか？",
     "corpse_guard_charge_power": "死体を処理して誰かを守る回数を増やしますか？",
     "ambush_vent_kill_power": "ベント中やベント付近から特殊キルを行いますか？",
@@ -308,6 +315,7 @@ FEATURE_QUESTIONS = {
     "vote_cancel_power": "会議で対象の得票を打ち消す能力ですか？",
     "vote_zero_power": "投票数が0票になる役職/属性ですか？",
     "task_meeting_time_power": "タスク完了によって会議時間を延長しますか？",
+    "task_public_reveal_power": "タスクを完了すると自分の役職が全員に公開されますか？",
     "killer_freeze_on_death_power": "キルされた時、キルした相手を一定時間動けなくしますか？",
     "oil_douse_win_power": "全生存者にオイルを塗り、ベントに入ることで勝利しますか？",
     "egoist_power": "インポスターを認識しつつ、インポスター全滅後に勝利を狙いますか？",
@@ -410,6 +418,8 @@ QUIZ_HINTS = {
     "survival_requirement_power": "生存や特定条件達成が勝利に関わります。",
     "photo_power": "写真や記録として位置情報を残します。",
     "random_teleport_power": "ランダムな位置へテレポートさせます。",
+    "mass_teleport_power": "生存者全員を集合テレポートさせます。",
+    "teleport_kill_swap_power": "対象と位置を入れ替えながらキルします。",
     "self_resurrection_power": "死亡後に復活できます。",
     "variable_vote_power": "投票数がランダムまたは設定値で変化します。",
     "portal_power": "ポータルや2点間移動に関わります。",
@@ -429,6 +439,7 @@ QUIZ_HINTS = {
     "role_info_power": "役職や陣営情報を知る能力があります。",
     "omniscient_power": "全員の役職を常に見ることができます。",
     "public_identity": "存在や役職が他人に分かります。",
+    "star_visual_power": "スター系の見た目や発光で目立ちます。",
     "fake_identity": "別陣営や別役職のように見える要素があります。",
     "dummy_power": "ダミーや分身を表示します。",
     "body_info_power": "死体・死因・死亡位置に関わります。",
@@ -436,6 +447,7 @@ QUIZ_HINTS = {
     "body_move_power": "死体を運んだり動かしたりできます。",
     "corpse_consumption_power": "死体の捕食や消去が勝利・能力に関わります。",
     "delayed_kill": "遅延キルや間接キルに関わります。",
+    "collision_kill_power": "接触やすれ違いでキルします。",
     "bomb_power": "爆弾の付与・設置・爆発に関わります。",
     "marker_power": "マーカーや地点指定による範囲能力に関わります。",
     "disguise_or_invisible": "変身・透明化・姿の偽装に関わります。",
@@ -529,6 +541,9 @@ QUIZ_HINTS = {
     "skating_power": "滑る移動能力に関わります。",
     "vote_swap_power": "会議中の票入れ替えに関わります。",
     "balance_vote_power": "天秤投票で対象2人の追放に関わります。",
+    "balance_self_vote_mode_power": "自投票で天秤モードに入り、2人を選びます。",
+    "balance_self_target_option_power": "自分自身を審判や天秤の対象にできる設定があります。",
+    "balance_restrict_other_abilities_power": "天秤会議中の能力使用制限設定があります。",
     "traitor_cracking_power": "キル後のクラッキングに関わります。",
     "corpse_guard_charge_power": "死体処理で防御回数を増やします。",
     "ambush_vent_kill_power": "ベントを使った奇襲キルに関わります。",
@@ -574,6 +589,7 @@ QUIZ_HINTS = {
     "vision_debuff_power": "視界が狭くなるデバフです。",
     "vote_zero_power": "投票数が0票になります。",
     "task_meeting_time_power": "タスク完了で会議時間が延びます。",
+    "task_public_reveal_power": "タスク完了で自分の役職が全員に公開されます。",
     "killer_freeze_on_death_power": "キルした相手を拘束します。",
     "oil_douse_win_power": "全員にオイルを塗ってベントに入る勝利条件です。",
     "egoist_power": "インポスターを認識するが、インポスターとは競合します。",
@@ -682,6 +698,9 @@ QUESTION_PRIORITY_BONUS = {
     "vote_power": 1.2,
     "special_vote_power": 1.35,
     "balance_vote_power": 2.2,
+    "balance_self_vote_mode_power": 1.95,
+    "balance_self_target_option_power": 1.95,
+    "balance_restrict_other_abilities_power": 1.95,
     "sidekick_creation_power": 1.7,
     "pavlov_owner_dog_power": 2.2,
     "oil_douse_win_power": 2.0,
@@ -693,6 +712,11 @@ QUESTION_PRIORITY_BONUS = {
     "curse_target_power": 2.0,
     "kidnap_drag_power": 2.0,
     "curse_proxy_kill_power": 2.0,
+    "mass_teleport_power": 2.0,
+    "teleport_kill_swap_power": 2.0,
+    "star_visual_power": 1.9,
+    "collision_kill_power": 2.0,
+    "task_public_reveal_power": 1.9,
     "trap_place_power": 1.9,
     "kill_trap_power": 1.9,
     "notify_trap_power": 1.9,
@@ -712,17 +736,50 @@ QUESTION_PRIORITY_BONUS = {
     "ghost_neutral_power": 1.5,
 }
 
+TEAM_YES_FEATURE_SKIP = {
+    "team_crewmate": {
+        "bounty_target_power",
+        "curse_target_power",
+        "kidnap_drag_power",
+        "curse_proxy_kill_power",
+        "serial_suicide_timer_power",
+        "gamble_cooldown_power",
+        "lights_only_kill_power",
+        "puppeteer_kill_power",
+        "kill_quota_win_power",
+        "teleport_kill_swap_power",
+        "ambush_vent_kill_power",
+        "second_kill_button_power",
+    },
+    "team_impostor": {
+        "forced_report_power",
+        "bait_vent_detection_power",
+        "killer_freeze_on_death_power",
+        "portable_vitals_power",
+        "death_cause_power",
+        "soul_vision_power",
+        "task_public_reveal_power",
+    },
+    "team_neutral": {
+        "sheriff_misfire_power",
+        "bait_vent_detection_power",
+        "killer_freeze_on_death_power",
+        "task_public_reveal_power",
+    },
+}
+
 
 def team_questions_to_skip(answered_key: str) -> set[str]:
+    skipped_features = set(TEAM_YES_FEATURE_SKIP.get(answered_key, set()))
     if answered_key == "team_crewmate":
         # Some support roles are presented like crewmates in play, so leave
         # these two follow-up team checks available after a crewmate "yes".
-        return TEAM_QUESTION_KEYS - {"team_madmate", "team_jackal"}
+        return (TEAM_QUESTION_KEYS - {"team_madmate", "team_jackal"}) | skipped_features
     if answered_key == "team_impostor":
-        return TEAM_QUESTION_KEYS - {"team_madmate"}
+        return (TEAM_QUESTION_KEYS - {"team_madmate"}) | skipped_features
     if answered_key == "team_neutral":
-        return TEAM_QUESTION_KEYS - {"team_jackal"}
-    return set(TEAM_QUESTION_KEYS)
+        return (TEAM_QUESTION_KEYS - {"team_jackal"}) | skipped_features
+    return set(TEAM_QUESTION_KEYS) | skipped_features
 
 
 def team_answer_matches(role: Role, key: str, answer: bool | None) -> bool:
@@ -799,8 +856,9 @@ class GuessSession:
         self.current_question: str | None = None
         self.last_result_names: set[str] = set()
         self.rejected_names: set[str] = set()
+        self.positive_answer_count = 0
         self.history: list[
-            tuple[list[Role], set[str], str | None, set[str], set[str]]
+            tuple[list[Role], set[str], str | None, set[str], set[str], int]
         ] = []
 
     def can_go_back(self) -> bool:
@@ -814,6 +872,7 @@ class GuessSession:
                 self.current_question,
                 set(self.last_result_names),
                 set(self.rejected_names),
+                self.positive_answer_count,
             )
         )
 
@@ -826,6 +885,7 @@ class GuessSession:
             self.current_question,
             self.last_result_names,
             self.rejected_names,
+            self.positive_answer_count,
         ) = self.history.pop()
         return True
 
@@ -833,6 +893,8 @@ class GuessSession:
         if not self.current_question:
             return
         key = self.current_question
+        if answer is True:
+            self.positive_answer_count += 1
         if key.startswith("guess:"):
             if answer is None:
                 return
@@ -986,6 +1048,9 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "vote_power",
         "special_vote_power",
         "balance_vote_power",
+        "balance_self_vote_mode_power",
+        "balance_self_target_option_power",
+        "balance_restrict_other_abilities_power",
         "meeting_kill_power",
         "vote_cancel_power",
         "exile_win",
@@ -1046,6 +1111,8 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "survival_requirement_power",
         "photo_power",
         "random_teleport_power",
+        "mass_teleport_power",
+        "teleport_kill_swap_power",
         "self_resurrection_power",
         "magic_circle_power",
         "variable_vote_power",
@@ -1089,6 +1156,8 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "action_detection_power",
         "role_info_power",
         "omniscient_power",
+        "public_identity",
+        "star_visual_power",
         "body_info_power",
         "conversion_power",
         "doll_creation_power",
@@ -1124,6 +1193,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "hijack_vision_power",
         "map_device_fake_power",
         "cooldown_power",
+        "collision_kill_power",
         "team_cooldown_boost_power",
         "kill_combo_power",
         "stock_reload_power",
@@ -1145,6 +1215,7 @@ def quiz_hints_for(role: Role, max_hints: int = 5) -> list[str]:
         "area_effect",
         "death_trigger",
         "killer_freeze_on_death_power",
+        "task_public_reveal_power",
         "blood_trail_power",
         "suicide_risk",
         "vote_zero_power",
@@ -1232,8 +1303,25 @@ def session_embed(session: GuessSession) -> discord.Embed:
     if len(session.candidates) == 0:
         return discord.Embed(
             title="役職当て",
-            description="候補がなくなりました。役職データが足りないか、どこかの回答が違うかもしれません。",
+            description=(
+                "候補がなくなりました。役職データが足りないか、どこかの回答が違うかもしれません。\n"
+                "一つ前に戻るか、もう一度 `/guess` で最初から試してください。"
+            ),
             color=0xE74C3C,
+        )
+    if (
+        session.positive_answer_count == 0
+        and len(session.asked) >= 6
+        and len(session.candidates) <= 3
+    ):
+        return discord.Embed(
+            title="役職当て",
+            description=(
+                "ここまで全て「いいえ」寄りの回答なので、該当役職がデータに無いか、"
+                "どこかの回答が違う可能性が高いです。\n"
+                "一つ前に戻るか、もう一度 `/guess` で最初から試してください。"
+            ),
+            color=0xE67E22,
         )
 
     grouped_roles = single_group_roles(session.candidates)
@@ -1334,6 +1422,7 @@ class GuessView(discord.ui.View):
         finished = (
             indistinguishable_result(session.candidates) is not None
             or "候補がなくなりました" in embed.description
+            or "該当役職がデータに無い" in embed.description
             or "候補をすべて確認しました" in embed.description
         )
         if finished:
