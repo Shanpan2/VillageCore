@@ -765,10 +765,14 @@ QUESTION_PRIORITY_BONUS = {
     "blood_stain_power": 1.95,
     "thrall_creation_power": 1.9,
     "area_instant_kill_power": 2.1,
+    "wave_cannon_power": 2.15,
     "projectile_barrage_power": 2.15,
     "multi_hit_kill_power": 2.05,
     "friendly_fire_option_power": 1.85,
     "can_win_alone": 1.5,
+    "additional_win": 1.75,
+    "exile_win": 1.95,
+    "survival_requirement_power": 1.75,
     "meeting_ability": 1.2,
     "vote_power": 1.2,
     "special_vote_power": 1.35,
@@ -789,6 +793,7 @@ QUESTION_PRIORITY_BONUS = {
     "oil_douse_win_power": 2.0,
     "egoist_power": 2.0,
     "invisibility_power": 1.8,
+    "disguise_or_invisible": 1.9,
     "shapeshift_power": 1.8,
     "lights_only_kill_power": 2.1,
     "bounty_target_power": 2.0,
@@ -797,7 +802,10 @@ QUESTION_PRIORITY_BONUS = {
     "curse_proxy_kill_power": 2.0,
     "mass_teleport_power": 2.0,
     "teleport_kill_swap_power": 2.0,
+    "teleport_power": 1.85,
+    "global_camouflage_power": 2.0,
     "star_visual_power": 1.9,
+    "growth_size_power": 2.0,
     "collision_kill_power": 2.0,
     "task_public_reveal_power": 1.9,
     "trap_place_power": 1.9,
@@ -808,6 +816,14 @@ QUESTION_PRIORITY_BONUS = {
     "death_cause_power": 1.7,
     "kill_flash_power": 1.7,
     "soul_vision_power": 1.7,
+    "tracking_power": 1.7,
+    "buff_modifier_power": 1.7,
+    "debuff_modifier_power": 1.7,
+    "environmental_death_power": 1.95,
+    "stationary_death_power": 1.85,
+    "meeting_message": 1.75,
+    "emergency_repair_power": 1.85,
+    "stock_reload_power": 1.85,
     "bait_vent_detection_power": 1.8,
     "forced_kill_misfire_power": 1.8,
     "lovers_power": 1.6,
@@ -935,7 +951,10 @@ def best_question(candidates: list[Role], asked: set[str]) -> str | None:
         balance = min(yes_count, effective_no_count)
         coverage_bonus = effective_known_count * 0.05
         one_sided_bonus = 0.25 if yes_count == 0 or no_count == 0 else 0
-        score = balance + coverage_bonus + one_sided_bonus + priority_bonus(key)
+        # Once the list is small, prefer a real differentiator over a long run
+        # of high-priority one-sided "no" questions.
+        split_bonus = 4.0 if len(candidates) <= 5 and yes_count > 0 and no_count > 0 else 0
+        score = balance + coverage_bonus + one_sided_bonus + split_bonus + priority_bonus(key)
         scored.append((score, key))
     if not scored:
         return None
