@@ -995,8 +995,27 @@ def priority_bonus(key: str) -> float:
     return explicit_bonus + order_bonus
 
 
+def answer_match_count(candidates: list[Role], key: str, answer: bool | None) -> int:
+    count = 0
+    for role in candidates:
+        if key in TEAM_QUESTION_KEYS and team_answer_matches(role, key, answer):
+            count += 1
+            continue
+        feature = role.features.get(key)
+        if feature == answer:
+            count += 1
+            continue
+        if answer is False and feature is None:
+            count += 1
+            continue
+        if key == "has_tasks" and feature is None:
+            count += 1
+    return count
+
+
 def best_question(candidates: list[Role], asked: set[str]) -> str | None:
     scored: list[tuple[float, str]] = []
+    candidate_count = len(candidates)
     for key in FEATURE_QUESTIONS:
         if key in asked:
             continue
@@ -1004,18 +1023,30 @@ def best_question(candidates: list[Role], asked: set[str]) -> str | None:
         no_count = sum(1 for role in candidates if role.features.get(key) is False)
         if yes_count == 0 and no_count == 0:
             continue
+        true_match_count = answer_match_count(candidates, key, True)
+        false_match_count = answer_match_count(candidates, key, False)
+        unknown_match_count = answer_match_count(candidates, key, None)
+        if (
+            true_match_count == candidate_count
+            or false_match_count == candidate_count
+            or unknown_match_count == candidate_count
+        ):
+            continue
         # Blank feature cells are treated flexibly on answer application: a "no"
         # keeps unknown roles, while a "yes" keeps only explicit positives.
         # Score questions by that effective split so rare but distinctive
         # positive tags, such as balance_vote_power, are not buried forever.
-        effective_no_count = len(candidates) - yes_count if yes_count else no_count
-        effective_known_count = len(candidates) if yes_count else no_count
-        balance = min(yes_count, effective_no_count)
+        effective_known_count = max(true_match_count, false_match_count, unknown_match_count)
+        balance = min(
+            match_count
+            for match_count in (true_match_count, false_match_count, unknown_match_count)
+            if match_count > 0
+        )
         coverage_bonus = effective_known_count * 0.05
         one_sided_bonus = 0.25 if yes_count == 0 or no_count == 0 else 0
         # Once the list is small, prefer a real differentiator over a long run
         # of high-priority one-sided "no" questions.
-        split_bonus = 4.0 if len(candidates) <= 5 and yes_count > 0 and no_count > 0 else 0
+        split_bonus = 4.0 if len(candidates) <= 5 and 0 < true_match_count < candidate_count else 0
         score = balance + coverage_bonus + one_sided_bonus + split_bonus + priority_bonus(key)
         scored.append((score, key))
     if not scored:
