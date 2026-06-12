@@ -1117,8 +1117,9 @@ class GuessSession:
         self.last_result_names: set[str] = set()
         self.rejected_names: set[str] = set()
         self.positive_answer_count = 0
+        self.answered_question_count = 0
         self.history: list[
-            tuple[list[Role], set[str], str | None, set[str], set[str], int]
+            tuple[list[Role], set[str], str | None, set[str], set[str], int, int]
         ] = []
 
     def can_go_back(self) -> bool:
@@ -1133,6 +1134,7 @@ class GuessSession:
                 set(self.last_result_names),
                 set(self.rejected_names),
                 self.positive_answer_count,
+                self.answered_question_count,
             )
         )
 
@@ -1146,6 +1148,7 @@ class GuessSession:
             self.last_result_names,
             self.rejected_names,
             self.positive_answer_count,
+            self.answered_question_count,
         ) = self.history.pop()
         return True
 
@@ -1153,6 +1156,7 @@ class GuessSession:
         if not self.current_question:
             return
         key = self.current_question
+        self.answered_question_count += 1
         if answer is True:
             self.positive_answer_count += 1
         if key.startswith("guess:"):
@@ -1227,9 +1231,64 @@ class GuessSession:
         # Clear the history so the retry can reuse useful questions if needed.
         self.asked.clear()
         self.history.clear()
+        self.positive_answer_count = 0
+        self.answered_question_count = 0
 
 
 sessions: dict[int, GuessSession] = {}
+
+MIN_FINAL_ANSWERED_QUESTIONS = 8
+MIN_FINAL_POSITIVE_ANSWERS = 3
+
+
+def primary_team(role: Role) -> str | None:
+    for key in TEAM_QUESTION_KEYS:
+        if role.features.get(key) is True:
+            return key
+    return None
+
+
+def should_delay_final_result(session: GuessSession) -> bool:
+    return (
+        session.answered_question_count < MIN_FINAL_ANSWERED_QUESTIONS
+        or session.positive_answer_count < MIN_FINAL_POSITIVE_ANSWERS
+    )
+
+
+def nearby_candidates_for_more_questions(session: GuessSession, role: Role) -> list[Role]:
+    team_key = primary_team(role)
+    nearby = []
+    for candidate in session.all_roles:
+        if candidate.name in session.rejected_names:
+            continue
+        if candidate.mod != role.mod:
+            continue
+        if team_key and primary_team(candidate) != team_key:
+            continue
+        nearby.append(candidate)
+    return nearby
+
+
+def expand_final_candidates_if_needed(session: GuessSession) -> bool:
+    if not session.candidates or not should_delay_final_result(session):
+        return False
+
+    expanded: list[Role] = []
+    seen_names: set[str] = set()
+    for role in session.candidates:
+        for candidate in nearby_candidates_for_more_questions(session, role):
+            if candidate.name in seen_names:
+                continue
+            seen_names.add(candidate.name)
+            expanded.append(candidate)
+
+    if len(expanded) <= len(session.candidates):
+        return False
+    if best_question(expanded, session.asked) is None:
+        return False
+
+    session.candidates = expanded
+    return True
 
 
 def feature_signature(role: Role) -> tuple[tuple[str, bool | None], ...]:
@@ -1634,8 +1693,11 @@ def session_embed(session: GuessSession) -> discord.Embed:
             color=0xE67E22,
         )
 
+    expand_final_candidates_if_needed(session)
+    final_result_allowed = not should_delay_final_result(session)
+
     grouped_roles = single_group_roles(session.candidates)
-    if grouped_roles:
+    if grouped_roles and final_result_allowed:
         session.last_result_names = {role.name for role in grouped_roles}
         return single_group_result(grouped_roles)
 
@@ -1643,7 +1705,7 @@ def session_embed(session: GuessSession) -> discord.Embed:
     if indistinguishable:
         return indistinguishable
 
-    if len(session.candidates) == 1:
+    if len(session.candidates) == 1 and final_result_allowed:
         role = session.candidates[0]
         session.last_result_names = {role.name}
         name_line = f"**{role.display_name}**"
