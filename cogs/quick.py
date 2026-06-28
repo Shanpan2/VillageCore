@@ -609,8 +609,8 @@ def cancel_game(interaction: discord.Interaction, game: str) -> tuple[bool, str]
     creator_id = state.get("creator_id") or (state.get("players") or [None])[0]
     is_creator = interaction.user.id == creator_id
     already_started = bool(state.get("started") or state.get("hands"))
-    if already_started and not is_admin:
-        return False, "開始済みのゲームを終了できるのは管理者だけです。"
+    if already_started and not is_creator and not is_admin:
+        return False, "開始済みのゲームを終了できるのは作成者または管理者だけです。"
     if not is_creator and not is_admin:
         return False, "募集を中止できるのは作成者または管理者です。"
 
@@ -1062,8 +1062,8 @@ class Quick(commands.Cog):
         if game.value == "gomoku":
             already_started = bool(already_started or state.get("ai") or state.get("white_id") is not None)
 
-        if already_started and not is_admin:
-            await interaction.response.send_message("開始済みのゲームを終了できるのは管理者だけです。", ephemeral=True)
+        if already_started and not is_creator and not is_admin:
+            await interaction.response.send_message("開始済みのゲームを終了できるのは作成者または管理者だけです。", ephemeral=True)
             return
         if not is_creator and not is_admin:
             await interaction.response.send_message("募集を中止できるのは作成者または管理者です。", ephemeral=True)

@@ -4,11 +4,6 @@ from discord.ext import commands
 
 
 CATEGORIES = {
-    "music": {
-        "label": "音楽",
-        "emoji": "🎵",
-        "prefixes": ("music",),
-    },
     "admin": {
         "label": "管理",
         "emoji": "🛠️",

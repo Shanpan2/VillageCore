@@ -47,6 +47,7 @@ TARGET_LEGACY_GUILD_ID = parse_discord_id(LEGACY_GUILD_ID, "LEGACY_GUILD_ID")
 DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.backup",
     "cogs.bot_status",
+    "cogs.music",
     "cogs.permission_check",
     "cogs.setup_guide",
 }
@@ -64,6 +65,7 @@ DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "poker_begin",
     "poker_start",
     "game_cancel",
+    "music",
     "join",
     "leave",
     "play",
@@ -574,7 +576,7 @@ async def handle_help_site(request):
           <div class="badge">村</div>
           <div>
             <h1>むらびと君 ヘルプ</h1>
-            <p>Discordサーバーの運営と交流を支える多機能Botです。音楽、チケット、出席、通知、AI、ゲーム、コミュニティ機能をまとめて使えます。</p>
+            <p>Discordサーバーの運営と交流を支える多機能Botです。チケット、出席、通知、AI、ゲーム、コミュニティ機能をまとめて使えます。</p>
           </div>
         </div>
       </header>
@@ -618,7 +620,6 @@ async def handle_help_site(request):
           <h2>日常で使う機能</h2>
           <div class="grid">
             <div class="tile"><strong>AI応答</strong>Botにメンション、またはBotの返信にリプライするとAIが答えます。</div>
-            <div class="tile"><strong>音楽</strong><code>/music</code> で音楽パネルを開き、再生、停止、スキップ、キュー確認をボタンで操作できます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
             <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code> でコインを賭けられます。</div>
             <div class="tile"><strong>誕生日</strong>登録済みの誕生日には通知と一緒に、年1回の誕生日コインボーナスが付与されます。</div>
@@ -732,7 +733,6 @@ async def handle_help_site(request):
           <div class="notice">
             <p><strong>AIが429/503になる</strong><br>Gemini APIの無料枠上限や混雑です。時間を置くか、モデル/クールダウン設定を調整してください。</p>
             <p><strong>YouTube通知が止まる</strong><br>YouTube Data APIのクォータ上限です。Botは一定時間チェックを休止します。</p>
-            <p><strong>音楽が再生されない</strong><br>cookie、yt-dlp、Deno、動画側の制限を確認してください。</p>
             <p><strong>ロール付与できない</strong><br>Botのロールを付与対象ロールより上に置いてください。</p>
             <p><strong>Botの不具合や要望を送りたい</strong><br><code>/report</code> で種類を選んで送信してください。開発者DMと、設定済みなら報告チャンネルへ届きます。</p>
           </div>
@@ -741,7 +741,7 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "music", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "topic", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "topic", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
           {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "birthday", "welcome", "ng_word", "backup"))}
         </section>

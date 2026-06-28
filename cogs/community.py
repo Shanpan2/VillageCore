@@ -88,6 +88,14 @@ def coin_gamble_lock_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_gamble_lock:{guild_id}:{user_id}"
 
 
+def coin_gamble_lock_reason_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin_gamble_lock_reason:{guild_id}:{user_id}"
+
+
+def gamble_role_expirations_key(guild_id: int) -> str:
+    return f"community_gamble_role_expirations:{guild_id}"
+
+
 def titles_key(guild_id: int, user_id: int) -> str:
     return f"community_titles:{guild_id}:{user_id}"
 
@@ -117,6 +125,8 @@ REPORT_KIND_LABELS = {
     "display": "表示崩れ",
     "other": "その他",
 }
+REAL_GAMBLER_ROLE_NAME = os.getenv("REAL_GAMBLER_ROLE_NAME", "リアルギャンブラー")
+REAL_GAMBLER_LOCK_DAYS = int(os.getenv("REAL_GAMBLER_LOCK_DAYS", "3"))
 
 COIN_SHOP_ITEMS = {
     "red": {"label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
@@ -182,10 +192,75 @@ async def get_coin_gamble_lock_until(guild_id: int, user_id: int) -> datetime | 
     return None
 
 
+async def get_coin_gamble_lock_reason(guild_id: int, user_id: int) -> str:
+    return await db_get(coin_gamble_lock_reason_key(guild_id, user_id)) or "ギャンブル制限中です"
+
+
+async def lock_coin_gamble_until(guild_id: int, user_id: int, locked_until: datetime, reason: str) -> datetime:
+    await db_set(coin_gamble_lock_key(guild_id, user_id), locked_until.isoformat())
+    await db_set(coin_gamble_lock_reason_key(guild_id, user_id), reason)
+    return locked_until
+
+
 async def lock_coin_gamble_for_24h(guild_id: int, user_id: int) -> datetime:
     locked_until = utc_now() + timedelta(hours=24)
-    await db_set(coin_gamble_lock_key(guild_id, user_id), locked_until.isoformat())
-    return locked_until
+    return await lock_coin_gamble_until(guild_id, user_id, locked_until, "0コインになったため")
+
+
+async def get_or_create_real_gambler_role(guild: discord.Guild) -> discord.Role | None:
+    role = discord.utils.get(guild.roles, name=REAL_GAMBLER_ROLE_NAME)
+    if role:
+        return role
+    bot_member = guild.me
+    if not bot_member or not bot_member.guild_permissions.manage_roles:
+        return None
+    try:
+        return await guild.create_role(
+            name=REAL_GAMBLER_ROLE_NAME,
+            color=discord.Color(0xB94F48),
+            reason="Real gambler restriction role",
+        )
+    except discord.HTTPException:
+        return None
+
+
+async def save_gamble_role_expiration(guild_id: int, user_id: int, role_id: int, expires_at: datetime):
+    records = await get_json(gamble_role_expirations_key(guild_id), [])
+    records = [
+        record
+        for record in records
+        if not (int(record.get("user_id", 0)) == user_id and int(record.get("role_id", 0)) == role_id)
+    ]
+    records.append(
+        {
+            "user_id": user_id,
+            "role_id": role_id,
+            "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+        }
+    )
+    await set_json(gamble_role_expirations_key(guild_id), records[-500:])
+
+
+async def apply_real_gambler_penalty(guild: discord.Guild, member: discord.Member) -> tuple[datetime, bool]:
+    locked_until = utc_now() + timedelta(days=max(1, REAL_GAMBLER_LOCK_DAYS))
+    await lock_coin_gamble_until(
+        guild.id,
+        member.id,
+        locked_until,
+        f"所持コインの50%以上を賭けようとしたため、{REAL_GAMBLER_LOCK_DAYS}日間ギャンブル停止中です",
+    )
+    role_added = False
+    role = await get_or_create_real_gambler_role(guild)
+    bot_member = guild.me
+    if role and bot_member and role not in member.roles and role < bot_member.top_role:
+        try:
+            await member.add_roles(role, reason="Bet more than 50 percent of coin balance")
+            role_added = True
+        except discord.HTTPException:
+            pass
+    if role:
+        await save_gamble_role_expiration(guild.id, member.id, role.id, locked_until)
+    return locked_until, role_added
 
 
 def draw_penalty_gacha() -> str:
@@ -691,8 +766,9 @@ class Community(commands.Cog):
         locked_until = await get_coin_gamble_lock_until(interaction.guild_id, interaction.user.id)
         if locked_until:
             remaining = format_remaining(locked_until - utc_now())
+            reason = await get_coin_gamble_lock_reason(interaction.guild_id, interaction.user.id)
             await interaction.response.send_message(
-                f"0コインになったため、ギャンブルはあと **{remaining}** できません。\n"
+                f"{reason}。ギャンブルはあと **{remaining}** できません。\n"
                 "コイン集めや別のゲームで少し休憩しましょう。",
                 ephemeral=True,
             )
@@ -710,6 +786,16 @@ class Community(commands.Cog):
         if current < amount:
             await interaction.response.send_message(
                 f"コインが足りません。現在の所持コインは **{current}** です。",
+                ephemeral=True,
+            )
+            return
+        if amount * 2 >= current and isinstance(interaction.user, discord.Member) and interaction.guild:
+            locked_until, role_added = await apply_real_gambler_penalty(interaction.guild, interaction.user)
+            remaining = format_remaining(locked_until - utc_now())
+            role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** を付与しました。" if role_added else ""
+            await interaction.response.send_message(
+                f"所持コインの50%以上を賭けようとしたため、今回のギャンブルは中止しました。\n"
+                f"ギャンブルは **{remaining}** できません。{role_text}",
                 ephemeral=True,
             )
             return
@@ -841,6 +927,28 @@ class Community(commands.Cog):
                         pass
             if changed:
                 await set_json(coin_shop_expirations_key(guild.id), remaining)
+
+            gamble_records = await get_json(gamble_role_expirations_key(guild.id), [])
+            if not gamble_records:
+                continue
+            gamble_remaining = []
+            gamble_changed = False
+            for record in gamble_records:
+                expires_at = parse_utc(record.get("expires_at", ""))
+                if not expires_at or expires_at > now:
+                    gamble_remaining.append(record)
+                    continue
+                gamble_changed = True
+                member = guild.get_member(int(record.get("user_id", 0)))
+                role = guild.get_role(int(record.get("role_id", 0)))
+                bot_member = guild.me
+                if member and role and bot_member and role in member.roles and role < bot_member.top_role:
+                    try:
+                        await member.remove_roles(role, reason="Real gambler restriction expired")
+                    except discord.HTTPException:
+                        pass
+            if gamble_changed:
+                await set_json(gamble_role_expirations_key(guild.id), gamble_remaining)
 
     @app_commands.command(name="faq_set", description="【管理者】FAQを登録します")
     @app_commands.default_permissions(manage_guild=True)

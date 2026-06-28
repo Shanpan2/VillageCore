@@ -2,7 +2,7 @@
 
 VillageCore is a multi-purpose Discord bot for community and server management.
 
-It includes music controls, tickets, role panels, attendance tracking, polls, YouTube notifications, AI replies, mini games, search, logs, and admin panels.
+It includes tickets, role panels, attendance tracking, polls, YouTube notifications, AI replies, mini games, search, logs, and admin panels.
 
 Japanese README: [README.md](README.md)
 
@@ -14,7 +14,6 @@ Japanese README: [README.md](README.md)
 ## Features
 
 - `/game`: button-based game panel for UNO, Sevens, Daifugo, Poker, Othello, Ito, Codenames, and Werewolf
-- `/music`: button-based music controls
 - `/youtube`: YouTube notification settings and status
 - `/attendance`: attendance tracking and warning checks
 - `/admin`: settings, permission checks, logs, and maintenance tools
@@ -35,8 +34,6 @@ Use `/game` as the main entry point. It supports lobby creation, joining, leavin
 This repository does not include secrets such as tokens, API keys, cookies, or database URLs.
 
 Set required values in your deployment provider's Variables / Secrets page, such as Railway.
-
-For YouTube music cookies, prefer storing the cookies.txt content in `YTDLP_COOKIES_TEXT` instead of committing or deploying a cookie file. The bot first tries normal playback without cookies and only retries with cookies when needed.
 
 For development and operational security notes, see [SECURITY.md](SECURITY.md).
 

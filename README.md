@@ -2,7 +2,7 @@
 
 VillageCore は、Discord サーバー運営をまとめて支援する多機能 Bot です。
 
-音楽、チケット、役職パネル、出席管理、投票、YouTube 通知、AI 応答、ミニゲーム、検索、ログ、管理パネルなどをまとめて扱えます。
+チケット、役職パネル、出席管理、投票、YouTube 通知、AI 応答、ミニゲーム、検索、ログ、管理パネルなどをまとめて扱えます。
 
 English README: [README_EN.md](README_EN.md)
 
@@ -17,7 +17,6 @@ Among Usの役職アキネーター・クイズ:Roles Guesser Botは[こちら](
 ## 主な機能
 
 - `/game`: UNO、7並べ、大富豪、ポーカー、オセロ、Ito、コードネーム、人狼をボタンで操作
-- `/music`: 音楽再生、停止、スキップ、キュー確認などをボタンで操作
 - `/youtube`: YouTube 通知の設定と状態確認
 - `/attendance`: 出席管理、ポイント一覧、警告確認
 - `/admin`: 設定確認、権限診断、ログ設定、メンテナンス
@@ -38,8 +37,6 @@ Among Usの役職アキネーター・クイズ:Roles Guesser Botは[こちら](
 このリポジトリには、Token、API Key、Cookie、データベースURLなどの秘密情報は含めていません。
 
 必要な設定値は、Railway などのデプロイ先の Variables / Secrets に登録してください。
-
-音楽再生でYouTube Cookieが必要な場合は、ファイルを配置するより `YTDLP_COOKIES_TEXT` に cookies.txt の内容を登録する運用を推奨します。Botは通常動画をCookieなしで取得し、必要な時だけCookieありで再試行します。
 
 開発・運用時のセキュリティ注意は [SECURITY.md](SECURITY.md) を確認してください。
 
