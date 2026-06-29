@@ -570,12 +570,14 @@ class Community(commands.Cog):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
+        current = await get_json(profile_key(interaction.guild_id, interaction.user.id), {})
+        parsed_items = parse_profile_items(items)
         data = {
-            "favorite": favorite[:300],
-            "active_time": active_time[:200],
-            "comment": comment[:500],
-            "sns": sns[:300],
-            "items": parse_profile_items(items),
+            "favorite": favorite[:300] if favorite else current.get("favorite", ""),
+            "active_time": active_time[:200] if active_time else current.get("active_time", ""),
+            "comment": comment[:500] if comment else current.get("comment", ""),
+            "sns": sns[:300] if sns else current.get("sns", ""),
+            "items": parsed_items if items else current.get("items", []),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         await set_json(profile_key(interaction.guild_id, interaction.user.id), data)
