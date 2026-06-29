@@ -26,7 +26,7 @@ class BotStatus(commands.Cog):
         try:
             await db_get("__healthcheck__")
             db_ok = True
-        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
+        except Exception as e:
             print(f"[BotStatus] DB healthcheck failed: {type(e).__name__}: {e}", flush=True)
             db_ok = False
 

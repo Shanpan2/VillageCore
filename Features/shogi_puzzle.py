@@ -419,7 +419,7 @@ def puzzle_is_checkmate(puzzle: dict) -> bool:
         return False
     try:
         return shogi.Board(puzzle_sfen(puzzle)).is_checkmate()
-    except (ValueError, IndexError):
+    except Exception:
         return False
 
 
@@ -487,7 +487,7 @@ def mate_line_after_attack(puzzle: dict, move_value: str) -> list[str] | None:
     try:
         board = shogi.Board(puzzle_sfen(puzzle))
         move = shogi.Move.from_usi(move_value)
-    except (ValueError, IndexError):
+    except Exception:
         return None
     if not any(move == legal_move for legal_move in board.legal_moves):
         return None
@@ -675,7 +675,7 @@ def legal_move_values(puzzle: dict) -> list[str]:
     try:
         board = shogi.Board(puzzle_sfen(puzzle))
         return sorted({move.usi() for move in board.legal_moves if not move_targets_gote_king(puzzle, move.usi())})
-    except (ValueError, IndexError):
+    except Exception:
         return [move for move in fallback_move_values(puzzle) if not move_targets_gote_king(puzzle, move)]
 
 

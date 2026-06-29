@@ -365,7 +365,7 @@ async def on_ready():
     if BOT_ACTIVITY_TEXT:
         try:
             await bot.change_presence(activity=discord.Game(name=BOT_ACTIVITY_TEXT))
-        except discord.HTTPException as e:
+        except Exception as e:
             print(f"[Bot] presence update failed: {type(e).__name__}: {e}", flush=True)
 
     try:
