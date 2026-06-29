@@ -239,7 +239,7 @@ async def load_guild_record(guild_id: int) -> dict:
     try:
         data = json.loads(raw)
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return {}
 
 
@@ -328,7 +328,7 @@ def dashboard_guild_rows(guilds: list[discord.Guild], guild_records: dict[str, s
         if raw_record:
             try:
                 record = json.loads(raw_record)
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 record = {}
         owner = guild.owner
         me = guild.me
@@ -365,15 +365,15 @@ async def on_ready():
     if BOT_ACTIVITY_TEXT:
         try:
             await bot.change_presence(activity=discord.Game(name=BOT_ACTIVITY_TEXT))
-        except Exception as e:
-            print(f"⚠️ presence update failed: {e}", flush=True)
+        except discord.HTTPException as e:
+            print(f"[Bot] presence update failed: {type(e).__name__}: {e}", flush=True)
 
     try:
         if not PERSISTENT_VIEWS_REGISTERED:
             register_persistent_views()
             PERSISTENT_VIEWS_REGISTERED = True
     except Exception as e:
-        print(f"⚠️ register_persistent_views エラー: {e}")
+        print(f"[Bot] register_persistent_views error: {type(e).__name__}: {e}", flush=True)
 
     try:
         await record_current_guilds()

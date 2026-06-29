@@ -660,7 +660,7 @@ def render_hand_image(cards: list[str]) -> Image.Image:
         if os.path.exists(path) and os.path.getsize(path) > 0:
             try:
                 card_img = Image.open(path).convert("RGBA").resize((card_width, card_height))
-            except Exception:
+            except (OSError, ValueError):
                 card_img = None
 
         if card_img is None:
@@ -753,7 +753,7 @@ async def send_uno_hand_dm(bot, state: dict, game_id: str, user_id: int):
     if not member:
         try:
             member = await bot.fetch_user(user_id)
-        except Exception:
+        except discord.HTTPException:
             member = None
     if not member:
         return False
@@ -765,7 +765,8 @@ async def send_uno_hand_dm(bot, state: dict, game_id: str, user_id: int):
             view=UnoHandView(game_id, user_id, hand),
         )
         return True
-    except Exception:
+    except discord.HTTPException as e:
+        print(f"[UNO] DM send failed for {user_id}: {type(e).__name__}: {e}", flush=True)
         return False
 
 
@@ -783,7 +784,7 @@ async def send_uno_challenge_dm(bot, state: dict, game_id: str, attacker_id: int
     if not member:
         try:
             member = await bot.fetch_user(defender_id)
-        except Exception:
+        except discord.HTTPException:
             member = None
     if not member:
         return False
@@ -793,7 +794,7 @@ async def send_uno_challenge_dm(bot, state: dict, game_id: str, attacker_id: int
             view=ChallengeView(game_id, attacker_id, defender_id),
         )
         return True
-    except Exception:
+    except discord.HTTPException:
         await send_uno_channel_update(bot, game_id, state, f"⚠️ <@{defender_id}> へのDM送信に失敗しました。", include_top=False)
         return False
 
@@ -849,7 +850,7 @@ def draw_uno_card(card: str, width: int, height: int) -> Image.Image:
     try:
         big_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
-    except Exception:
+    except OSError:
         pass
 
     text_color = (20, 20, 20) if color == "yellow" else (255, 255, 255)
@@ -978,7 +979,7 @@ async def start_uno_game(interaction: discord.Interaction, game_id: str | None =
                     "あなたのUNOの手札です。ターンが来たら操作パネルを送ります。",
                     file=generate_hand_file(hands[user_id]),
                 )
-            except Exception:
+            except discord.HTTPException:
                 failed_dm.append(member.mention)
 
     first_player = state["players"][0]

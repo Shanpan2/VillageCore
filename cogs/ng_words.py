@@ -58,8 +58,8 @@ class NgWords(commands.Cog):
         embed.add_field(name="内容", value=(message.content or "なし")[:1000], inline=False)
         try:
             await channel.send(embed=embed)
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[NGWords] moderation log send failed: {type(e).__name__}: {e}", flush=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -81,16 +81,16 @@ class NgWords(commands.Cog):
 
         try:
             await message.delete()
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[NGWords] message delete failed: {type(e).__name__}: {e}", flush=True)
 
         try:
             await message.channel.send(
                 f"{message.author.mention} NGワードが含まれていたため削除しました。",
                 delete_after=8,
             )
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[NGWords] notification send failed: {type(e).__name__}: {e}", flush=True)
 
         await self.send_moderation_log(message, matched)
 

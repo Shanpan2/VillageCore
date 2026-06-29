@@ -60,8 +60,8 @@ class OthelloMoveSelect(discord.ui.Select):
             if allowed_id is None or interaction.user.id != allowed_id:
                 await interaction.response.send_message("❌ 今の手番のプレイヤーのみ選択できます。", ephemeral=True)
                 return
-        except Exception:
-            pass
+        except (ImportError, KeyError, AttributeError) as e:
+            print(f"[OthelloView] turn check failed: {type(e).__name__}: {e}", flush=True)
 
         if self.values and self.values[0] != "none":
             val = self.values[0]
@@ -70,15 +70,15 @@ class OthelloMoveSelect(discord.ui.Select):
                 x = ord(val[0].upper()) - 65
                 y = int(val[1:]) - 1
                 self.view.selected_move = (x, y)
-            except Exception:
+            except (ValueError, IndexError):
                 self.view.selected_move = None
         # Acknowledge selection with a short ephemeral message
         try:
             await interaction.response.send_message(f"選択しました: {self.values[0]}", ephemeral=True)
-        except Exception:
+        except discord.HTTPException:
             try:
                 await interaction.response.defer(ephemeral=True)
-            except Exception:
+            except discord.HTTPException:
                 pass
 
 
@@ -116,14 +116,14 @@ class OthelloConfirmButton(discord.ui.Button):
 
             view.selected_move = None
         except Exception as e:
-            print(f"[OthelloView] button error: {type(e).__name__}: {e}")
+            print(f"[OthelloView] button error: {type(e).__name__}: {e}", flush=True)
             traceback.print_exc()
             try:
                 await interaction.followup.send(
                     "❌ オセロ操作中にエラーが発生しました。",
                     ephemeral=True,
                 )
-            except Exception:
+            except discord.HTTPException:
                 pass
 
 
@@ -183,11 +183,11 @@ class JoinButton(discord.ui.Button):
             await interaction.message.edit(embed=embed, attachments=[file], view=OthelloView(self.game_id, valid_moves, show_join=False))
             await interaction.followup.send("✅ 後手として参加しました。", ephemeral=True)
         except Exception as e:
-            print(f"[OthelloView.Join] error: {type(e).__name__}: {e}")
+            print(f"[OthelloView.Join] error: {type(e).__name__}: {e}", flush=True)
             traceback.print_exc()
             try:
                 await interaction.followup.send("❌ 参加処理中にエラーが発生しました。", ephemeral=True)
-            except Exception:
+            except discord.HTTPException:
                 pass
 
 
@@ -228,10 +228,7 @@ class SurrenderButton(discord.ui.Button):
 
             # ゲームデータを削除
             await delete_othello_game(interaction.guild_id or game.get("guild_id"), self.game_id)
-            try:
-                othello_games.pop(self.game_id, None)
-            except Exception:
-                pass
+            othello_games.pop(self.game_id, None)
 
             # 表示更新
             try:
@@ -243,13 +240,13 @@ class SurrenderButton(discord.ui.Button):
                     ),
                     view=None,
                 )
-            except Exception:
-                pass
+            except discord.HTTPException as e:
+                print(f"[OthelloView.Surrender] message edit failed: {type(e).__name__}: {e}", flush=True)
             await interaction.followup.send(f"✅ 降参しました。{winner} の勝利です。", ephemeral=True)
         except Exception as e:
-            print(f"[OthelloView.Surrender] error: {type(e).__name__}: {e}")
+            print(f"[OthelloView.Surrender] error: {type(e).__name__}: {e}", flush=True)
             traceback.print_exc()
             try:
                 await interaction.followup.send("❌ 降参処理中にエラーが発生しました。", ephemeral=True)
-            except Exception:
+            except discord.HTTPException:
                 pass

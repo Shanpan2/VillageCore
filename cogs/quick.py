@@ -854,7 +854,7 @@ class GameActionButton(discord.ui.Button):
                         await interaction.followup.send(message, ephemeral=True)
                     else:
                         await interaction.response.send_message(message, ephemeral=True)
-                except Exception:
+                except discord.HTTPException:
                     pass
                 return
             _, store = GAME_STORES[self.game]

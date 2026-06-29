@@ -83,8 +83,8 @@ async def send_server_log(bot: commands.Bot, guild: discord.Guild, embed: discor
     if isinstance(channel, discord.TextChannel):
         try:
             await channel.send(embed=embed)
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[ServerLog] failed to send log to channel {channel_id}: {type(e).__name__}: {e}", flush=True)
 
 
 def log_settings_embed(settings: dict[str, bool]) -> discord.Embed:

@@ -234,8 +234,8 @@ async def begin_ito(interaction: discord.Interaction, game_id: str, edit_message
         member = interaction.guild.get_member(int(uid)) or await interaction.client.fetch_user(int(uid))
         try:
             await member.send(f"Itoのお題は **{state['topic']}** です。あなたの数字は **{number}** です。数字を直接言わずに例えてください。")
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[Ito] DM send failed for {uid}: {type(e).__name__}: {e}", flush=True)
     content = clue_text(state)
     if edit_message:
         await interaction.response.edit_message(content=content, view=None)

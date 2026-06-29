@@ -274,7 +274,7 @@ def render_gomoku_image(board: list[list[int]], selected: tuple[int, int] | None
     draw = ImageDraw.Draw(image)
     try:
         font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-    except Exception:
+    except OSError:
         font = ImageFont.load_default()
 
     line_color = (93, 58, 25)
@@ -342,7 +342,7 @@ async def finish_gomoku_game(interaction: discord.Interaction, game_id: str, win
     file = render_gomoku_image(game["board"])
     try:
         await interaction.message.edit(embed=embed, attachments=[file], view=None)
-    except Exception:
+    except discord.HTTPException:
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, file=file)
         else:
@@ -563,8 +563,8 @@ class GomokuCancelButton(discord.ui.Button):
                 attachments=[],
                 view=None,
             )
-        except Exception:
-            pass
+        except discord.HTTPException as e:
+            print(f"[Gomoku] cancel message edit failed: {type(e).__name__}: {e}", flush=True)
         await interaction.followup.send("五目並べ募集を中止しました。", ephemeral=True)
 
 

@@ -200,7 +200,8 @@ async def load_quote_attachment_image(message: discord.Message) -> Image.Image |
         try:
             data = await attachment.read()
             return Image.open(BytesIO(data)).convert("RGBA")
-        except Exception:
+        except (discord.HTTPException, OSError, ValueError) as e:
+            print(f"[ai_chat] attachment image load failed: {type(e).__name__}: {e}", flush=True)
             return None
     return None
 
@@ -263,8 +264,8 @@ async def make_quote_card(message: discord.Message, theme_key: str = "black") ->
     try:
         avatar_bytes = await message.author.display_avatar.replace(size=512, static_format="png").read()
         avatar = Image.open(BytesIO(avatar_bytes)).convert("RGBA").resize((300, 300))
-    except Exception:
-        pass
+    except (discord.HTTPException, OSError, ValueError) as e:
+        print(f"[ai_chat] avatar load failed: {type(e).__name__}: {e}", flush=True)
 
     mask = Image.new("L", (300, 300), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, 300, 300), fill=255)
@@ -501,7 +502,7 @@ class AIChat(commands.Cog):
             if not isinstance(replied_message, discord.Message) and message.reference.message_id:
                 try:
                     replied_message = await message.channel.fetch_message(message.reference.message_id)
-                except Exception:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     replied_message = None
             if isinstance(replied_message, discord.Message):
                 is_reply_to_bot = replied_message.author.id == self.bot.user.id

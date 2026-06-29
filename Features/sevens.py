@@ -278,7 +278,7 @@ def render_board_image(state: dict, path: Path = BOARD_IMAGE_PATH) -> Path:
         rank_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
         suit_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-    except Exception:
+    except OSError:
         rank_font = ImageFont.load_default()
         suit_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
@@ -380,7 +380,7 @@ def hand_file(member: discord.Member, hand: list[tuple[str, int]], playable: lis
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
         card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-    except Exception:
+    except OSError:
         title_font = ImageFont.load_default()
         card_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
@@ -429,8 +429,8 @@ async def send_player_hand_update(
     playable = playable_cards(hand, state["board"]) if include_candidates else []
     try:
         await send_hand(member, hand, playable)
-    except Exception:
-        pass
+    except discord.HTTPException as e:
+        print(f"[Sevens] DM send failed for {user_id}: {type(e).__name__}: {e}", flush=True)
 
 
 class SevensPlayView(discord.ui.View):
@@ -717,7 +717,7 @@ async def start_sevens_game(interaction: discord.Interaction, game_id: str | Non
         hand = [tuple(c) for c in hands[str(uid)]]
         try:
             await send_hand(member, hand, playable_cards(hand, state["board"]))
-        except Exception:
+        except discord.HTTPException:
             failed_dm.append(member.mention)
 
     current_user = state["players"][state["turn_index"]]

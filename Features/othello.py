@@ -159,14 +159,14 @@ class Othello(commands.Cog):
                 view=OthelloView(game_id, valid_moves, show_join=True),
             )
         except Exception as e:
-            print(f"[Othello] command error: {type(e).__name__}: {e}")
+            print(f"[Othello] command error: {type(e).__name__}: {e}", flush=True)
             traceback.print_exc()
             try:
                 await interaction.response.send_message(
                     "❌ オセロの開始中にエラーが発生しました。",
                     ephemeral=True,
                 )
-            except Exception:
+            except discord.HTTPException:
                 pass
 
     @app_commands.command(name="othello_ai", description="AIとオセロで対戦します")
@@ -490,7 +490,7 @@ async def finish_othello_game(interaction, game_id: str, prefix: str = ""):
     )
     try:
         await interaction.message.edit(embed=embed, attachments=[file], view=None)
-    except Exception:
+    except discord.HTTPException:
         if getattr(interaction, "response", None) and not interaction.response.is_done():
             await interaction.response.send_message(embed=embed, file=file)
         else:
@@ -509,7 +509,7 @@ def generate_othello_image(board, valid_moves=None):
     try:
         from PIL import ImageFont
         font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
-    except Exception:
+    except OSError:
         font = ImageFont.load_default()
 
     # グリッド線
@@ -649,7 +649,7 @@ async def handle_othello_move(interaction, game_id, x, y):
                 "❌ オセロの処理中にエラーが発生しました。",
                 ephemeral=True,
             )
-        except Exception:
+        except discord.HTTPException:
             pass
 
 

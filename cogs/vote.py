@@ -22,7 +22,7 @@ async def load_votes() -> dict:
         return {}
     try:
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return {}
 
 
@@ -131,7 +131,7 @@ class Vote(commands.Cog):
             try:
                 message_id = int(message_id_str)
                 channel_id = int(vote_data["channel_id"])
-            except Exception:
+            except (ValueError, KeyError, TypeError):
                 data.pop(message_id_str, None)
                 changed = True
                 continue
@@ -140,12 +140,12 @@ class Vote(commands.Cog):
             if channel is None:
                 try:
                     channel = await self.bot.fetch_channel(channel_id)
-                except Exception:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     continue
 
             try:
                 message = await channel.fetch_message(message_id)
-            except Exception:
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 data.pop(message_id_str, None)
                 changed = True
                 continue
@@ -314,8 +314,8 @@ class Vote(commands.Cog):
                 embed.description = "\n".join(f"{opt}: **{results[opt]}票**" for opt in options)
                 embed.color = 0xFF5555
                 await msg.edit(embed=embed, view=None)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+            print(f"[Vote] vote end message edit failed: {type(e).__name__}: {e}", flush=True)
 
         result_lines = "\n".join(f"**{opt}** → {results[opt]}票" for opt in options)
         deleted_text = f"\n🗑️ 削除されたロール: {', '.join(deleted)}" if deleted else ""

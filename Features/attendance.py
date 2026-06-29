@@ -67,8 +67,8 @@ async def load_attend() -> dict:
     if raw:
         try:
             return json.loads(raw)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            print(f"[attendance] DB JSON parse failed: {type(e).__name__}: {e}", flush=True)
 
     for path in (ATTEND_BACKUP_PATH, LEGACY_ATTEND_PATH):
         if not path.exists():
@@ -77,7 +77,8 @@ async def load_attend() -> dict:
             data = json.loads(path.read_text(encoding="utf-8"))
             await save_attend(data)
             return data
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            print(f"[attendance] backup file load failed ({path}): {type(e).__name__}: {e}", flush=True)
             continue
 
     return {"members": {}, "notify_channel_id": None}

@@ -248,8 +248,8 @@ async def apply_real_gambler_penalty(guild: discord.Guild, member: discord.Membe
         try:
             await member.add_roles(role, reason="Coin balance reached zero by gambling")
             role_added = True
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[Community] gambler role add failed for {member.id}: {type(e).__name__}: {e}", flush=True)
     if role:
         await save_gamble_role_expiration(guild.id, member.id, role.id, expires_at)
     return expires_at, role_added
@@ -299,8 +299,8 @@ async def apply_coin_rewards(guild: discord.Guild | None, member: discord.Member
                 try:
                     await member.add_roles(role, reason="Coin milestone reward")
                     messages.append(f"記念ロール「{name}」を付与")
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as e:
+                    print(f"[Community] milestone role add failed: {type(e).__name__}: {e}", flush=True)
     return messages
 
 
@@ -692,8 +692,8 @@ class Community(commands.Cog):
             if removable_roles:
                 try:
                     await interaction.user.remove_roles(*removable_roles, reason="Coin shop color role replaced")
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as e:
+                    print(f"[Community] shop role remove failed: {type(e).__name__}: {e}", flush=True)
 
             await interaction.user.add_roles(role, reason="Coin shop purchase")
             expires_at = datetime.now(timezone.utc) + timedelta(days=data["days"])
@@ -940,8 +940,8 @@ class Community(commands.Cog):
                     if member and role and bot_member and role in member.roles and role < bot_member.top_role:
                         try:
                             await member.remove_roles(role, reason="Coin shop color role expired")
-                        except discord.HTTPException:
-                            pass
+                        except discord.HTTPException as e:
+                            print(f"[Community] shop role expiry removal failed: {type(e).__name__}: {e}", flush=True)
                 if changed:
                     await set_json(coin_shop_expirations_key(guild.id), remaining)
 
@@ -962,8 +962,8 @@ class Community(commands.Cog):
                 if member and role and bot_member and role in member.roles and role < bot_member.top_role:
                     try:
                         await member.remove_roles(role, reason="Real gambler restriction expired")
-                    except discord.HTTPException:
-                        pass
+                    except discord.HTTPException as e:
+                        print(f"[Community] gambler role expiry removal failed: {type(e).__name__}: {e}", flush=True)
             if gamble_changed:
                 await set_json(gamble_role_expirations_key(guild.id), gamble_remaining)
 
@@ -1068,8 +1068,8 @@ class Community(commands.Cog):
             try:
                 await developer.send(embed=developer_embed)
                 sent_to.append("開発者DM")
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as e:
+                print(f"[Community] developer DM failed: {type(e).__name__}: {e}", flush=True)
 
         channel_id = int(await db_get(report_channel_key(interaction.guild_id)) or "0")
         channel = self.bot.get_channel(channel_id)
@@ -1077,8 +1077,8 @@ class Community(commands.Cog):
             try:
                 await channel.send(embed=channel_embed)
                 sent_to.append("報告チャンネル")
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as e:
+                print(f"[Community] report channel send failed: {type(e).__name__}: {e}", flush=True)
 
         if not sent_to:
             await interaction.response.send_message(

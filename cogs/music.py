@@ -218,8 +218,8 @@ async def send_music_cookie_warning(bot: commands.Bot, guild: discord.Guild, err
     embed.add_field(name="詳細", value=f"`{str(error)[:900]}`", inline=False)
     try:
         await channel.send(embed=embed)
-    except discord.HTTPException:
-        pass
+    except discord.HTTPException as e:
+        print(f"[Music] cookie warning send failed: {type(e).__name__}: {e}", flush=True)
 
 
 def _error_text(error: Exception) -> str:
@@ -805,13 +805,13 @@ class Music(commands.Cog):
             await player.add_to_queue(interaction.channel, query)
             try:
                 await interaction.delete_original_response()
-            except Exception:
+            except discord.HTTPException:
                 pass
         except Exception as e:
             print(f"[play error] {e}", flush=True)
             try:
                 await interaction.edit_original_response(content=f"❌ エラー: {e}")
-            except Exception:
+            except discord.HTTPException:
                 pass
 
     @app_commands.command(name="skip", description="次の曲へスキップします")

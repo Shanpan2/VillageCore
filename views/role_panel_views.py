@@ -35,8 +35,8 @@ async def reset_role_panel_message(interaction: discord.Interaction, role_ids: l
     if interaction.message:
         try:
             await interaction.message.edit(view=RolePanelView(role_ids, role_names))
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[RolePanel] message reset failed: {type(e).__name__}: {e}", flush=True)
 
 
 async def toggle_roles(interaction: discord.Interaction, selected_role_ids: list[int]) -> str:

@@ -162,8 +162,8 @@ async def dm_roles(bot: commands.Bot, guild: discord.Guild, state: dict):
         extra = f"\n人狼仲間: {' / '.join(wolves)}" if role == "werewolf" else ""
         try:
             await member.send(f"あなたの役職は **{role_label}** です。\n{ROLE_HELP.get(role, '')}{extra}")
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as e:
+            print(f"[Werewolf] DM role notification failed for {user_id}: {type(e).__name__}: {e}", flush=True)
 
 
 async def start_match(interaction: discord.Interaction, game_id: str, state: dict):

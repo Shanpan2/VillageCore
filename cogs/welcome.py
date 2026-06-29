@@ -20,7 +20,7 @@ class Welcome(commands.Cog):
             return None
         try:
             channel_id = int(raw)
-        except Exception:
+        except (ValueError, TypeError):
             return None
         channel = guild.get_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
@@ -180,8 +180,8 @@ class Welcome(commands.Cog):
 
         try:
             await channel.send(content=message)
-        except Exception as e:
-            print(f"⚠️ Welcome send failed: {e}")
+        except discord.HTTPException as e:
+            print(f"[Welcome] send failed for guild {member.guild.id}: {type(e).__name__}: {e}", flush=True)
 
 async def setup(bot):
     await bot.add_cog(Welcome(bot))

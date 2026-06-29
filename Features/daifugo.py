@@ -425,7 +425,7 @@ def hand_file(member: discord.Member, hand: list[dict]) -> discord.File:
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
         card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-    except Exception:
+    except OSError:
         title_font = ImageFont.load_default()
         card_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
@@ -472,8 +472,8 @@ async def send_player_hand_update(
     candidates = legal_groups(hand, state) if include_candidates else None
     try:
         await send_hand(member, hand, candidates)
-    except Exception:
-        pass
+    except discord.HTTPException as e:
+        print(f"[Daifugo] DM send failed for {user_id}: {type(e).__name__}: {e}", flush=True)
 
 
 def clear_field(state: dict):
@@ -787,7 +787,8 @@ async def start_daifugo_game(interaction: discord.Interaction, game_id: str | No
         try:
             hand = hands[str(uid)]
             await send_hand(member, hand, legal_groups(hand, state) if uid == current else None)
-        except Exception:
+        except (discord.HTTPException, KeyError) as e:
+            print(f"[Daifugo] DM send failed for {uid}: {type(e).__name__}: {e}", flush=True)
             failed_dm.append(member.mention)
 
     text = status_text(state, "大富豪を開始しました。")

@@ -345,7 +345,7 @@ def hand_file(member: discord.Member, hand: list[dict], title: str = "ポーカ�
         title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
         card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
-    except Exception:
+    except OSError:
         title_font = ImageFont.load_default()
         card_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
@@ -379,7 +379,7 @@ def result_file(
         small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
         card_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
         card_small_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15)
-    except Exception:
+    except OSError:
         title_font = ImageFont.load_default()
         name_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
@@ -470,7 +470,7 @@ async def advance_or_finish(interaction: discord.Interaction, state: dict, prefi
     if member:
         try:
             await send_hand(member, state["hands"][str(current)])
-        except Exception:
+        except discord.HTTPException:
             prefix += f"\n<@{current}> へのDM送信に失敗しました。"
     await interaction.response.edit_message(content=status_text(state, prefix), view=PokerDrawView(game_id, current))
 
@@ -673,8 +673,8 @@ async def exchange_cards(interaction: discord.Interaction, game_id: str, user_id
     if member:
         try:
             await send_hand(member, state["hands"][str(user_id)], "交換後の手札")
-        except Exception:
-            pass
+        except discord.HTTPException as e:
+            print(f"[Poker] DM send failed for {user_id}: {type(e).__name__}: {e}", flush=True)
 
     prefix = f"<@{user_id}> が {discard_count} 枚交換しました。" if discard_count else f"<@{user_id}> は交換しませんでした。"
     await advance_or_finish(interaction, state, prefix)
@@ -715,7 +715,7 @@ async def start_poker_game(interaction: discord.Interaction, game_id: str | None
             continue
         try:
             await send_hand(member, state["hands"][str(uid)])
-        except Exception:
+        except discord.HTTPException:
             failed_dm.append(member.mention)
 
     current = state["players"][state["turn_index"]]

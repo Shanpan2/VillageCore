@@ -177,7 +177,7 @@ class YoutubeNotify(commands.Cog):
             if channel is None:
                 try:
                     channel = await self.bot.fetch_channel(channel_id)
-                except Exception:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     continue
 
             if not isinstance(channel, (discord.TextChannel, discord.Thread)):

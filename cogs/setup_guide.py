@@ -33,15 +33,15 @@ class SetupGuide(commands.Cog):
             try:
                 await target.send(embed=embed)
                 return
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as e:
+                print(f"[SetupGuide] system_channel send failed for guild {guild.id}: {type(e).__name__}: {e}", flush=True)
 
         for channel in guild.text_channels:
             if channel.permissions_for(guild.me).send_messages:
                 try:
                     await channel.send(embed=embed)
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as e:
+                    print(f"[SetupGuide] fallback channel send failed for guild {guild.id}: {type(e).__name__}: {e}", flush=True)
                 return
 
 
