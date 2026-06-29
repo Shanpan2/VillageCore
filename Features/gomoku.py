@@ -1,6 +1,4 @@
-import asyncio
 import io
-import json
 import random
 
 import discord
@@ -8,7 +6,13 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+)
+from utils.game_cog import BaseGameCog
+from utils.coin import get_coin_balance, set_coin_balance
 
 
 gomoku_games: dict[str, dict] = {}
@@ -23,72 +27,35 @@ AI_DIFFICULTIES = {
 RANDOMIZER = random.SystemRandom()
 
 
-def coin_key(guild_id: int, user_id: int) -> str:
-    return f"community_coin:{guild_id}:{user_id}"
-
-
-def gomoku_index_key(guild_id: int) -> str:
-    return f"gomoku_games_index:{guild_id}"
-
-
-def gomoku_game_key(guild_id: int, game_id: str) -> str:
-    return f"gomoku_game:{guild_id}:{game_id}"
-
-
-async def get_coin_balance(guild_id: int, user_id: int) -> int:
-    return int(await db_get(coin_key(guild_id, user_id)) or "0")
-
-
-async def set_coin_balance(guild_id: int, user_id: int, amount: int):
-    await db_set(coin_key(guild_id, user_id), str(max(0, amount)))
+_PREFIX = "gomoku"
 
 
 async def save_gomoku_game(guild_id: int | None, game_id: str, game: dict):
-    if not guild_id:
-        return
-    game["guild_id"] = guild_id
-    await db_set(gomoku_game_key(guild_id, game_id), json.dumps(game, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(gomoku_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(gomoku_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, gomoku_games, guild_id, game_id, game)
 
 
 async def delete_gomoku_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(gomoku_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(gomoku_index_key(guild_id), json.dumps(index, ensure_ascii=False))
-    await db_set(gomoku_game_key(guild_id, game_id), "")
+    await _delete_game(_PREFIX, guild_id, game_id, clear_value=True)
+
+
+def _validate_gomoku(state: dict) -> bool:
+    return (
+        isinstance(state.get("board"), list)
+        and not state.get("finished")
+        and bool(state.get("message_id"))
+    )
+
+
+def _restore_gomoku_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    bot.add_view(GomokuView(game_id, show_join=state.get("white_id") is None))
 
 
 async def load_gomoku_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(gomoku_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    active = []
-    for game_id in index:
-        raw = await db_get(gomoku_game_key(guild.id, game_id))
-        if not raw:
-            continue
-        try:
-            game = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(game.get("board"), list) and not game.get("finished") and game.get("message_id"):
-            gomoku_games[game_id] = game
-            bot.add_view(GomokuView(game_id, show_join=game.get("white_id") is None))
-            active.append(game_id)
-    if active != index:
-        await db_set(gomoku_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, gomoku_games, bot, guild,
+        validate=_validate_gomoku,
+        restore_view=_restore_gomoku_view,
+    )
 
 
 async def cleanup_stale_gomoku_game(interaction: discord.Interaction, game_id: str) -> bool:
@@ -694,22 +661,8 @@ class GomokuFirstView(discord.ui.View):
         self.add_item(GomokuFirstButton("ランダム", difficulty, "random", row=0))
 
 
-class Gomoku(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_gomoku_games_for_guild(self.bot, guild)
+class Gomoku(BaseGameCog):
+    _load_guild = staticmethod(load_gomoku_games_for_guild)
 
     async def start_pvp(self, interaction: discord.Interaction):
         game_id = str(interaction.channel_id)

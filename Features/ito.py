@@ -1,15 +1,21 @@
-import asyncio
-import json
 import random
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+    get_game_state,
+)
+from utils.game_cog import BaseGameCog
 
 
 ito_games: dict[str, dict] = {}
+
+_PREFIX = "ito"
 
 DEFAULT_TOPICS = [
     "強そうなもの",
@@ -23,67 +29,24 @@ DEFAULT_TOPICS = [
 ]
 
 
-def ito_index_key(guild_id: int) -> str:
-    return f"ito_games_index:{guild_id}"
-
-
-def ito_game_key(guild_id: int, game_id: str) -> str:
-    return f"ito_game:{guild_id}:{game_id}"
-
-
 async def save_ito_game(guild_id: int | None, game_id: str, state: dict | None = None):
-    if not guild_id:
-        return
-    state = state or ito_games.get(game_id)
-    if not state:
-        return
-    state["guild_id"] = guild_id
-    await db_set(ito_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(ito_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(ito_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, ito_games, guild_id, game_id, state)
 
 
 async def delete_ito_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(ito_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(ito_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _restore_ito_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    if state.get("phase") == "lobby":
+        bot.add_view(ItoLobbyView(game_id))
 
 
 async def load_ito_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(ito_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    changed = False
-    for game_id in index:
-        raw = await db_get(ito_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            state = json.loads(raw)
-        except json.JSONDecodeError:
-            changed = True
-            continue
-        if not isinstance(state, dict) or not state.get("players"):
-            changed = True
-            continue
-        ito_games[game_id] = state
-        if state.get("phase") == "lobby":
-            bot.add_view(ItoLobbyView(game_id))
-    if changed:
-        active = [game_id for game_id in index if game_id in ito_games]
-        await db_set(ito_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, ito_games, bot, guild,
+        restore_view=_restore_ito_view,
+    )
 
 
 def normalize_ito_state(state: dict) -> dict:
@@ -95,30 +58,10 @@ def normalize_ito_state(state: dict) -> dict:
 
 
 async def get_ito_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
-    state = ito_games.get(game_id)
-    if state:
-        state = normalize_ito_state(state)
-        ito_games[game_id] = state
-        return state
-
-    guild_ids: list[int] = []
-    if guild_id:
-        guild_ids.append(int(guild_id))
-    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
-    for target_guild_id in guild_ids:
-        raw = await db_get(ito_game_key(target_guild_id, game_id))
-        if not raw:
-            continue
-        try:
-            state = normalize_ito_state(json.loads(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if not state.get("players"):
-            continue
-        state["guild_id"] = target_guild_id
-        ito_games[game_id] = state
-        return state
-    return None
+    return await get_game_state(
+        _PREFIX, ito_games, bot, game_id, guild_id,
+        normalize=normalize_ito_state,
+    )
 
 
 def mention(user_id: int | str) -> str:
@@ -244,22 +187,8 @@ async def begin_ito(interaction: discord.Interaction, game_id: str, edit_message
     await interaction.followup.send("数字をDMに送りました。DMが届かない場合は管理者に確認してください。", ephemeral=True)
 
 
-class Ito(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_ito_games_for_guild(self.bot, guild)
+class Ito(BaseGameCog):
+    _load_guild = staticmethod(load_ito_games_for_guild)
 
     @app_commands.command(name="ito", description="Itoを遊びます")
     @app_commands.describe(action="操作", text="お題、例え、順番提出に使います")

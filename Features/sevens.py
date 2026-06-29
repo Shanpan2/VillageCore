@@ -1,6 +1,4 @@
 import random
-import asyncio
-import json
 from io import BytesIO
 from pathlib import Path
 
@@ -9,7 +7,14 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+    get_game_state,
+)
+from utils.game_lobby import GameLobbyView
+from utils.game_cog import BaseGameCog
 
 
 SUITS = ["S", "H", "D", "C"]
@@ -20,73 +25,30 @@ RANK_LABELS = {1: "A", 11: "J", 12: "Q", 13: "K"}
 BOARD_IMAGE_PATH = Path("sevens_board.png")
 sevens_games: dict[str, dict] = {}
 
-
-def sevens_index_key(guild_id: int) -> str:
-    return f"sevens_games_index:{guild_id}"
-
-
-def sevens_game_key(guild_id: int, game_id: str) -> str:
-    return f"sevens_game:{guild_id}:{game_id}"
+_PREFIX = "sevens"
 
 
 async def save_sevens_game(guild_id: int | None, game_id: str, state: dict | None = None):
-    if not guild_id:
-        return
-    state = state or sevens_games.get(game_id)
-    if not state:
-        return
-    state["guild_id"] = guild_id
-    await db_set(sevens_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(sevens_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(sevens_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, sevens_games, guild_id, game_id, state)
 
 
 async def delete_sevens_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(sevens_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(sevens_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _restore_sevens_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    if state.get("started"):
+        current = state["players"][state.get("turn_index", 0)]
+        bot.add_view(SevensPlayView(game_id, current))
+    else:
+        bot.add_view(SevensLobbyView(game_id))
 
 
 async def load_sevens_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(sevens_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-
-    changed = False
-    for game_id in index:
-        raw = await db_get(sevens_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            state = json.loads(raw)
-        except json.JSONDecodeError:
-            changed = True
-            continue
-        if not isinstance(state, dict) or not state.get("players"):
-            changed = True
-            continue
-        sevens_games[game_id] = state
-        if state.get("started"):
-            current = state["players"][state.get("turn_index", 0)]
-            bot.add_view(SevensPlayView(game_id, current))
-        else:
-            bot.add_view(SevensLobbyView(game_id))
-
-    if changed:
-        active = [game_id for game_id in index if game_id in sevens_games]
-        await db_set(sevens_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, sevens_games, bot, guild,
+        restore_view=_restore_sevens_view,
+    )
 
 
 def normalize_sevens_state(state: dict) -> dict:
@@ -98,29 +60,10 @@ def normalize_sevens_state(state: dict) -> dict:
 
 
 async def get_sevens_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
-    state = sevens_games.get(game_id)
-    if state:
-        state = normalize_sevens_state(state)
-        sevens_games[game_id] = state
-        return state
-    guild_ids: list[int] = []
-    if guild_id:
-        guild_ids.append(int(guild_id))
-    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
-    for target_guild_id in guild_ids:
-        raw = await db_get(sevens_game_key(target_guild_id, game_id))
-        if not raw:
-            continue
-        try:
-            state = normalize_sevens_state(json.loads(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if not state.get("players"):
-            continue
-        state["guild_id"] = target_guild_id
-        sevens_games[game_id] = state
-        return state
-    return None
+    return await get_game_state(
+        _PREFIX, sevens_games, bot, game_id, guild_id,
+        normalize=normalize_sevens_state,
+    )
 
 
 def lobby_text(state: dict) -> str:
@@ -132,83 +75,16 @@ def lobby_text(state: dict) -> str:
     )
 
 
-class SevensLobbyView(discord.ui.View):
-    def __init__(self, game_id: str):
-        super().__init__(timeout=None)
-        self.game_id = game_id
-        for action, child in zip(("join", "leave", "begin", "cancel"), self.children):
-            child.custom_id = f"sevens_lobby_{action}_{game_id}"
-
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = sevens_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("この7並べ募集は終了しています。", ephemeral=True)
-            return
-        if state.get("started"):
-            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-            return
-        if interaction.user.id in state["players"]:
-            await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-            return
-        state["players"].append(interaction.user.id)
-        await save_sevens_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
-        await interaction.response.edit_message(content=lobby_text(state), view=self)
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = sevens_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("この7並べ募集は終了しています。", ephemeral=True)
-            return
-        if state.get("started"):
-            await interaction.response.send_message("すでに開始しています。開始後は抜けられません。", ephemeral=True)
-            return
-        if interaction.user.id not in state["players"]:
-            await interaction.response.send_message("まだ参加していません。", ephemeral=True)
-            return
-        state["players"].remove(interaction.user.id)
-        if not state["players"]:
-            await delete_sevens_game(interaction.guild_id or state.get("guild_id"), self.game_id)
-            sevens_games.pop(self.game_id, None)
-            await interaction.response.edit_message(content="参加者がいなくなったため、7並べ募集を終了しました。", view=None)
-            return
-        if state.get("creator_id") == interaction.user.id:
-            state["creator_id"] = state["players"][0]
-        await save_sevens_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
-        await interaction.response.edit_message(content=lobby_text(state), view=self)
-
-    @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
-    async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await start_sevens_game(interaction, self.game_id)
-            state = sevens_games.get(self.game_id)
-            if state and state.get("started") and interaction.message:
-                try:
-                    await interaction.message.edit(content=lobby_text(state) + "\n\n開始済みです。", view=None)
-                except discord.HTTPException:
-                    pass
-        except Exception as e:
-            print(f"[SevensLobbyView.begin] error: {type(e).__name__}: {e}", flush=True)
-            if interaction.response.is_done():
-                await interaction.followup.send("開始処理中にエラーが発生しました。`/sevens_begin` でもう一度試してください。", ephemeral=True)
-            else:
-                await interaction.response.send_message("開始処理中にエラーが発生しました。`/sevens_begin` でもう一度試してください。", ephemeral=True)
-
-    @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = sevens_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("この7並べ募集はありません。", ephemeral=True)
-            return
-        is_creator = interaction.user.id == state.get("creator_id")
-        is_admin = bool(getattr(interaction.user.guild_permissions, "manage_guild", False))
-        if not is_creator and not is_admin:
-            await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
-            return
-        await delete_sevens_game(interaction.guild_id or state.get("guild_id"), self.game_id)
-        sevens_games.pop(self.game_id, None)
-        await interaction.response.edit_message(content="7並べ募集を中止しました。", view=None)
+class SevensLobbyView(GameLobbyView):
+    game_name = "7並べ"
+    lobby_prefix = "sevens_lobby"
+    games = sevens_games
+    save = staticmethod(save_sevens_game)
+    delete = staticmethod(delete_sevens_game)
+    start = staticmethod(lambda interaction, game_id: start_sevens_game(interaction, game_id))
+    lobby_text = staticmethod(lobby_text)
+    started_key = "started"
+    begin_cmd = "/sevens_begin"
 
 
 def rank_label(rank: int) -> str:
@@ -624,22 +500,8 @@ async def surrender(interaction: discord.Interaction, game_id: str, user_id: int
     await update_game_message(interaction, state, f"🏳️ <@{user_id}> が降参しました。")
 
 
-class Sevens(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_sevens_games_for_guild(self.bot, guild)
+class Sevens(BaseGameCog):
+    _load_guild = staticmethod(load_sevens_games_for_guild)
 
     @app_commands.command(name="sevens_start", description="7並べゲームを作成します")
     async def sevens_start(self, interaction: discord.Interaction):

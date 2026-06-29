@@ -2,13 +2,18 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw, ImageFont
-import asyncio
-import json
 import random
 import os
 from io import BytesIO
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+    get_game_state,
+)
+from utils.game_lobby import GameLobbyView
+from utils.game_cog import BaseGameCog
 from views.uno_views import (
     UnoHandView,
     WildColorSelectView,
@@ -20,13 +25,7 @@ from views.uno_views import (
 # UNO ゲーム状態（メモリ管理）
 uno_games: dict[str, dict] = {}
 
-
-def uno_index_key(guild_id: int) -> str:
-    return f"uno_games_index:{guild_id}"
-
-
-def uno_game_key(guild_id: int, game_id: str) -> str:
-    return f"uno_game:{guild_id}:{game_id}"
+_PREFIX = "uno"
 
 
 def normalize_uno_state(state: dict) -> dict:
@@ -53,93 +52,41 @@ async def save_uno_game(guild_id: int | None, game_id: str, state: dict | None =
     state = normalize_uno_state(state or uno_games.get(game_id) or {})
     if not state:
         return
-    state["guild_id"] = guild_id
-    await db_set(uno_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(uno_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(uno_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, uno_games, guild_id, game_id, state)
 
 
 async def delete_uno_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(uno_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(uno_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _restore_uno_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    state = normalize_uno_state(state)
+    pending = state.get("pending")
+    if not state.get("hands"):
+        bot.add_view(UnoLobbyView(game_id))
+    elif pending and pending.get("type") == "wild_color":
+        bot.add_view(WildColorSelectView(game_id, int(pending["user_id"]), pending["card"]))
+    elif pending and pending.get("type") == "challenge":
+        bot.add_view(ChallengeView(game_id, int(pending["attacker_id"]), int(pending["defender_id"])))
+    elif pending and pending.get("type") == "uno_declare":
+        bot.add_view(UnoDeclareView(game_id, int(pending["user_id"])))
+    else:
+        current = state["players"][state.get("turn_index", 0)]
+        bot.add_view(UnoHandView(game_id, current, state["hands"].get(current, [])))
 
 
 async def load_uno_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(uno_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-
-    changed = False
-    for game_id in index:
-        raw = await db_get(uno_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            state = normalize_uno_state(json.loads(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            changed = True
-            continue
-        if not isinstance(state, dict) or not state.get("players"):
-            changed = True
-            continue
-        uno_games[game_id] = state
-        pending = state.get("pending")
-        if not state.get("hands"):
-            bot.add_view(UnoLobbyView(game_id))
-        elif pending and pending.get("type") == "wild_color":
-            bot.add_view(WildColorSelectView(game_id, int(pending["user_id"]), pending["card"]))
-        elif pending and pending.get("type") == "challenge":
-            bot.add_view(ChallengeView(game_id, int(pending["attacker_id"]), int(pending["defender_id"])))
-        elif pending and pending.get("type") == "uno_declare":
-            bot.add_view(UnoDeclareView(game_id, int(pending["user_id"])))
-        else:
-            current = state["players"][state.get("turn_index", 0)]
-            bot.add_view(UnoHandView(game_id, current, state["hands"].get(current, [])))
-
-    if changed:
-        active = [game_id for game_id in index if game_id in uno_games]
-        await db_set(uno_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, uno_games, bot, guild,
+        restore_view=_restore_uno_view,
+    )
 
 
 async def get_uno_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
-    state = uno_games.get(game_id)
-    if state:
-        state = normalize_uno_state(state)
-        uno_games[game_id] = state
-        return state
-
-    guild_ids: list[int] = []
-    if guild_id:
-        guild_ids.append(int(guild_id))
-    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
-
-    for target_guild_id in guild_ids:
-        raw = await db_get(uno_game_key(target_guild_id, game_id))
-        if not raw:
-            continue
-        try:
-            state = normalize_uno_state(json.loads(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if not state.get("players"):
-            continue
-        state["guild_id"] = target_guild_id
-        uno_games[game_id] = state
-        return state
-    return None
+    return await get_game_state(
+        _PREFIX, uno_games, bot, game_id, guild_id,
+        normalize=normalize_uno_state,
+    )
 
 
 def lobby_text(state: dict) -> str:
@@ -153,101 +100,20 @@ def lobby_text(state: dict) -> str:
     )
 
 
-class UnoLobbyView(discord.ui.View):
-    def __init__(self, game_id: str):
-        super().__init__(timeout=None)
-        self.game_id = game_id
-        for action, child in zip(("join", "leave", "begin", "cancel"), self.children):
-            child.custom_id = f"uno_lobby_{action}_{game_id}"
-
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = uno_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("このUNO募集は終了しています。", ephemeral=True)
-            return
-        if state.get("hands"):
-            await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-            return
-        if interaction.user.id in state["players"]:
-            await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-            return
-        state["players"].append(interaction.user.id)
-        await save_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
-        await interaction.response.edit_message(content=lobby_text(state), view=self)
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = uno_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("このUNO募集は終了しています。", ephemeral=True)
-            return
-        if state.get("hands"):
-            await interaction.response.send_message("すでに開始しています。開始後は抜けられません。", ephemeral=True)
-            return
-        if interaction.user.id not in state["players"]:
-            await interaction.response.send_message("まだ参加していません。", ephemeral=True)
-            return
-        state["players"].remove(interaction.user.id)
-        if not state["players"]:
-            await delete_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id)
-            uno_games.pop(self.game_id, None)
-            await interaction.response.edit_message(content="参加者がいなくなったため、UNO募集を終了しました。", view=None)
-            return
-        if state.get("creator_id") == interaction.user.id:
-            state["creator_id"] = state["players"][0]
-        await save_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id, state)
-        await interaction.response.edit_message(content=lobby_text(state), view=self)
-
-    @discord.ui.button(label="開始", style=discord.ButtonStyle.primary)
-    async def begin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await start_uno_game(interaction, self.game_id)
-            state = uno_games.get(self.game_id)
-            if state and state.get("hands") and interaction.message:
-                try:
-                    await interaction.message.edit(content=lobby_text(state) + "\n\n開始済みです。", view=None)
-                except discord.HTTPException:
-                    pass
-        except Exception as e:
-            print(f"[UnoLobbyView.begin] error: {type(e).__name__}: {e}", flush=True)
-            if interaction.response.is_done():
-                await interaction.followup.send("開始処理中にエラーが発生しました。`/uno_begin` でもう一度試してください。", ephemeral=True)
-            else:
-                await interaction.response.send_message("開始処理中にエラーが発生しました。`/uno_begin` でもう一度試してください。", ephemeral=True)
-
-    @discord.ui.button(label="中止", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        state = uno_games.get(self.game_id)
-        if not state:
-            await interaction.response.send_message("このUNO募集はありません。", ephemeral=True)
-            return
-        is_creator = interaction.user.id == state.get("creator_id")
-        is_admin = bool(getattr(interaction.user.guild_permissions, "manage_guild", False))
-        if not is_creator and not is_admin:
-            await interaction.response.send_message("中止できるのは作成者または管理者だけです。", ephemeral=True)
-            return
-        await delete_uno_game(interaction.guild_id or state.get("guild_id"), self.game_id)
-        uno_games.pop(self.game_id, None)
-        await interaction.response.edit_message(content="UNO募集を中止しました。", view=None)
+class UnoLobbyView(GameLobbyView):
+    game_name = "UNO"
+    lobby_prefix = "uno_lobby"
+    games = uno_games
+    save = staticmethod(save_uno_game)
+    delete = staticmethod(delete_uno_game)
+    start = staticmethod(lambda interaction, game_id: start_uno_game(interaction, game_id))
+    lobby_text = staticmethod(lobby_text)
+    started_key = "hands"
+    begin_cmd = "/uno_begin"
 
 
-class Uno(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_uno_games_for_guild(self.bot, guild)
+class Uno(BaseGameCog):
+    _load_guild = staticmethod(load_uno_games_for_guild)
 
     # -------------------------------------------------------
     # /uno_start

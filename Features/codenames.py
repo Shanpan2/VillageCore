@@ -1,12 +1,15 @@
-import asyncio
-import json
 import random
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+)
+from utils.game_cog import BaseGameCog
 
 
 codenames_games: dict[str, dict] = {}
@@ -23,67 +26,32 @@ TEAM_LABELS = {"red": "赤", "blue": "青", "neutral": "市民", "assassin": "�
 TEAM_MARKS = {"red": "R", "blue": "B", "neutral": "N", "assassin": "X"}
 
 
-def codenames_index_key(guild_id: int) -> str:
-    return f"codenames_games_index:{guild_id}"
-
-
-def codenames_game_key(guild_id: int, game_id: str) -> str:
-    return f"codenames_game:{guild_id}:{game_id}"
+_PREFIX = "codenames"
 
 
 async def save_codenames_game(guild_id: int | None, game_id: str, state: dict | None = None):
-    if not guild_id:
-        return
-    state = state or codenames_games.get(game_id)
-    if not state:
-        return
-    state["guild_id"] = guild_id
-    await db_set(codenames_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(codenames_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(codenames_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, codenames_games, guild_id, game_id, state)
 
 
 async def delete_codenames_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(codenames_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(codenames_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _restore_codenames_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    if state.get("phase") == "lobby":
+        bot.add_view(CodenamesLobbyView(game_id))
+
+
+def _validate_codenames(state: dict) -> bool:
+    return isinstance(state, dict) and bool(state.get("teams"))
 
 
 async def load_codenames_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(codenames_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    changed = False
-    for game_id in index:
-        raw = await db_get(codenames_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            state = json.loads(raw)
-        except json.JSONDecodeError:
-            changed = True
-            continue
-        if not isinstance(state, dict) or not state.get("teams"):
-            changed = True
-            continue
-        codenames_games[game_id] = state
-        if state.get("phase") == "lobby":
-            bot.add_view(CodenamesLobbyView(game_id))
-    if changed:
-        active = [game_id for game_id in index if game_id in codenames_games]
-        await db_set(codenames_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, codenames_games, bot, guild,
+        validate=_validate_codenames,
+        restore_view=_restore_codenames_view,
+    )
 
 
 def mention(user_id: int | str) -> str:
@@ -291,22 +259,8 @@ async def finish_game(interaction: discord.Interaction, game_id: str, winner: st
     )
 
 
-class Codenames(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_codenames_games_for_guild(self.bot, guild)
+class Codenames(BaseGameCog):
+    _load_guild = staticmethod(load_codenames_games_for_guild)
 
     @app_commands.command(name="codenames", description="コードネームを遊びます")
     @app_commands.describe(action="操作", text="ヒントや推理する単語、番号", number="ヒントで関連する枚数")

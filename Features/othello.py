@@ -1,13 +1,17 @@
 import io
-import asyncio
-import json
 import random
 import traceback
 import discord
 from discord.ext import commands
 from discord import app_commands
 from PIL import Image, ImageDraw
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+)
+from utils.game_cog import BaseGameCog
+from utils.coin import get_coin_balance, set_coin_balance
 from views.othello_views import OthelloView
 
 othello_games = {}
@@ -24,99 +28,40 @@ EDGE_SCORE = 18
 MOBILITY_SCORE = 8
 
 
-def coin_key(guild_id: int, user_id: int) -> str:
-    return f"community_coin:{guild_id}:{user_id}"
-
-
-def othello_index_key(guild_id: int) -> str:
-    return f"othello_games_index:{guild_id}"
-
-
-def othello_game_key(guild_id: int, game_id: str) -> str:
-    return f"othello_game:{guild_id}:{game_id}"
+_PREFIX = "othello"
+_EXCLUDE_KEYS = frozenset({"message_id", "channel_id"})
 
 
 async def save_othello_game(guild_id: int | None, game_id: str, game: dict):
-    if not guild_id:
-        return
-    game["guild_id"] = guild_id
-    data = {
-        key: value
-        for key, value in game.items()
-        if key not in {"message_id", "channel_id"}
-    }
-    await db_set(othello_game_key(guild_id, game_id), json.dumps(data, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(othello_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(othello_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(
+        _PREFIX, othello_games, guild_id, game_id, game,
+        exclude_keys=_EXCLUDE_KEYS,
+    )
 
 
 async def delete_othello_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(othello_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(othello_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _validate_othello(state: dict) -> bool:
+    board = state.get("board")
+    return isinstance(board, list) and len(board) == 8
+
+
+def _restore_othello_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    valid_moves = get_valid_moves(state["board"], int(state.get("turn", 1)))
+    bot.add_view(OthelloView(game_id, valid_moves, show_join=(state.get("white_id") is None)))
 
 
 async def load_othello_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(othello_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    changed = False
-    for game_id in index:
-        raw = await db_get(othello_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            game = json.loads(raw)
-        except json.JSONDecodeError:
-            changed = True
-            continue
-        board = game.get("board")
-        if not isinstance(board, list) or len(board) != 8:
-            changed = True
-            continue
-        othello_games[game_id] = game
-        valid_moves = get_valid_moves(board, int(game.get("turn", 1)))
-        bot.add_view(OthelloView(game_id, valid_moves, show_join=(game.get("white_id") is None)))
-    if changed:
-        active = [game_id for game_id in index if game_id in othello_games]
-        await db_set(othello_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, othello_games, bot, guild,
+        validate=_validate_othello,
+        restore_view=_restore_othello_view,
+    )
 
-
-async def get_coin_balance(guild_id: int, user_id: int) -> int:
-    return int(await db_get(coin_key(guild_id, user_id)) or "0")
-
-
-async def set_coin_balance(guild_id: int, user_id: int, amount: int):
-    await db_set(coin_key(guild_id, user_id), str(max(0, amount)))
-
-class Othello(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_othello_games_for_guild(self.bot, guild)
+class Othello(BaseGameCog):
+    _load_guild = staticmethod(load_othello_games_for_guild)
 
     @app_commands.command(name="othello", description="オセロゲームを開始します")
     async def othello(self, interaction: discord.Interaction):

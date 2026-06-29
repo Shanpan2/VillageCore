@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database.config_db import db_get, db_get_all_config, db_set
+from utils.coin import coin_key
 
 
 JST = timezone(timedelta(hours=9))
@@ -74,10 +75,6 @@ def parse_profile_items(raw: str) -> list[dict]:
 
 def profile_key(guild_id: int, user_id: int) -> str:
     return f"community_profile:{guild_id}:{user_id}"
-
-
-def coin_key(guild_id: int, user_id: int) -> str:
-    return f"community_coin:{guild_id}:{user_id}"
 
 
 def coin_daily_key(guild_id: int, user_id: int) -> str:

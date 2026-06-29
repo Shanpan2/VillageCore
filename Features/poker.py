@@ -1,6 +1,4 @@
 import random
-import asyncio
-import json
 from collections import Counter
 from io import BytesIO
 
@@ -9,7 +7,14 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from database.config_db import db_get, db_set
+from utils.game_persistence import (
+    save_game as _save_game,
+    delete_game as _delete_game,
+    load_games_for_guild,
+    get_game_state,
+)
+from utils.game_cog import BaseGameCog
+from utils.coin import get_coin_balance, set_coin_balance
 
 
 SUITS = ["S", "H", "D", "C"]
@@ -30,73 +35,30 @@ HAND_NAMES = {
 
 poker_games: dict[str, dict] = {}
 
-
-def poker_index_key(guild_id: int) -> str:
-    return f"poker_games_index:{guild_id}"
-
-
-def poker_game_key(guild_id: int, game_id: str) -> str:
-    return f"poker_game:{guild_id}:{game_id}"
+_PREFIX = "poker"
 
 
 async def save_poker_game(guild_id: int | None, game_id: str, state: dict | None = None):
-    if not guild_id:
-        return
-    state = state or poker_games.get(game_id)
-    if not state:
-        return
-    state["guild_id"] = guild_id
-    await db_set(poker_game_key(guild_id, game_id), json.dumps(state, ensure_ascii=False))
-    try:
-        index = json.loads(await db_get(poker_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    if game_id not in index:
-        index.append(game_id)
-        await db_set(poker_index_key(guild_id), json.dumps(index[-100:], ensure_ascii=False))
+    await _save_game(_PREFIX, poker_games, guild_id, game_id, state)
 
 
 async def delete_poker_game(guild_id: int | None, game_id: str):
-    if not guild_id:
-        return
-    try:
-        index = json.loads(await db_get(poker_index_key(guild_id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-    index = [item for item in index if item != game_id]
-    await db_set(poker_index_key(guild_id), json.dumps(index, ensure_ascii=False))
+    await _delete_game(_PREFIX, guild_id, game_id)
+
+
+def _restore_poker_view(bot: commands.Bot, game_id: str, state: dict) -> None:
+    if state.get("started"):
+        current = state["players"][state.get("turn_index", 0)]
+        bot.add_view(PokerDrawView(game_id, current))
+    else:
+        bot.add_view(PokerLobbyView(game_id))
 
 
 async def load_poker_games_for_guild(bot: commands.Bot, guild: discord.Guild):
-    try:
-        index = json.loads(await db_get(poker_index_key(guild.id)) or "[]")
-    except json.JSONDecodeError:
-        index = []
-
-    changed = False
-    for game_id in index:
-        raw = await db_get(poker_game_key(guild.id, game_id))
-        if not raw:
-            changed = True
-            continue
-        try:
-            state = json.loads(raw)
-        except json.JSONDecodeError:
-            changed = True
-            continue
-        if not isinstance(state, dict) or not state.get("players"):
-            changed = True
-            continue
-        poker_games[game_id] = state
-        if state.get("started"):
-            current = state["players"][state.get("turn_index", 0)]
-            bot.add_view(PokerDrawView(game_id, current))
-        else:
-            bot.add_view(PokerLobbyView(game_id))
-
-    if changed:
-        active = [game_id for game_id in index if game_id in poker_games]
-        await db_set(poker_index_key(guild.id), json.dumps(active, ensure_ascii=False))
+    await load_games_for_guild(
+        _PREFIX, poker_games, bot, guild,
+        restore_view=_restore_poker_view,
+    )
 
 
 def normalize_poker_state(state: dict) -> dict:
@@ -109,41 +71,10 @@ def normalize_poker_state(state: dict) -> dict:
 
 
 async def get_poker_game_state(bot: commands.Bot, game_id: str, guild_id: int | None = None) -> dict | None:
-    state = poker_games.get(game_id)
-    if state:
-        state = normalize_poker_state(state)
-        poker_games[game_id] = state
-        return state
-    guild_ids: list[int] = []
-    if guild_id:
-        guild_ids.append(int(guild_id))
-    guild_ids.extend(guild.id for guild in getattr(bot, "guilds", []) if guild.id not in guild_ids)
-    for target_guild_id in guild_ids:
-        raw = await db_get(poker_game_key(target_guild_id, game_id))
-        if not raw:
-            continue
-        try:
-            state = normalize_poker_state(json.loads(raw))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        if not state.get("players"):
-            continue
-        state["guild_id"] = target_guild_id
-        poker_games[game_id] = state
-        return state
-    return None
-
-
-def coin_key(guild_id: int, user_id: int) -> str:
-    return f"community_coin:{guild_id}:{user_id}"
-
-
-async def get_coin_balance(guild_id: int, user_id: int) -> int:
-    return int(await db_get(coin_key(guild_id, user_id)) or "0")
-
-
-async def set_coin_balance(guild_id: int, user_id: int, amount: int):
-    await db_set(coin_key(guild_id, user_id), str(max(0, amount)))
+    return await get_game_state(
+        _PREFIX, poker_games, bot, game_id, guild_id,
+        normalize=normalize_poker_state,
+    )
 
 
 def bet_line(state: dict) -> str:
@@ -728,22 +659,8 @@ async def start_poker_game(interaction: discord.Interaction, game_id: str | None
     await interaction.followup.send(text, view=PokerDrawView(game_id, current))
 
 
-class Poker(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._restore_task = None
-
-    async def cog_load(self):
-        self._restore_task = asyncio.create_task(self._restore_saved_games())
-
-    async def cog_unload(self):
-        if self._restore_task:
-            self._restore_task.cancel()
-
-    async def _restore_saved_games(self):
-        await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            await load_poker_games_for_guild(self.bot, guild)
+class Poker(BaseGameCog):
+    _load_guild = staticmethod(load_poker_games_for_guild)
 
     @app_commands.command(name="poker_start", description="ポーカーゲームを作成します")
     @app_commands.describe(bet="1人あたりの賭けコイン数。0で賭けなし")
