@@ -11,6 +11,65 @@ from database.config_db import db_get_all_config, db_set, use_postgres
 
 BACKUP_VERSION = 1
 
+# Keys that contain a guild ID scope use one of these prefix patterns.
+# Only keys belonging to the importing guild (or global non-guild keys)
+# are allowed during import to prevent cross-guild data injection.
+_GUILD_SCOPED_PREFIXES = (
+    "server_log_channel:",
+    "server_log_settings:",
+    "ticket_log_channel:",
+    "ticket_counter:",
+    "youtube_notify_channel_id:",
+    "youtube_notify_keywords:",
+    "youtube_posted_ids:",
+    "birthday_settings:",
+    "birthday_bonus:",
+    "ng_words:",
+    "ops_error_channel:",
+    "ops_command_log_channel:",
+    "ops_maintenance:",
+    "ops_setup_done:",
+    "community_profile:",
+    "community_coin:",
+    "community_coin_daily:",
+    "community_coin_gamble_lock:",
+    "community_coin_gamble_lock_reason:",
+    "community_gamble_role_expirations:",
+    "community_titles:",
+    "community_badges:",
+    "community_event:",
+    "community_event_index:",
+    "community_topic:",
+    "community_faq:",
+    "community_faq_index:",
+    "community_rule:",
+    "community_report_channel:",
+    "community_report_cooldown:",
+    "community_coin_shop_expirations:",
+    "welcome_channel_",
+    "welcome_message_",
+    "ai_memory:",
+    "role_panel:",
+    "bot_guild:",
+    "music_state:",
+    "attendance_",
+)
+
+
+def _is_key_for_guild(key: str, guild_id: int | None) -> bool:
+    """Return True if the key belongs to the given guild or is not guild-scoped."""
+    if guild_id is None:
+        return False
+    guild_str = str(guild_id)
+    for prefix in _GUILD_SCOPED_PREFIXES:
+        if key.startswith(prefix):
+            remainder = key[len(prefix):]
+            # The guild ID should be the next segment (before any further ':' or '_')
+            segment = remainder.split(":")[0].split("_")[0]
+            return segment == guild_str
+    # Non-guild-scoped keys (e.g. global config) are allowed
+    return True
+
 
 class Backup(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -56,15 +115,21 @@ class Backup(commands.Cog):
             await interaction.followup.send(f"バックアップを読み込めませんでした: `{type(e).__name__}: {e}`", ephemeral=True)
             return
 
+        guild_id = interaction.guild_id
         restored = 0
+        skipped = 0
         for key, value in config.items():
             if not isinstance(key, str) or value is None:
+                continue
+            if not _is_key_for_guild(key, guild_id):
+                skipped += 1
                 continue
             await db_set(key, str(value))
             restored += 1
 
+        skip_note = f"\nスキップ項目数: {skipped}（他サーバーのデータは復元されません）" if skipped else ""
         await interaction.followup.send(
-            f"バックアップを復元しました。復元項目数: {restored}\n"
+            f"バックアップを復元しました。復元項目数: {restored}{skip_note}\n"
             "一部機能はBot再起動後に反映されます。",
             ephemeral=True,
         )

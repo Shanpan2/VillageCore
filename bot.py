@@ -1,3 +1,4 @@
+import hmac
 import os
 import sys
 import discord
@@ -753,22 +754,34 @@ async def handle_help_site(request):
     return web.Response(text=html, content_type="text/html")
 
 
+DASHBOARD_SECURITY_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def dashboard_response(text: str, content_type: str = "text/html", status: int = 200) -> web.Response:
+    return web.Response(text=text, content_type=content_type, status=status, headers=DASHBOARD_SECURITY_HEADERS)
+
+
 def dashboard_auth_ok(request: web.Request) -> bool:
-    return bool(DASHBOARD_TOKEN and request.query.get("token") == DASHBOARD_TOKEN)
+    if not DASHBOARD_TOKEN:
+        return False
+    provided = request.query.get("token", "")
+    return hmac.compare_digest(provided, DASHBOARD_TOKEN)
 
 
 async def handle_dashboard(request: web.Request):
     if not DASHBOARD_TOKEN:
-        return web.Response(
-            text=(
-                "<h1>むらびと君ダッシュボード</h1>"
-                "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>"
-            ),
-            content_type="text/html",
+        return dashboard_response(
+            "<h1>むらびと君ダッシュボード</h1>"
+            "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>",
         )
 
     if not dashboard_auth_ok(request):
-        return web.Response(status=401, text="認証できませんでした。")
+        return dashboard_response("認証できませんでした。", status=401)
 
     try:
         config = await db_get_all_config()
@@ -892,21 +905,18 @@ async def handle_dashboard(request: web.Request):
     </body>
     </html>
     """
-    return web.Response(text=html, content_type="text/html")
+    return dashboard_response(html)
 
 
 async def handle_roles_dashboard(request: web.Request):
     if not DASHBOARD_TOKEN:
-        return web.Response(
-            text=(
-                "<h1>Roles Guesserダッシュボード</h1>"
-                "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>"
-            ),
-            content_type="text/html",
+        return dashboard_response(
+            "<h1>Roles Guesserダッシュボード</h1>"
+            "<p>ダッシュボードは無効です。<code>DASHBOARD_TOKEN</code> を設定してください。</p>",
         )
 
     if not dashboard_auth_ok(request):
-        return web.Response(status=401, text="認証できませんでした。")
+        return dashboard_response("認証できませんでした。", status=401)
 
     try:
         config = await db_get_all_config()
@@ -1012,7 +1022,7 @@ async def handle_roles_dashboard(request: web.Request):
     </body>
     </html>
     """
-    return web.Response(text=html, content_type="text/html")
+    return dashboard_response(html)
 
 
 async def start_health_server():

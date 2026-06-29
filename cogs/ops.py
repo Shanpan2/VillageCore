@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -6,6 +7,24 @@ from discord import app_commands
 from discord.ext import commands
 
 from database.config_db import db_get, db_get_all_config, db_set
+
+_REDACT_ENV_NAMES = (
+    "DISCORD_TOKEN",
+    "ROLE_GUESSER_TOKEN",
+    "DASHBOARD_TOKEN",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "YOUTUBE_API_KEY",
+    "DATABASE_URL",
+)
+
+
+def _sanitize_error_text(text: str) -> str:
+    for name in _REDACT_ENV_NAMES:
+        value = os.getenv(name)
+        if value:
+            text = text.replace(value, "***")
+    return text[:900]
 
 try:
     import shogi
@@ -218,7 +237,7 @@ class Ops(commands.Cog):
         name = interaction.command.qualified_name if interaction.command else "unknown"
         embed.add_field(name="コマンド", value=f"/{name}", inline=True)
         embed.add_field(name="ユーザー", value=f"{interaction.user} ({interaction.user.id})", inline=False)
-        embed.add_field(name="内容", value=f"`{type(error).__name__}: {str(error)[:900]}`", inline=False)
+        embed.add_field(name="内容", value=f"`{type(error).__name__}: {_sanitize_error_text(str(error))}`", inline=False)
         await self.send_ops_log(interaction.guild_id, error_channel_key, embed)
 
     @app_commands.command(name="permission_audit", description="Botに必要な権限を機能別に診断します")
