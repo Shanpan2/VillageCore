@@ -126,35 +126,33 @@ REPORT_KIND_LABELS = {
     "other": "その他",
 }
 REAL_GAMBLER_ROLE_NAME = os.getenv("REAL_GAMBLER_ROLE_NAME", "リアルギャンブラー")
-REAL_GAMBLER_LOCK_DAYS = int(os.getenv("REAL_GAMBLER_LOCK_DAYS", "3"))
+REAL_GAMBLER_ROLE_DAYS = int(os.getenv("REAL_GAMBLER_ROLE_DAYS", os.getenv("REAL_GAMBLER_LOCK_DAYS", "7")))
 
 COIN_SHOP_ITEMS = {
-    "red": {"label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
-    "blue": {"label": "青カラー", "role_name": "カラー: 青", "cost": 300, "days": 7, "color": 0x3498DB},
-    "green": {"label": "緑カラー", "role_name": "カラー: 緑", "cost": 300, "days": 7, "color": 0x2ECC71},
-    "purple": {"label": "紫カラー", "role_name": "カラー: 紫", "cost": 300, "days": 7, "color": 0x9B59B6},
-    "gold": {"label": "金カラー", "role_name": "カラー: 金", "cost": 500, "days": 7, "color": 0xF1C40F},
+    "red": {"kind": "role", "label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
+    "blue": {"kind": "role", "label": "青カラー", "role_name": "カラー: 青", "cost": 300, "days": 7, "color": 0x3498DB},
+    "green": {"kind": "role", "label": "緑カラー", "role_name": "カラー: 緑", "cost": 300, "days": 7, "color": 0x2ECC71},
+    "purple": {"kind": "role", "label": "紫カラー", "role_name": "カラー: 紫", "cost": 300, "days": 7, "color": 0x9B59B6},
+    "gold": {"kind": "role", "label": "金カラー", "role_name": "カラー: 金", "cost": 500, "days": 7, "color": 0xF1C40F},
+    "editor": {"kind": "title", "label": "称号: 編集見習い", "name": "編集見習い", "cost": 120},
+    "lucky": {"kind": "title", "label": "称号: 幸運の村民", "name": "幸運の村民", "cost": 180},
+    "regular": {"kind": "badge", "label": "バッジ: ショップ常連", "name": "ショップ常連", "cost": 250},
+    "sponsor": {"kind": "badge", "label": "バッジ: 村の支援者", "name": "村の支援者", "cost": 500},
 }
 
 PENALTY_GACHA_ITEMS = [
-    "次の発言だけ、語尾に「ですぞ」を付ける",
-    "今日の反省を1行で書く",
-    "好きな食べ物を1つ発表する",
-    "次のゲーム募集を1回立てる",
-    "最近のおすすめ動画や曲を1つ紹介する",
-    "次のおみくじ結果を素直に受け入れる",
-    "今日だけ慎重派を名乗る",
+    "3分以上の動画素材を編集して、進捗を報告する",
+    "7日以内に短い動画を1本投稿する",
+    "30分以上、編集作業通話のVCで作業する",
+    "今日中に動画企画を1つ書いて投稿する",
+    "未編集素材を1つ整理して、次にやる作業を宣言する",
+    "次の発言でギャンブル敗北レポートを1行提出する",
+    "今日だけ慎重派を名乗り、ギャンブルを自粛する",
     "負けた理由をかっこよく言い訳する",
-    "今日の一言を名言っぽく投稿する",
-    "自分のラッキーアイテムを勝手に決めて発表する",
-    "次の1回だけ丁寧語で話す",
-    "村への感謝を1行で書く",
-    "次に遊びたいゲームを1つ宣言する",
-    "今日の自分に称号を1つ付ける",
-    "好きな絵文字を3つだけ並べる",
-    "今の気持ちを五七五っぽく書く",
-    "次の発言だけ大げさに反省する",
-    "コイン復活後の目標を1つ宣言する",
+    "コイン復活後の健全な目標を1つ宣言する",
+    "編集部屋VCに入れる時間を1つ宣言する",
+    "おすすめ動画を1つ紹介して、良かった点を1行書く",
+    "次のゲーム募集を1回立てる",
 ]
 
 
@@ -242,29 +240,29 @@ async def save_gamble_role_expiration(guild_id: int, user_id: int, role_id: int,
 
 
 async def apply_real_gambler_penalty(guild: discord.Guild, member: discord.Member) -> tuple[datetime, bool]:
-    locked_until = utc_now() + timedelta(days=max(1, REAL_GAMBLER_LOCK_DAYS))
-    await lock_coin_gamble_until(
-        guild.id,
-        member.id,
-        locked_until,
-        f"所持コインの50%以上を賭けようとしたため、{REAL_GAMBLER_LOCK_DAYS}日間ギャンブル停止中です",
-    )
+    expires_at = utc_now() + timedelta(days=max(1, REAL_GAMBLER_ROLE_DAYS))
     role_added = False
     role = await get_or_create_real_gambler_role(guild)
     bot_member = guild.me
     if role and bot_member and role not in member.roles and role < bot_member.top_role:
         try:
-            await member.add_roles(role, reason="Bet more than 50 percent of coin balance")
+            await member.add_roles(role, reason="Coin balance reached zero by gambling")
             role_added = True
         except discord.HTTPException:
             pass
     if role:
-        await save_gamble_role_expiration(guild.id, member.id, role.id, locked_until)
-    return locked_until, role_added
+        await save_gamble_role_expiration(guild.id, member.id, role.id, expires_at)
+    return expires_at, role_added
 
 
 def draw_penalty_gacha() -> str:
     return random.choice(PENALTY_GACHA_ITEMS)
+
+
+def coin_shop_item_summary(data: dict) -> str:
+    if data.get("kind") == "role":
+        return f"{data['cost']}コイン / {data['days']}日"
+    return f"{data['cost']}コイン / 永続"
 
 
 async def add_unique_json_value(key: str, value: str, limit: int = 30) -> bool:
@@ -620,8 +618,8 @@ class Community(commands.Cog):
         coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
         await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
 
-    @app_commands.command(name="coin_shop", description="コインで期間限定カラー役職を交換します")
-    @app_commands.describe(item="交換するカラー。未指定なら一覧を表示します")
+    @app_commands.command(name="coin_shop", description="コインでロール、称号、バッジを交換します")
+    @app_commands.describe(item="交換する商品。未指定なら一覧を表示します")
     @app_commands.choices(
         item=[
             app_commands.Choice(name="赤カラー 300コイン / 7日", value="red"),
@@ -629,6 +627,10 @@ class Community(commands.Cog):
             app_commands.Choice(name="緑カラー 300コイン / 7日", value="green"),
             app_commands.Choice(name="紫カラー 300コイン / 7日", value="purple"),
             app_commands.Choice(name="金カラー 500コイン / 7日", value="gold"),
+            app_commands.Choice(name="称号: 編集見習い 120コイン", value="editor"),
+            app_commands.Choice(name="称号: 幸運の村民 180コイン", value="lucky"),
+            app_commands.Choice(name="バッジ: ショップ常連 250コイン", value="regular"),
+            app_commands.Choice(name="バッジ: 村の支援者 500コイン", value="sponsor"),
         ]
     )
     async def coin_shop(self, interaction: discord.Interaction, item: app_commands.Choice[str] | None = None):
@@ -638,15 +640,15 @@ class Community(commands.Cog):
 
         if item is None:
             lines = [
-                f"- **{data['label']}**: {data['cost']}コイン / {data['days']}日"
+                f"- **{data['label']}**: {coin_shop_item_summary(data)}"
                 for data in COIN_SHOP_ITEMS.values()
             ]
             embed = discord.Embed(
                 title="コインショップ",
-                description="期間限定カラー役職を交換できます。\n\n" + "\n".join(lines),
+                description="期間限定ロール、称号、バッジを交換できます。\n\n" + "\n".join(lines),
                 color=0xF1C40F,
             )
-            embed.set_footer(text="/coin_shop item:カラー名 で交換できます。")
+            embed.set_footer(text="/coin_shop item:商品名 で交換できます。")
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
@@ -665,36 +667,54 @@ class Community(commands.Cog):
             )
             return
 
-        role = await get_or_create_shop_role(interaction.guild, data)
-        bot_member = interaction.guild.me
-        if not role or not bot_member or role >= bot_member.top_role:
-            await interaction.response.send_message(
-                "カラー役職を作成/付与できませんでした。Botに「ロールの管理」権限があるか、Botのロール位置を確認してください。",
-                ephemeral=True,
-            )
+        kind = data.get("kind", "role")
+        result_text = ""
+        if kind == "role":
+            role = await get_or_create_shop_role(interaction.guild, data)
+            bot_member = interaction.guild.me
+            if not role or not bot_member or role >= bot_member.top_role:
+                await interaction.response.send_message(
+                    "カラー役職を作成/付与できませんでした。Botに「ロールの管理」権限があるか、Botのロール位置を確認してください。",
+                    ephemeral=True,
+                )
+                return
+
+            shop_role_names = {
+                shop_item["role_name"]
+                for shop_item in COIN_SHOP_ITEMS.values()
+                if shop_item.get("kind") == "role"
+            }
+            removable_roles = [
+                member_role
+                for member_role in interaction.user.roles
+                if member_role.name in shop_role_names and member_role != role and member_role < bot_member.top_role
+            ]
+            if removable_roles:
+                try:
+                    await interaction.user.remove_roles(*removable_roles, reason="Coin shop color role replaced")
+                except discord.HTTPException:
+                    pass
+
+            await interaction.user.add_roles(role, reason="Coin shop purchase")
+            expires_at = datetime.now(timezone.utc) + timedelta(days=data["days"])
+            await save_shop_expiration(interaction.guild_id, interaction.user.id, role.id, item_key, expires_at)
+            result_text = f"期限: **{data['days']}日間**"
+        elif kind == "title":
+            await add_unique_json_value(titles_key(interaction.guild_id, interaction.user.id), data["name"])
+            result_text = "称号はプロフィールに永続保存されます。"
+        elif kind == "badge":
+            await add_unique_json_value(badges_key(interaction.guild_id, interaction.user.id), data["name"])
+            result_text = "バッジはプロフィールに永続保存されます。"
+        else:
+            await interaction.response.send_message("その商品種別はまだ対応していません。", ephemeral=True)
             return
 
-        shop_role_names = {shop_item["role_name"] for shop_item in COIN_SHOP_ITEMS.values()}
-        removable_roles = [
-            member_role
-            for member_role in interaction.user.roles
-            if member_role.name in shop_role_names and member_role != role and member_role < bot_member.top_role
-        ]
-        if removable_roles:
-            try:
-                await interaction.user.remove_roles(*removable_roles, reason="Coin shop color role replaced")
-            except discord.HTTPException:
-                pass
-
         await db_set(balance_key, str(balance - data["cost"]))
-        await interaction.user.add_roles(role, reason="Coin shop purchase")
-        expires_at = datetime.now(timezone.utc) + timedelta(days=data["days"])
-        await save_shop_expiration(interaction.guild_id, interaction.user.id, role.id, item_key, expires_at)
 
         await interaction.response.send_message(
             f"{interaction.user.mention} が **{data['label']}** を交換しました。\n"
             f"消費: **{data['cost']}** コイン / 残高: **{balance - data['cost']}** コイン\n"
-            f"期限: **{data['days']}日間**",
+            f"{result_text}",
         )
 
     @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")
@@ -789,17 +809,6 @@ class Community(commands.Cog):
                 ephemeral=True,
             )
             return
-        if amount * 2 >= current and isinstance(interaction.user, discord.Member) and interaction.guild:
-            locked_until, role_added = await apply_real_gambler_penalty(interaction.guild, interaction.user)
-            remaining = format_remaining(locked_until - utc_now())
-            role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** を付与しました。" if role_added else ""
-            await interaction.response.send_message(
-                f"所持コインの50%以上を賭けようとしたため、今回のギャンブルは中止しました。\n"
-                f"ギャンブルは **{remaining}** できません。{role_text}",
-                ephemeral=True,
-            )
-            return
-
         if random.random() < 0.45:
             bonus_percent = random.randint(10, 100)
             profit = max(1, amount * bonus_percent // 100)
@@ -821,16 +830,25 @@ class Community(commands.Cog):
             locked_until = await lock_coin_gamble_for_24h(interaction.guild_id, interaction.user.id)
             remaining = format_remaining(locked_until - utc_now())
             penalty = draw_penalty_gacha()
+            role_text = ""
+            if isinstance(interaction.user, discord.Member) and interaction.guild:
+                role_expires_at, role_added = await apply_real_gambler_penalty(interaction.guild, interaction.user)
+                role_remaining = format_remaining(role_expires_at - utc_now())
+                if role_added:
+                    role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** を **{role_remaining}** 付与しました。"
+                else:
+                    role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** は付与済み、または権限不足で付与できませんでした。"
             zero_lock_text = (
                 f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
-                f"\n罰ゲームガチャが自動発生: **{penalty}**"
+                f"{role_text}"
+                f"\n強化罰ゲームガチャが自動発生: **{penalty}**"
             )
         await interaction.response.send_message(
             f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
             f"現在 **{new_balance}** コインです。{zero_lock_text}"
         )
 
-    @app_commands.command(name="penalty_gacha", description="軽い罰ゲームをランダムで引きます")
+    @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
     async def penalty_gacha(self, interaction: discord.Interaction):
         penalty = draw_penalty_gacha()
         await interaction.response.send_message(f"罰ゲームガチャ: **{penalty}**")
@@ -907,26 +925,25 @@ class Community(commands.Cog):
         now = datetime.now(timezone.utc)
         for guild in self.bot.guilds:
             records = await get_json(coin_shop_expirations_key(guild.id), [])
-            if not records:
-                continue
-            remaining = []
-            changed = False
-            for record in records:
-                expires_at = parse_utc(record.get("expires_at", ""))
-                if not expires_at or expires_at > now:
-                    remaining.append(record)
-                    continue
-                changed = True
-                member = guild.get_member(int(record.get("user_id", 0)))
-                role = guild.get_role(int(record.get("role_id", 0)))
-                bot_member = guild.me
-                if member and role and bot_member and role in member.roles and role < bot_member.top_role:
-                    try:
-                        await member.remove_roles(role, reason="Coin shop color role expired")
-                    except discord.HTTPException:
-                        pass
-            if changed:
-                await set_json(coin_shop_expirations_key(guild.id), remaining)
+            if records:
+                remaining = []
+                changed = False
+                for record in records:
+                    expires_at = parse_utc(record.get("expires_at", ""))
+                    if not expires_at or expires_at > now:
+                        remaining.append(record)
+                        continue
+                    changed = True
+                    member = guild.get_member(int(record.get("user_id", 0)))
+                    role = guild.get_role(int(record.get("role_id", 0)))
+                    bot_member = guild.me
+                    if member and role and bot_member and role in member.roles and role < bot_member.top_role:
+                        try:
+                            await member.remove_roles(role, reason="Coin shop color role expired")
+                        except discord.HTTPException:
+                            pass
+                if changed:
+                    await set_json(coin_shop_expirations_key(guild.id), remaining)
 
             gamble_records = await get_json(gamble_role_expirations_key(guild.id), [])
             if not gamble_records:
