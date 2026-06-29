@@ -11,9 +11,9 @@ from database.config_db import db_get_all_config, db_set, use_postgres
 
 BACKUP_VERSION = 1
 
-# Keys that contain a guild ID scope use one of these prefix patterns.
-# Only keys belonging to the importing guild (or global non-guild keys)
-# are allowed during import to prevent cross-guild data injection.
+# Prefixes whose next segment after the prefix is a guild ID.
+# Only keys belonging to the importing guild (or non-guild keys) are
+# allowed during import to prevent cross-guild data injection.
 _GUILD_SCOPED_PREFIXES = (
     "server_log_channel:",
     "server_log_settings:",
@@ -37,7 +37,6 @@ _GUILD_SCOPED_PREFIXES = (
     "community_gamble_role_expirations:",
     "community_titles:",
     "community_badges:",
-    "community_event:",
     "community_event_index:",
     "community_topic:",
     "community_faq:",
@@ -49,9 +48,15 @@ _GUILD_SCOPED_PREFIXES = (
     "welcome_channel_",
     "welcome_message_",
     "ai_memory:",
-    "role_panel:",
     "bot_guild:",
     "music_state:",
+)
+
+# Prefixes keyed by something other than guild ID (e.g. message ID or
+# global). These are always allowed through during import.
+_NON_GUILD_PREFIXES = (
+    "role_panel:",
+    "community_event:",
     "attendance_",
 )
 
@@ -64,9 +69,11 @@ def _is_key_for_guild(key: str, guild_id: int | None) -> bool:
     for prefix in _GUILD_SCOPED_PREFIXES:
         if key.startswith(prefix):
             remainder = key[len(prefix):]
-            # The guild ID should be the next segment (before any further ':' or '_')
             segment = remainder.split(":")[0].split("_")[0]
             return segment == guild_str
+    for prefix in _NON_GUILD_PREFIXES:
+        if key.startswith(prefix):
+            return True
     # Non-guild-scoped keys (e.g. global config) are allowed
     return True
 
