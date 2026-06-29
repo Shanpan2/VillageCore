@@ -96,6 +96,22 @@ def gamble_role_expirations_key(guild_id: int) -> str:
     return f"community_gamble_role_expirations:{guild_id}"
 
 
+def penalty_immunity_key(guild_id: int, user_id: int) -> str:
+    return f"community_penalty_immunity:{guild_id}:{user_id}"
+
+
+def gamble_boost_key(guild_id: int, user_id: int) -> str:
+    return f"community_gamble_boost:{guild_id}:{user_id}"
+
+
+def vc_penalty_channel_key(guild_id: int) -> str:
+    return f"community_vc_penalty_channel:{guild_id}"
+
+
+def vc_penalties_key(guild_id: int) -> str:
+    return f"community_vc_penalties:{guild_id}"
+
+
 def titles_key(guild_id: int, user_id: int) -> str:
     return f"community_titles:{guild_id}:{user_id}"
 
@@ -134,25 +150,48 @@ COIN_SHOP_ITEMS = {
     "green": {"kind": "role", "label": "緑カラー", "role_name": "カラー: 緑", "cost": 300, "days": 7, "color": 0x2ECC71},
     "purple": {"kind": "role", "label": "紫カラー", "role_name": "カラー: 紫", "cost": 300, "days": 7, "color": 0x9B59B6},
     "gold": {"kind": "role", "label": "金カラー", "role_name": "カラー: 金", "cost": 500, "days": 7, "color": 0xF1C40F},
+    "orange": {"kind": "role", "label": "橙カラー", "role_name": "カラー: 橙", "cost": 300, "days": 7, "color": 0xE67E22},
+    "pink": {"kind": "role", "label": "桃カラー", "role_name": "カラー: 桃", "cost": 300, "days": 7, "color": 0xE91E63},
+    "white": {"kind": "role", "label": "白カラー", "role_name": "カラー: 白", "cost": 400, "days": 7, "color": 0xECF0F1},
+    "black": {"kind": "role", "label": "黒カラー", "role_name": "カラー: 黒", "cost": 400, "days": 7, "color": 0x2C3E50},
+    "star": {"kind": "role", "label": "★装飾ロール", "role_name": "★装飾付き", "cost": 500, "days": 14, "color": 0xFFD700},
     "editor": {"kind": "title", "label": "称号: 編集見習い", "name": "編集見習い", "cost": 120},
     "lucky": {"kind": "title", "label": "称号: 幸運の村民", "name": "幸運の村民", "cost": 180},
+    "gamble_king": {"kind": "title", "label": "称号: ギャンブル王", "name": "ギャンブル王", "cost": 400},
+    "video_master": {"kind": "title", "label": "称号: 動画マスター", "name": "動画マスター", "cost": 350},
     "regular": {"kind": "badge", "label": "バッジ: ショップ常連", "name": "ショップ常連", "cost": 250},
     "sponsor": {"kind": "badge", "label": "バッジ: 村の支援者", "name": "村の支援者", "cost": 500},
+    "whale": {"kind": "badge", "label": "バッジ: 大富豪", "name": "大富豪", "cost": 750},
+    "collector": {"kind": "badge", "label": "バッジ: コレクター", "name": "コレクター", "cost": 400},
+    "penalty_skip": {"kind": "special", "label": "罰ゲーム免除券", "special_type": "penalty_immunity", "cost": 600},
+    "luck_boost": {"kind": "special", "label": "幸運のお守り", "special_type": "gamble_boost", "cost": 400},
 }
 
-PENALTY_GACHA_ITEMS = [
-    "3分以上の動画素材を編集して、進捗を報告する",
-    "7日以内に短い動画を1本投稿する",
-    "30分以上、編集作業通話のVCで作業する",
-    "今日中に動画企画を1つ書いて投稿する",
-    "未編集素材を1つ整理して、次にやる作業を宣言する",
+PENALTY_GACHA_LIGHT = [
     "次の発言でギャンブル敗北レポートを1行提出する",
     "今日だけ慎重派を名乗り、ギャンブルを自粛する",
     "負けた理由をかっこよく言い訳する",
     "コイン復活後の健全な目標を1つ宣言する",
-    "編集部屋VCに入れる時間を1つ宣言する",
     "おすすめ動画を1つ紹介して、良かった点を1行書く",
     "次のゲーム募集を1回立てる",
+    "未編集素材を1つ整理して、次にやる作業を宣言する",
+    "編集部屋VCに入れる時間を1つ宣言する",
+    "今日中に動画企画を1つ書いて投稿する",
+]
+
+PENALTY_GACHA_HEAVY_TEMPLATES = [
+    {"template": "{minutes}分以上の尺を編集しなさい", "params": {"minutes": (3, 15)}},
+    {"template": "{days}日以内に動画を1本投稿しなさい", "params": {"days": (3, 14)}},
+    {"template": "合計{hours}時間以上の編集作業を行い、完了報告しなさい", "params": {"hours": (1, 5)}},
+    {"template": "作業通話VCに合計{hours}時間以上入室して作業しなさい", "params": {"hours": (1, 3)}},
+    {"template": "次の{days}日間、毎日編集の進捗報告をしなさい", "params": {"days": (3, 7)}},
+    {"template": "{days}日以内に{minutes}分以上の動画を企画から完成まで仕上げなさい", "params": {"days": (7, 14), "minutes": (3, 10)}},
+    {"template": "{hours}時間以上の配信または実況を{days}日以内に行いなさい", "params": {"hours": (1, 3), "days": (3, 7)}},
+    {"template": "今日中にサムネイルを{count}枚作成して共有しなさい", "params": {"count": (2, 5)}},
+    {"template": "動画の企画書を{count}本書いて投稿しなさい", "params": {"count": (1, 3)}},
+    {"template": "{days}日以内に他メンバーの動画を{count}本視聴し、各感想を書きなさい", "params": {"days": (3, 7), "count": (2, 5)}},
+    {"template": "{days}日以内に{minutes}分以上の切り抜き動画を作成しなさい", "params": {"days": (5, 10), "minutes": (2, 8)}},
+    {"template": "作業通話VCで{hours}時間以上作業し、成果物を提出しなさい", "params": {"hours": (2, 4)}},
 ]
 
 
@@ -255,14 +294,41 @@ async def apply_real_gambler_penalty(guild: discord.Guild, member: discord.Membe
     return expires_at, role_added
 
 
+def draw_penalty_gacha_light() -> str:
+    return random.choice(PENALTY_GACHA_LIGHT)
+
+
+def draw_penalty_gacha_heavy() -> str:
+    entry = random.choice(PENALTY_GACHA_HEAVY_TEMPLATES)
+    params = {k: random.randint(lo, hi) for k, (lo, hi) in entry["params"].items()}
+    return entry["template"].format(**params)
+
+
 def draw_penalty_gacha() -> str:
-    return random.choice(PENALTY_GACHA_ITEMS)
+    if random.random() < 0.3:
+        return draw_penalty_gacha_heavy()
+    return draw_penalty_gacha_light()
 
 
 def coin_shop_item_summary(data: dict) -> str:
     if data.get("kind") == "role":
         return f"{data['cost']}コイン / {data['days']}日"
+    if data.get("kind") == "special":
+        return f"{data['cost']}コイン / 1回"
     return f"{data['cost']}コイン / 永続"
+
+
+async def coin_shop_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    matches = []
+    for key, data in COIN_SHOP_ITEMS.items():
+        label = f"{data['label']} {coin_shop_item_summary(data)}"
+        if not current or current.lower() in label.lower() or current.lower() in key.lower():
+            matches.append(app_commands.Choice(name=label[:100], value=key))
+        if len(matches) >= 25:
+            break
+    return matches
 
 
 async def add_unique_json_value(key: str, value: str, limit: int = 30) -> bool:
@@ -619,21 +685,9 @@ class Community(commands.Cog):
         await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
 
     @app_commands.command(name="coin_shop", description="コインでロール、称号、バッジを交換します")
-    @app_commands.describe(item="交換する商品。未指定なら一覧を表示します")
-    @app_commands.choices(
-        item=[
-            app_commands.Choice(name="赤カラー 300コイン / 7日", value="red"),
-            app_commands.Choice(name="青カラー 300コイン / 7日", value="blue"),
-            app_commands.Choice(name="緑カラー 300コイン / 7日", value="green"),
-            app_commands.Choice(name="紫カラー 300コイン / 7日", value="purple"),
-            app_commands.Choice(name="金カラー 500コイン / 7日", value="gold"),
-            app_commands.Choice(name="称号: 編集見習い 120コイン", value="editor"),
-            app_commands.Choice(name="称号: 幸運の村民 180コイン", value="lucky"),
-            app_commands.Choice(name="バッジ: ショップ常連 250コイン", value="regular"),
-            app_commands.Choice(name="バッジ: 村の支援者 500コイン", value="sponsor"),
-        ]
-    )
-    async def coin_shop(self, interaction: discord.Interaction, item: app_commands.Choice[str] | None = None):
+    @app_commands.describe(item="交換する商品名。未指定なら一覧を表示します")
+    @app_commands.autocomplete(item=coin_shop_autocomplete)
+    async def coin_shop(self, interaction: discord.Interaction, item: str | None = None):
         if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
@@ -645,14 +699,14 @@ class Community(commands.Cog):
             ]
             embed = discord.Embed(
                 title="コインショップ",
-                description="期間限定ロール、称号、バッジを交換できます。\n\n" + "\n".join(lines),
+                description="ロール、称号、バッジ、特殊アイテムを交換できます。\n\n" + "\n".join(lines),
                 color=0xF1C40F,
             )
             embed.set_footer(text="/coin_shop item:商品名 で交換できます。")
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        item_key = item.value
+        item_key = item
         data = COIN_SHOP_ITEMS.get(item_key)
         if not data:
             await interaction.response.send_message("その商品は見つかりませんでした。", ephemeral=True)
@@ -705,6 +759,17 @@ class Community(commands.Cog):
         elif kind == "badge":
             await add_unique_json_value(badges_key(interaction.guild_id, interaction.user.id), data["name"])
             result_text = "バッジはプロフィールに永続保存されます。"
+        elif kind == "special":
+            special_type = data.get("special_type")
+            if special_type == "penalty_immunity":
+                await db_set(penalty_immunity_key(interaction.guild_id, interaction.user.id), "1")
+                result_text = "次回の罰ゲームが免除されます（1回限り）。"
+            elif special_type == "gamble_boost":
+                await db_set(gamble_boost_key(interaction.guild_id, interaction.user.id), "1")
+                result_text = "次回のギャンブルで当選確率がUPします（1回限り）。"
+            else:
+                await interaction.response.send_message("その特殊アイテムはまだ対応していません。", ephemeral=True)
+                return
         else:
             await interaction.response.send_message("その商品種別はまだ対応していません。", ephemeral=True)
             return
@@ -809,7 +874,14 @@ class Community(commands.Cog):
                 ephemeral=True,
             )
             return
-        if random.random() < 0.45:
+        has_boost = await db_get(gamble_boost_key(interaction.guild_id, interaction.user.id))
+        win_rate = 0.55 if has_boost else 0.45
+        boost_text = ""
+        if has_boost:
+            await db_set(gamble_boost_key(interaction.guild_id, interaction.user.id), "")
+            boost_text = "\n🍀 幸運のお守りを使用しました（当選確率UP済み）"
+
+        if random.random() < win_rate:
             bonus_percent = random.randint(10, 100)
             profit = max(1, amount * bonus_percent // 100)
             new_balance = current + profit
@@ -818,18 +890,20 @@ class Community(commands.Cog):
             reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
             await interaction.response.send_message(
                 f"当たり！ {interaction.user.mention} は **{amount}** コインを賭けて "
-                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
+                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。{boost_text}{reward_text}"
             )
             return
 
         loss = amount if random.random() < 0.65 else max(1, amount // 2)
         new_balance = max(0, current - loss)
         await db_set(key, str(new_balance))
-        zero_lock_text = ""
+
+        has_immunity = await db_get(penalty_immunity_key(interaction.guild_id, interaction.user.id))
+
+        extra_text = ""
         if new_balance == 0:
             locked_until = await lock_coin_gamble_for_24h(interaction.guild_id, interaction.user.id)
             remaining = format_remaining(locked_until - utc_now())
-            penalty = draw_penalty_gacha()
             role_text = ""
             if isinstance(interaction.user, discord.Member) and interaction.guild:
                 role_expires_at, role_added = await apply_real_gambler_penalty(interaction.guild, interaction.user)
@@ -838,14 +912,28 @@ class Community(commands.Cog):
                     role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** を **{role_remaining}** 付与しました。"
                 else:
                     role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** は付与済み、または権限不足で付与できませんでした。"
-            zero_lock_text = (
+            if has_immunity:
+                await db_set(penalty_immunity_key(interaction.guild_id, interaction.user.id), "")
+                penalty_text = "🛡 罰ゲーム免除券を使用して罰ゲームを回避しました！"
+            else:
+                penalty = draw_penalty_gacha_heavy()
+                penalty_text = f"強化罰ゲームガチャが自動発生: **{penalty}**"
+            extra_text = (
                 f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
                 f"{role_text}"
-                f"\n強化罰ゲームガチャが自動発生: **{penalty}**"
+                f"\n{penalty_text}"
             )
+        elif amount >= current // 2:
+            if has_immunity:
+                await db_set(penalty_immunity_key(interaction.guild_id, interaction.user.id), "")
+                extra_text = "\n🛡 罰ゲーム免除券を使用して罰ゲームを回避しました！"
+            else:
+                penalty = draw_penalty_gacha_light()
+                extra_text = f"\n大勝負の代償...罰ゲーム発生: **{penalty}**"
+
         await interaction.response.send_message(
             f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
-            f"現在 **{new_balance}** コインです。{zero_lock_text}"
+            f"現在 **{new_balance}** コインです。{boost_text}{extra_text}"
         )
 
     @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
@@ -1092,6 +1180,108 @@ class Community(commands.Cog):
             f"報告を送信しました。送信先: **{', '.join(sent_to)}**",
             ephemeral=True,
         )
+
+    @app_commands.command(name="penalty_vc_channel", description="【管理者】罰ゲームVC移動先チャンネルを設定します")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(channel="罰ゲーム対象者が移動される作業通話VCチャンネル")
+    async def penalty_vc_channel(self, interaction: discord.Interaction, channel: discord.VoiceChannel):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(vc_penalty_channel_key(interaction.guild_id), str(channel.id))
+        await interaction.response.send_message(
+            f"罰ゲームVC移動先を {channel.mention} に設定しました。",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="penalty_vc_assign", description="【管理者】メンバーにVC入室罰を割り当てます")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(member="対象メンバー", hours="VC入室が必要な合計時間", days="期限（日数）")
+    async def penalty_vc_assign(
+        self, interaction: discord.Interaction, member: discord.Member, hours: int = 1, days: int = 7
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        vc_channel_id = await db_get(vc_penalty_channel_key(interaction.guild_id))
+        if not vc_channel_id:
+            await interaction.response.send_message(
+                "先に `/penalty_vc_channel` で移動先VCを設定してください。", ephemeral=True
+            )
+            return
+        expires_at = utc_now() + timedelta(days=max(1, days))
+        records = await get_json(vc_penalties_key(interaction.guild_id), [])
+        records = [r for r in records if int(r.get("user_id", 0)) != member.id]
+        records.append({
+            "user_id": member.id,
+            "hours_required": max(1, hours),
+            "assigned_at": utc_now().isoformat(),
+            "expires_at": expires_at.isoformat(),
+        })
+        await set_json(vc_penalties_key(interaction.guild_id), records[-200:])
+        await interaction.response.send_message(
+            f"{member.mention} にVC入室罰を割り当てました。\n"
+            f"作業通話VCに合計 **{hours}時間** の入室が必要です（期限: **{days}日間**）。\n"
+            "対象者がVCに参加すると自動的に作業通話VCへ移動されます。",
+        )
+
+    @app_commands.command(name="penalty_vc_status", description="VC入室罰の状態を確認します")
+    async def penalty_vc_status(self, interaction: discord.Interaction, member: discord.Member | None = None):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        member = member or interaction.user
+        records = await get_json(vc_penalties_key(interaction.guild_id), [])
+        now = utc_now()
+        active = [
+            r for r in records
+            if int(r.get("user_id", 0)) == member.id
+            and parse_utc(r.get("expires_at", "")) is not None
+            and parse_utc(r.get("expires_at", "")) > now
+        ]
+        if not active:
+            await interaction.response.send_message(
+                f"{member.mention} にはアクティブなVC入室罰はありません。", ephemeral=True
+            )
+            return
+        record = active[0]
+        expires_at = parse_utc(record["expires_at"])
+        remaining = format_remaining(expires_at - now) if expires_at else "不明"
+        await interaction.response.send_message(
+            f"{member.mention} のVC入室罰:\n"
+            f"必要時間: **{record.get('hours_required', '?')}時間**\n"
+            f"残り期限: **{remaining}**",
+            ephemeral=True,
+        )
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ):
+        if not after.channel or member.bot:
+            return
+        if before.channel and before.channel.id == after.channel.id:
+            return
+        vc_channel_id = int(await db_get(vc_penalty_channel_key(member.guild.id)) or "0")
+        if not vc_channel_id or after.channel.id == vc_channel_id:
+            return
+        records = await get_json(vc_penalties_key(member.guild.id), [])
+        now = utc_now()
+        active = [
+            r for r in records
+            if int(r.get("user_id", 0)) == member.id
+            and parse_utc(r.get("expires_at", "")) is not None
+            and parse_utc(r.get("expires_at", "")) > now
+        ]
+        if not active:
+            return
+        vc_channel = member.guild.get_channel(vc_channel_id)
+        if not isinstance(vc_channel, discord.VoiceChannel):
+            return
+        try:
+            await member.move_to(vc_channel, reason="VC penalty enforcement")
+        except discord.HTTPException:
+            pass
 
     @app_commands.command(name="archive_old_events", description="【管理者】古いイベント記録を整理します")
     @app_commands.default_permissions(manage_guild=True)

@@ -703,11 +703,13 @@ async def handle_help_site(request):
             <div class="tile"><strong>ほどほどに遊ぶ</strong>連続で賭け続けず、区切りを決めて遊ぶと長く楽しめます。</div>
             <div class="tile"><strong>休憩を入れる</strong>大きく負けた時や連敗した時は10分休憩。熱くなりすぎる前に止めるのが安心です。</div>
             <div class="tile"><strong>煽りすぎない</strong>「今日はここまで」と言った人には追加で煽らないようにしましょう。</div>
-            <div class="tile"><strong>0コイン時</strong>ギャンブルで0コインになった場合、その時点から24時間はギャンブルできません。</div>
+            <div class="tile"><strong>0コイン時</strong>ギャンブルで0コインになった場合、24時間ギャンブル禁止＋リアルギャンブラーロール付与（1週間）＋強化罰ゲームが発生します。</div>
+            <div class="tile"><strong>50%以上賭け</strong>所持コインの50%以上を賭けて負けると、軽い罰ゲームが発生します。</div>
           </div>
           <div class="notice">
-            <p><strong>軽い罰ゲームにするなら</strong><br>
-              安全で短く、笑って終われる内容にしてください。<code>/penalty_gacha</code> で軽い罰ゲームをランダムに引けます。
+            <p><strong>罰ゲームについて</strong><br>
+              <code>/penalty_gacha</code> で罰ゲームをランダムに引けます。動画編集・VC入室・投稿などの強化罰ゲームも含まれます。
+              コインショップで「罰ゲーム免除券」や「幸運のお守り」も購入できます。
             </p>
             <ul class="compact-list">
               <li>その日だけ軽い語尾を付ける</li>
@@ -741,7 +743,7 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "topic", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "penalty_vc", "title", "topic", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
           {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "birthday", "welcome", "ng_word", "backup"))}
         </section>
