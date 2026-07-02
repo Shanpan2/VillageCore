@@ -104,6 +104,10 @@ def badges_key(guild_id: int, user_id: int) -> str:
     return f"community_badges:{guild_id}:{user_id}"
 
 
+def penalty_task_key(guild_id: int, user_id: int) -> str:
+    return f"community_penalty_task:{guild_id}:{user_id}"
+
+
 COIN_MILESTONES = [
     {"coins": 50, "kind": "badge", "name": "小銭持ち"},
     {"coins": 100, "kind": "title", "name": "村の財布"},
@@ -153,6 +157,8 @@ PENALTY_GACHA_ITEMS = [
     "編集部屋VCに入れる時間を1つ宣言する",
     "おすすめ動画を1つ紹介して、良かった点を1行書く",
     "次のゲーム募集を1回立てる",
+    "次のアモアスで強制参加したうえで初手吊りされる（1回）",
+    "次のアモアス参加時に、名前を『ギャンカス〇〇〇』または『ギャンブラー〇〇』に変更する",
 ]
 
 
@@ -257,6 +263,39 @@ async def apply_real_gambler_penalty(guild: discord.Guild, member: discord.Membe
 
 def draw_penalty_gacha() -> str:
     return random.choice(PENALTY_GACHA_ITEMS)
+
+
+def format_datetime_jst(value: datetime | None) -> str:
+    if not value:
+        return "不明"
+    return value.astimezone(JST).strftime("%Y-%m-%d %H:%M")
+
+
+async def save_penalty_task(guild_id: int, user_id: int, penalty: str) -> dict:
+    task = {
+        "penalty": penalty,
+        "assigned_at": utc_now().isoformat(),
+        "deadline_at": (utc_now() + timedelta(days=7)).isoformat(),
+        "completed": False,
+        "completed_at": "",
+    }
+    await set_json(penalty_task_key(guild_id, user_id), task)
+    return task
+
+
+async def get_penalty_task(guild_id: int, user_id: int) -> dict | None:
+    task = await get_json(penalty_task_key(guild_id, user_id), None)
+    return task if isinstance(task, dict) else None
+
+
+async def complete_penalty_task(guild_id: int, user_id: int) -> bool:
+    task = await get_penalty_task(guild_id, user_id)
+    if not task or task.get("completed"):
+        return False
+    task["completed"] = True
+    task["completed_at"] = utc_now().isoformat()
+    await set_json(penalty_task_key(guild_id, user_id), task)
+    return True
 
 
 def coin_shop_item_summary(data: dict) -> str:
@@ -640,14 +679,20 @@ class Community(commands.Cog):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
 
+        owned_titles = await get_json(titles_key(interaction.guild_id, interaction.user.id), [])
+        owned_badges = await get_json(badges_key(interaction.guild_id, interaction.user.id), [])
         if item is None:
-            lines = [
-                f"- **{data['label']}**: {coin_shop_item_summary(data)}"
-                for data in COIN_SHOP_ITEMS.values()
-            ]
+            lines = []
+            for data in COIN_SHOP_ITEMS.values():
+                if data.get("kind") == "title" and data.get("name") in owned_titles:
+                    continue
+                if data.get("kind") == "badge" and data.get("name") in owned_badges:
+                    continue
+                lines.append(f"- **{data['label']}**: {coin_shop_item_summary(data)}")
             embed = discord.Embed(
                 title="コインショップ",
-                description="期間限定ロール、称号、バッジを交換できます。\n\n" + "\n".join(lines),
+                description="期間限定ロール、称号、バッジを交換できます。\n獲得済みの称号・バッジは一覧から非表示になります。\n\n"
+                + ("\n".join(lines) if lines else "現在交換できる未獲得の称号・バッジはありません。"),
                 color=0xF1C40F,
             )
             embed.set_footer(text="/coin_shop item:商品名 で交換できます。")
@@ -702,9 +747,21 @@ class Community(commands.Cog):
             await save_shop_expiration(interaction.guild_id, interaction.user.id, role.id, item_key, expires_at)
             result_text = f"期限: **{data['days']}日間**"
         elif kind == "title":
+            if data["name"] in owned_titles:
+                await interaction.response.send_message(
+                    f"称号 **{data['name']}** はすでに獲得済みです。コインは消費していません。",
+                    ephemeral=True,
+                )
+                return
             await add_unique_json_value(titles_key(interaction.guild_id, interaction.user.id), data["name"])
             result_text = "称号はプロフィールに永続保存されます。"
         elif kind == "badge":
+            if data["name"] in owned_badges:
+                await interaction.response.send_message(
+                    f"バッジ **{data['name']}** はすでに獲得済みです。コインは消費していません。",
+                    ephemeral=True,
+                )
+                return
             await add_unique_json_value(badges_key(interaction.guild_id, interaction.user.id), data["name"])
             result_text = "バッジはプロフィールに永続保存されます。"
         else:
@@ -832,6 +889,18 @@ class Community(commands.Cog):
             locked_until = await lock_coin_gamble_for_24h(interaction.guild_id, interaction.user.id)
             remaining = format_remaining(locked_until - utc_now())
             penalty = draw_penalty_gacha()
+            active_task = await get_penalty_task(interaction.guild_id, interaction.user.id)
+            if not active_task or active_task.get("completed"):
+                active_task = await save_penalty_task(interaction.guild_id, interaction.user.id, penalty)
+                penalty_text = (
+                    f"\n強化罰ゲームが発生: **{penalty}**"
+                    f"\n期限: **{format_datetime_jst(parse_utc(active_task.get('deadline_at', '')))}**"
+                )
+            else:
+                penalty_text = (
+                    f"\n未完了の強化罰ゲームがあります: **{active_task.get('penalty', '不明')}**"
+                    "\n新しい罰ゲームは追加しませんでした。"
+                )
             role_text = ""
             if isinstance(interaction.user, discord.Member) and interaction.guild:
                 role_expires_at, role_added = await apply_real_gambler_penalty(interaction.guild, interaction.user)
@@ -843,7 +912,8 @@ class Community(commands.Cog):
             zero_lock_text = (
                 f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
                 f"{role_text}"
-                f"\n強化罰ゲームガチャが自動発生: **{penalty}**"
+                f"{penalty_text}"
+                "\n`/penalty_status` で状態を確認できます。"
             )
         await interaction.response.send_message(
             f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
@@ -854,6 +924,47 @@ class Community(commands.Cog):
     async def penalty_gacha(self, interaction: discord.Interaction):
         penalty = draw_penalty_gacha()
         await interaction.response.send_message(f"罰ゲームガチャ: **{penalty}**")
+
+    @app_commands.command(name="penalty_status", description="現在の強化罰ゲームを確認します")
+    async def penalty_status(self, interaction: discord.Interaction, member: discord.Member | None = None):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        member = member or interaction.user
+        task = await get_penalty_task(interaction.guild_id, member.id)
+        if not task:
+            await interaction.response.send_message(f"{member.mention} に強化罰ゲームはありません。", ephemeral=True)
+            return
+
+        completed = bool(task.get("completed"))
+        deadline_at = parse_utc(task.get("deadline_at", ""))
+        completed_at = parse_utc(task.get("completed_at", ""))
+        status = "完了済み" if completed else "未完了"
+        embed = discord.Embed(
+            title=f"{member.display_name} の強化罰ゲーム",
+            color=0x2ECC71 if completed else 0xE67E22,
+        )
+        embed.add_field(name="内容", value=str(task.get("penalty") or "不明"), inline=False)
+        embed.add_field(name="状態", value=status, inline=True)
+        embed.add_field(name="期限", value=format_datetime_jst(deadline_at), inline=True)
+        if completed_at:
+            embed.add_field(name="完了日時", value=format_datetime_jst(completed_at), inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="penalty_complete", description="【管理者】メンバーの強化罰ゲームを完了にします")
+    @app_commands.default_permissions(manage_guild=True)
+    async def penalty_complete(self, interaction: discord.Interaction, member: discord.Member):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        completed = await complete_penalty_task(interaction.guild_id, member.id)
+        if not completed:
+            await interaction.response.send_message(
+                f"{member.mention} に未完了の強化罰ゲームはありません。",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(f"{member.mention} の強化罰ゲームを完了にしました。", ephemeral=True)
 
     @app_commands.command(name="coin_give", description="【管理者】メンバーにコインを付与します")
     @app_commands.default_permissions(manage_guild=True)

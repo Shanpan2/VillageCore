@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import random
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from discord.ext import commands
 ROLE_GUESSER_TOKEN = os.getenv("ROLE_GUESSER_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
 DATA_PATH = Path(__file__).with_name("data") / "roles.csv"
+INTRO_QUIZ_DATA_PATH = Path(__file__).with_name("data") / "intro_quiz.json"
 
 
 def parse_discord_id(value: str | None, name: str) -> int | None:
@@ -752,6 +754,49 @@ def normalize_mod_name(value: str | None) -> str:
     key = " ".join(key.split())
     compact_key = key.replace(" ", "")
     return MOD_ALIASES.get(key) or MOD_ALIASES.get(compact_key) or raw
+
+
+def load_intro_quiz_metadata() -> dict:
+    if not INTRO_QUIZ_DATA_PATH.exists():
+        return {"mods": {}, "roles": {}}
+    with INTRO_QUIZ_DATA_PATH.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
+    data = metadata or load_intro_quiz_metadata()
+    roles_data = data.get("roles", {})
+    role_key = role.name
+    mod_key = None
+    if role.mod:
+        mod_key = f"{role.mod}_{role.name}"
+    candidates = []
+    if mod_key:
+        candidates.append(mod_key)
+    if role.name:
+        candidates.append(role.name)
+    if role.display_name:
+        candidates.append(role.display_name)
+    if role.mod and role.display_name:
+        candidates.append(f"{role.mod}_{role.display_name}")
+    for candidate in candidates:
+        if candidate in roles_data:
+            return roles_data[candidate]
+    return None
+
+
+def filter_roles_for_intro_quiz(roles: list[Role], mod: str | None = None) -> list[Role]:
+    selected_mod = normalize_mod_name(mod) if mod else None
+    filtered = []
+    for role in roles:
+        if not selected_mod:
+            continue
+        if normalize_mod_name(role.mod).lower() != selected_mod.lower():
+            continue
+        if normalize_mod_name(role.mod) == "Vanilla":
+            continue
+        filtered.append(role)
+    return filtered
 
 
 TEAM_QUESTION_KEYS = {
@@ -1624,6 +1669,41 @@ def build_quiz_embed(answer: Role, choices: list[Role], selected_mod: str | None
     )
 
 
+def build_intro_quiz_embed(answer: Role, choices: list[Role], selected_mod: str | None = None) -> discord.Embed:
+    metadata = load_intro_quiz_metadata()
+    meta = find_intro_quiz_metadata(answer, metadata)
+    mod_meta = metadata.get("mods", {}).get(answer.mod)
+    mod_label = mod_meta.get("label") if mod_meta else answer.mod
+    intro_text = meta.get("intro_text") if meta else None
+    wiki_url = meta.get("wiki_url") if meta else None
+    if not wiki_url and mod_meta:
+        wiki_url = mod_meta.get("wiki_url")
+
+    mod_line = f"対象MOD: `{selected_mod or mod_label}`\n" if selected_mod or mod_label else "対象MOD: `すべて`\n"
+    description = (
+        f"{mod_line}"
+        "次の短い説明だけで、どの役職か当ててください。\n\n"
+    )
+    if intro_text:
+        description += f"説明: {intro_text}\n\n"
+    else:
+        description += "説明: 役職の特徴を短く示します。\n\n"
+    options = "\n".join(
+        f"{index + 1}. {role_label(role)}"
+        for index, role in enumerate(choices)
+    )
+    embed = discord.Embed(
+        title="イントロクイズ",
+        description=description + options,
+        color=0x1ABC9C,
+    )
+    if wiki_url:
+        embed.add_field(name="参考リンク", value=f"[Wiki]({wiki_url})", inline=False)
+    else:
+        embed.add_field(name="参考リンク", value="未登録", inline=False)
+    return embed
+
+
 def single_group_result(roles: list[Role]) -> discord.Embed | None:
     display_names = {role.display_name for role in roles}
     if len(display_names) != 1:
@@ -1962,6 +2042,12 @@ class QuizView(discord.ui.View):
         correct = selected.name == self.answer_role.name
         color = 0x2ECC71 if correct else 0xE74C3C
         result = "正解です！" if correct else "不正解です。"
+        metadata = load_intro_quiz_metadata()
+        quiz_meta = find_intro_quiz_metadata(self.answer_role, metadata)
+        mod_meta = metadata.get("mods", {}).get(self.answer_role.mod)
+        wiki_url = quiz_meta.get("wiki_url") if quiz_meta else None
+        if not wiki_url and mod_meta:
+            wiki_url = mod_meta.get("wiki_url")
         embed = discord.Embed(
             title="役職クイズ",
             description=(
@@ -1972,6 +2058,10 @@ class QuizView(discord.ui.View):
             ),
             color=color,
         )
+        if wiki_url:
+            embed.add_field(name="参考リンク", value=f"[Wiki]({wiki_url})", inline=False)
+        else:
+            embed.add_field(name="参考リンク", value="未登録", inline=False)
         await interaction.response.edit_message(embed=embed, view=None)
 
 
@@ -2051,31 +2141,37 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
 
 
 @role_bot.tree.command(name="quiz", description="Among Us系Modの役職クイズを出します")
-@app_commands.describe(mod="出題するMOD名。未指定なら全MODから出題します")
+@app_commands.describe(mod="出題するMOD名。必須です")
 @app_commands.autocomplete(mod=mod_autocomplete)
-async def quiz(interaction: discord.Interaction, mod: str | None = None):
+async def quiz(interaction: discord.Interaction, mod: str):
     roles = load_roles()
     if not roles:
         await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
         return
 
     selected_mod = normalize_mod_name(mod) if mod else ""
-    if selected_mod:
-        matched_roles = [role for role in roles if role.mod.lower() == selected_mod.lower()]
-        if not matched_roles:
-            mods = ", ".join(sorted({role.mod for role in roles}))
-            await interaction.response.send_message(
-                f"`{selected_mod}` は登録されていません。\n登録MOD: {mods or 'なし'}",
-                ephemeral=True,
-            )
-            return
-        roles = matched_roles
-        selected_mod = roles[0].mod
-    else:
-        selected_mod = None
+    if not selected_mod:
+        await interaction.response.send_message("イントロクイズは MOD 指定必須です。対象の MOD を指定してください。", ephemeral=True)
+        return
+
+    matched_roles = [role for role in roles if role.mod.lower() == selected_mod.lower()]
+    if not matched_roles:
+        mods = ", ".join(sorted({role.mod for role in roles}))
+        await interaction.response.send_message(
+            f"`{selected_mod}` は登録されていません。\n登録MOD: {mods or 'なし'}",
+            ephemeral=True,
+        )
+        return
+    roles = matched_roles
+    selected_mod = roles[0].mod
+
+    intro_roles = filter_roles_for_intro_quiz(roles, selected_mod)
+    if len(intro_roles) < 2:
+        await interaction.response.send_message("イントロクイズを作るには、対象MODに2件以上の役職が必要です。", ephemeral=True)
+        return
 
     unique_roles = {}
-    for role in roles:
+    for role in intro_roles:
         unique_roles.setdefault((role.display_name, feature_signature(role)), role)
     quiz_roles = list(unique_roles.values())
     if len(quiz_roles) < 2:
@@ -2087,6 +2183,15 @@ async def quiz(interaction: discord.Interaction, mod: str | None = None):
     choice_count = min(4, len(quiz_roles))
     choices = random.sample(distractors, k=choice_count - 1) + [answer]
     random.shuffle(choices)
+
+    metadata = load_intro_quiz_metadata()
+    intro_meta = find_intro_quiz_metadata(answer, metadata)
+    if intro_meta:
+        await interaction.response.send_message(
+            embed=build_intro_quiz_embed(answer, choices, selected_mod),
+            view=QuizView(interaction.user.id, answer, choices),
+        )
+        return
 
     await interaction.response.send_message(
         embed=build_quiz_embed(answer, choices, selected_mod),
