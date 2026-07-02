@@ -921,9 +921,28 @@ class Community(commands.Cog):
         )
 
     @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
-    async def penalty_gacha(self, interaction: discord.Interaction):
+    @app_commands.describe(member="【管理者のみ】別のメンバーの代わりに引く場合は指定してください")
+    @app_commands.default_permissions(manage_guild=True)
+    async def penalty_gacha(self, interaction: discord.Interaction, member: discord.Member | None = None):
+        # メンバーが指定されていない場合は、管理者は誰でも実行可能、非管理者は自分自身のみ
+        if member is None:
+            target_member = interaction.user
+        else:
+            # メンバーが指定されている場合は、管理者のみ実行可能
+            is_admin = interaction.user.guild_permissions.manage_guild
+            if not is_admin:
+                await interaction.response.send_message(
+                    "他のメンバーの代わりに罰ゲームを引けるのは管理者だけです。",
+                    ephemeral=True,
+                )
+                return
+            target_member = member
+
         penalty = draw_penalty_gacha()
-        await interaction.response.send_message(f"罰ゲームガチャ: **{penalty}**")
+        if member is None:
+            await interaction.response.send_message(f"罰ゲームガチャ: **{penalty}**")
+        else:
+            await interaction.response.send_message(f"{target_member.mention} の罰ゲームガチャ: **{penalty}**")
 
     @app_commands.command(name="penalty_status", description="現在の強化罰ゲームを確認します")
     async def penalty_status(self, interaction: discord.Interaction, member: discord.Member | None = None):
