@@ -2170,10 +2170,52 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
     await start_guess_session(interaction, mod)
 
 
-@role_bot.tree.command(name="quiz", description="Among Us系Modのイントロクイズを出します")
+@role_bot.tree.command(name="quiz", description="Among Us系Modの通常クイズを出します")
 @app_commands.describe(mod="出題するMOD名。必須です")
 @app_commands.autocomplete(mod=mod_autocomplete)
 async def quiz(interaction: discord.Interaction, mod: str):
+    roles = load_roles()
+    if not roles:
+        await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
+        return
+
+    selected_mod = normalize_mod_name(mod) if mod else ""
+    if not selected_mod:
+        await interaction.response.send_message("クイズは MOD 指定必須です。対象の MOD を指定してください。", ephemeral=True)
+        return
+
+    matched_roles = [role for role in roles if role.mod.lower() == selected_mod.lower()]
+    if not matched_roles:
+        mods = ", ".join(sorted({role.mod for role in roles}))
+        await interaction.response.send_message(
+            f"`{selected_mod}` は登録されていません。\n登録MOD: {mods or 'なし'}",
+            ephemeral=True,
+        )
+        return
+    roles = matched_roles
+    selected_mod = roles[0].mod
+
+    quiz_roles = [role for role in roles if role.mod == selected_mod]
+    if len(quiz_roles) < 2:
+        await interaction.response.send_message("クイズを作るには、候補役職が2件以上必要です。", ephemeral=True)
+        return
+
+    answer = random.choice(quiz_roles)
+    distractors = [role for role in quiz_roles if role.name != answer.name]
+    choice_count = min(4, len(quiz_roles))
+    choices = random.sample(distractors, k=choice_count - 1) + [answer]
+    random.shuffle(choices)
+
+    await interaction.response.send_message(
+        embed=build_quiz_embed(answer, choices, selected_mod),
+        view=QuizView(interaction.user.id, answer, choices),
+    )
+
+
+@role_bot.tree.command(name="introquiz", description="Among Us系Modのイントロクイズを出します")
+@app_commands.describe(mod="出題するMOD名。必須です")
+@app_commands.autocomplete(mod=mod_autocomplete)
+async def introquiz(interaction: discord.Interaction, mod: str):
     roles = load_roles()
     if not roles:
         await interaction.response.send_message("役職データがまだありません。", ephemeral=True)
@@ -2214,16 +2256,8 @@ async def quiz(interaction: discord.Interaction, mod: str):
     choices = random.sample(distractors, k=choice_count - 1) + [answer]
     random.shuffle(choices)
 
-    metadata = load_intro_quiz_metadata()
-    if has_intro_quiz_support(answer, metadata):
-        await interaction.response.send_message(
-            embed=build_intro_quiz_embed(answer, choices, selected_mod),
-            view=QuizView(interaction.user.id, answer, choices),
-        )
-        return
-
     await interaction.response.send_message(
-        embed=build_quiz_embed(answer, choices, selected_mod),
+        embed=build_intro_quiz_embed(answer, choices, selected_mod),
         view=QuizView(interaction.user.id, answer, choices),
     )
 

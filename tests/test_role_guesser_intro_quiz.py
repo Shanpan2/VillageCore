@@ -8,6 +8,7 @@ from role_guesser.bot import (
     build_intro_quiz_embed,
     filter_roles_for_intro_quiz,
     find_intro_quiz_metadata,
+    has_intro_quiz_support,
     load_intro_quiz_metadata,
 )
 
@@ -59,3 +60,10 @@ def test_intro_quiz_embed_falls_back_to_mod_wiki_when_role_wiki_is_placeholder(m
 
     assert embed.title == "イントロクイズ"
     assert "https://example.com/toh" in embed.fields[0].value
+
+
+def test_has_intro_quiz_support_uses_mod_metadata_when_role_entry_is_missing():
+    metadata = {"mods": {"TOH": {"wiki_url": "https://example.com/toh"}}, "roles": {}}
+    role = Role(name="Sheriff", display_name="シェリフ", mod="TOH", features={})
+
+    assert has_intro_quiz_support(role, metadata) is True
