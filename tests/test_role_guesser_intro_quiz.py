@@ -48,6 +48,23 @@ def test_intro_quiz_metadata_treats_placeholder_wiki_as_missing():
     assert item["wiki_url"] is None
 
 
+def test_intro_quiz_metadata_matches_prefixed_role_name_to_plain_json_key():
+    metadata = {
+        "roles": {
+            "EvilHacker": {
+                "intro_text": "システムをハッキングせよ",
+                "wiki_url": "https://example.com/evilhacker",
+            }
+        }
+    }
+    role = Role(name="SNR_EvilHacker", display_name="イビルハッカー", mod="SNR", features={})
+
+    item = find_intro_quiz_metadata(role, metadata)
+
+    assert item is not None
+    assert item["wiki_url"] == "https://example.com/evilhacker"
+
+
 def test_intro_quiz_embed_falls_back_to_mod_wiki_when_role_wiki_is_placeholder(monkeypatch):
     metadata = {
         "mods": {"TOH": {"wiki_url": "https://example.com/toh"}},

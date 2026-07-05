@@ -786,22 +786,36 @@ def _normalize_intro_quiz_entry(entry: object) -> dict | None:
     return cleaned
 
 
-def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
-    data = metadata or load_intro_quiz_metadata()
-    roles_data = data.get("roles", {})
-    mod_key = None
-    if role.mod:
-        mod_key = f"{role.mod}_{role.name}"
-    candidates = []
-    if mod_key:
-        candidates.append(mod_key)
+def _intro_quiz_role_candidates(role: Role) -> list[str]:
+    candidates: list[str] = []
+    if role.mod and role.name:
+        candidates.append(f"{role.mod}_{role.name}")
     if role.name:
         candidates.append(role.name)
     if role.display_name:
         candidates.append(role.display_name)
     if role.mod and role.display_name:
         candidates.append(f"{role.mod}_{role.display_name}")
+    if role.name and "_" in role.name:
+        _, suffix = role.name.split("_", 1)
+        if suffix:
+            candidates.append(suffix)
+            if role.mod:
+                candidates.append(f"{role.mod}_{suffix}")
+    # preserve insertion order while removing duplicates
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
     for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
+    data = metadata or load_intro_quiz_metadata()
+    roles_data = data.get("roles", {})
+    for candidate in _intro_quiz_role_candidates(role):
         if candidate in roles_data:
             return _normalize_intro_quiz_entry(roles_data[candidate])
     return None
