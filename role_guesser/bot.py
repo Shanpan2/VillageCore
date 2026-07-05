@@ -2272,6 +2272,25 @@ async def roles(interaction: discord.Interaction):
     )
 
 
+@role_bot.tree.command(name="help", description="Roles Guesserの使い方を表示します")
+async def help(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        embed=discord.Embed(
+            title="Roles Guesser ヘルプ",
+            description=(
+                "以下のコマンドで役職当て・クイズを遊べます。\n"
+                "`mod` は MOD 名を指定してください。\n"
+                "`/guess` は質問に答えて役職を当てるモードです。\n"
+                "`/quiz` は通常の役職クイズです。\n"
+                "`/introquiz` は `intro_quiz.json` に登録された短い説明とリンクを使うイントロクイズです。\n"
+                "`/roles` は登録済みの役職数と MOD を表示します。"
+            ),
+            color=0x3498DB,
+        ),
+        ephemeral=True,
+    )
+
+
 async def start_role_guesser_bot() -> None:
     if not ROLE_GUESSER_TOKEN:
         print("ROLE_GUESSER_TOKEN is not set; Role Guesser bot skipped.", flush=True)
