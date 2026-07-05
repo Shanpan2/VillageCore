@@ -763,10 +763,32 @@ def load_intro_quiz_metadata() -> dict:
         return json.load(file)
 
 
+def _normalize_intro_quiz_wiki_url(url: object) -> str | None:
+    if not isinstance(url, str):
+        return None
+    normalized = url.strip()
+    if not normalized:
+        return None
+    placeholder_values = {"未登録", "none", "null", "n/a", "-", "(未登録)"}
+    if normalized.lower() in {value.lower() for value in placeholder_values}:
+        return None
+    return normalized
+
+
+def _normalize_intro_quiz_entry(entry: object) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+    cleaned = dict(entry)
+    wiki_url = _normalize_intro_quiz_wiki_url(cleaned.get("wiki_url"))
+    cleaned["wiki_url"] = wiki_url
+    if not cleaned.get("intro_text"):
+        cleaned["intro_text"] = None
+    return cleaned
+
+
 def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
     data = metadata or load_intro_quiz_metadata()
     roles_data = data.get("roles", {})
-    role_key = role.name
     mod_key = None
     if role.mod:
         mod_key = f"{role.mod}_{role.name}"
@@ -781,8 +803,16 @@ def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict |
         candidates.append(f"{role.mod}_{role.display_name}")
     for candidate in candidates:
         if candidate in roles_data:
-            return roles_data[candidate]
+            return _normalize_intro_quiz_entry(roles_data[candidate])
     return None
+
+
+def has_intro_quiz_support(role: Role, metadata: dict | None = None) -> bool:
+    data = metadata or load_intro_quiz_metadata()
+    if find_intro_quiz_metadata(role, data):
+        return True
+    mod_meta = data.get("mods", {}).get(role.mod)
+    return bool(mod_meta and (mod_meta.get("wiki_url") or mod_meta.get("label")))
 
 
 def filter_roles_for_intro_quiz(roles: list[Role], mod: str | None = None) -> list[Role]:
@@ -2140,7 +2170,7 @@ async def guess(interaction: discord.Interaction, mod: str | None = None):
     await start_guess_session(interaction, mod)
 
 
-@role_bot.tree.command(name="quiz", description="Among Us系Modの役職クイズを出します")
+@role_bot.tree.command(name="quiz", description="Among Us系Modのイントロクイズを出します")
 @app_commands.describe(mod="出題するMOD名。必須です")
 @app_commands.autocomplete(mod=mod_autocomplete)
 async def quiz(interaction: discord.Interaction, mod: str):
@@ -2185,8 +2215,7 @@ async def quiz(interaction: discord.Interaction, mod: str):
     random.shuffle(choices)
 
     metadata = load_intro_quiz_metadata()
-    intro_meta = find_intro_quiz_metadata(answer, metadata)
-    if intro_meta:
+    if has_intro_quiz_support(answer, metadata):
         await interaction.response.send_message(
             embed=build_intro_quiz_embed(answer, choices, selected_mod),
             view=QuizView(interaction.user.id, answer, choices),
