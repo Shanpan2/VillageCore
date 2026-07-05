@@ -839,10 +839,39 @@ def _build_intro_quiz_mod_index(data: dict) -> dict[str, dict]:
     return index
 
 
+def _name_prefix_candidate(name: str | None) -> str | None:
+    """Extract a mod-like prefix directly from the role name itself.
+
+    Many intro_quiz.json keys follow a `PREFIX_RoleName` convention (e.g.
+    `SNR_EvilHacker`). If the CSV's `mod` column is ever inconsistent with
+    that prefix, falling back to the prefix embedded in the name keeps
+    lookups working regardless of the `mod` column's value.
+    """
+    if not name or "_" not in name:
+        return None
+    prefix, _, rest = name.partition("_")
+    if prefix and rest:
+        return prefix
+    return None
+
+
 def find_intro_quiz_mod_metadata(role: Role, metadata: dict | None = None) -> dict | None:
     data = metadata or load_intro_quiz_metadata()
     mod_index = _build_intro_quiz_mod_index(data)
-    return mod_index.get(_normalize_lookup_key(role.mod))
+
+    # 1) まずは通常通り mod 列の値で探す
+    found = mod_index.get(_normalize_lookup_key(role.mod))
+    if found:
+        return found
+
+    # 2) mod 列がズレていても拾えるよう、name のプレフィックスからも探す
+    name_prefix = _name_prefix_candidate(role.name)
+    if name_prefix:
+        found = mod_index.get(_normalize_lookup_key(name_prefix))
+        if found:
+            return found
+
+    return None
 
 def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
     data = metadata or load_intro_quiz_metadata()
@@ -858,7 +887,7 @@ def has_intro_quiz_support(role: Role, metadata: dict | None = None) -> bool:
     data = metadata or load_intro_quiz_metadata()
     if find_intro_quiz_metadata(role, data):
         return True
-    mod_meta = find_intro_quiz_mod_metadata(role, data)   # ← ここを変更
+    mod_meta = find_intro_quiz_mod_metadata(role, data)
     return bool(mod_meta and (mod_meta.get("wiki_url") or mod_meta.get("label")))
 
 def filter_roles_for_intro_quiz(roles: list[Role], mod: str | None = None) -> list[Role]:
