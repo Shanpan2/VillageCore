@@ -811,13 +811,46 @@ def _intro_quiz_role_candidates(role: Role) -> list[str]:
             unique_candidates.append(candidate)
     return unique_candidates
 
+def _normalize_lookup_key(value: str | None) -> str:
+    if not value:
+        return ""
+    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
+
+
+def _build_intro_quiz_role_index(data: dict) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for key, entry in data.get("roles", {}).items():
+        normalized_entry = _normalize_intro_quiz_entry(entry)
+        if normalized_entry is None:
+            continue
+        lookup_key = _normalize_lookup_key(key)
+        if lookup_key:
+            index[lookup_key] = normalized_entry
+    return index
+
+
+def _build_intro_quiz_mod_index(data: dict) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for key, entry in data.get("mods", {}).items():
+        if isinstance(entry, dict):
+            lookup_key = _normalize_lookup_key(key)
+            if lookup_key:
+                index[lookup_key] = entry
+    return index
+
+
+def find_intro_quiz_mod_metadata(role: Role, metadata: dict | None = None) -> dict | None:
+    data = metadata or load_intro_quiz_metadata()
+    mod_index = _build_intro_quiz_mod_index(data)
+    return mod_index.get(_normalize_lookup_key(role.mod))
 
 def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict | None:
     data = metadata or load_intro_quiz_metadata()
-    roles_data = data.get("roles", {})
+    role_index = _build_intro_quiz_role_index(data)
     for candidate in _intro_quiz_role_candidates(role):
-        if candidate in roles_data:
-            return _normalize_intro_quiz_entry(roles_data[candidate])
+        lookup_key = _normalize_lookup_key(candidate)
+        if lookup_key and lookup_key in role_index:
+            return role_index[lookup_key]
     return None
 
 
@@ -825,9 +858,8 @@ def has_intro_quiz_support(role: Role, metadata: dict | None = None) -> bool:
     data = metadata or load_intro_quiz_metadata()
     if find_intro_quiz_metadata(role, data):
         return True
-    mod_meta = data.get("mods", {}).get(role.mod)
+    mod_meta = find_intro_quiz_mod_metadata(role, data)   # ← ここを変更
     return bool(mod_meta and (mod_meta.get("wiki_url") or mod_meta.get("label")))
-
 
 def filter_roles_for_intro_quiz(roles: list[Role], mod: str | None = None) -> list[Role]:
     selected_mod = normalize_mod_name(mod) if mod else None
@@ -1716,7 +1748,7 @@ def build_quiz_embed(answer: Role, choices: list[Role], selected_mod: str | None
 def build_intro_quiz_embed(answer: Role, choices: list[Role], selected_mod: str | None = None) -> discord.Embed:
     metadata = load_intro_quiz_metadata()
     meta = find_intro_quiz_metadata(answer, metadata)
-    mod_meta = metadata.get("mods", {}).get(answer.mod)
+    mod_meta = find_intro_quiz_mod_metadata(answer, metadata)   # ← ここを変更
     mod_label = mod_meta.get("label") if mod_meta else answer.mod
     intro_text = meta.get("intro_text") if meta else None
     wiki_url = meta.get("wiki_url") if meta else None
@@ -2088,7 +2120,7 @@ class QuizView(discord.ui.View):
         result = "正解です！" if correct else "不正解です。"
         metadata = load_intro_quiz_metadata()
         quiz_meta = find_intro_quiz_metadata(self.answer_role, metadata)
-        mod_meta = metadata.get("mods", {}).get(self.answer_role.mod)
+        mod_meta = find_intro_quiz_mod_metadata(self.answer_role, metadata)   # ← ここを変更
         wiki_url = quiz_meta.get("wiki_url") if quiz_meta else None
         if not wiki_url and mod_meta:
             wiki_url = mod_meta.get("wiki_url")
