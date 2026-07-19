@@ -4,8 +4,11 @@ import csv
 import json
 import os
 import random
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -763,23 +766,66 @@ def load_intro_quiz_metadata() -> dict:
         return json.load(file)
 
 
+INTRO_QUIZ_WIKI_URL_KEYS = (
+    "wiki_url",
+    "wikiUrl",
+    "wikiURL",
+    "wiki",
+    "wiki_link",
+    "wikiLink",
+    "url",
+    "link",
+    "source_url",
+    "sourceUrl",
+    "reference_url",
+    "referenceUrl",
+)
+
+INTRO_QUIZ_WIKI_PLACEHOLDERS = {
+    "未登録",
+    "譛ｪ逋ｻ骭ｲ",
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "-",
+    "(未登録)",
+    "(譛ｪ逋ｻ骭ｲ)",
+}
+
+
 def _normalize_intro_quiz_wiki_url(url: object) -> str | None:
     if not isinstance(url, str):
         return None
     normalized = url.strip()
     if not normalized:
         return None
-    placeholder_values = {"未登録", "none", "null", "n/a", "-", "(未登録)"}
-    if normalized.lower() in {value.lower() for value in placeholder_values}:
+    if normalized.lower() in {value.lower() for value in INTRO_QUIZ_WIKI_PLACEHOLDERS}:
         return None
-    return normalized
+    markdown_match = re.search(r"\[[^\]]+\]\((https?://[^)\s]+)\)", normalized)
+    if markdown_match:
+        return markdown_match.group(1).strip()
+    url_match = re.search(r"https?://\S+", normalized)
+    if url_match:
+        return url_match.group(0).rstrip(")、)]}>")
+    return None
+
+
+def _extract_intro_quiz_wiki_url(entry: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(entry, Mapping):
+        return None
+    for key in INTRO_QUIZ_WIKI_URL_KEYS:
+        wiki_url = _normalize_intro_quiz_wiki_url(entry.get(key))
+        if wiki_url:
+            return wiki_url
+    return None
 
 
 def _normalize_intro_quiz_entry(entry: object) -> dict | None:
     if not isinstance(entry, dict):
         return None
     cleaned = dict(entry)
-    wiki_url = _normalize_intro_quiz_wiki_url(cleaned.get("wiki_url"))
+    wiki_url = _extract_intro_quiz_wiki_url(cleaned)
     cleaned["wiki_url"] = wiki_url
     if not cleaned.get("intro_text"):
         cleaned["intro_text"] = None
@@ -883,12 +929,29 @@ def find_intro_quiz_metadata(role: Role, metadata: dict | None = None) -> dict |
     return None
 
 
+def resolve_intro_quiz_wiki_url(
+    role: Role,
+    metadata: dict | None = None,
+    role_meta: Mapping[str, Any] | None = None,
+    mod_meta: Mapping[str, Any] | None = None,
+) -> str | None:
+    data = metadata or load_intro_quiz_metadata()
+    resolved_role_meta = role_meta if role_meta is not None else find_intro_quiz_metadata(role, data)
+    wiki_url = _extract_intro_quiz_wiki_url(resolved_role_meta)
+    if wiki_url:
+        return wiki_url
+
+    resolved_mod_meta = mod_meta if mod_meta is not None else find_intro_quiz_mod_metadata(role, data)
+    return _extract_intro_quiz_wiki_url(resolved_mod_meta)
+
+
 def has_intro_quiz_support(role: Role, metadata: dict | None = None) -> bool:
     data = metadata or load_intro_quiz_metadata()
-    if find_intro_quiz_metadata(role, data):
+    role_meta = find_intro_quiz_metadata(role, data)
+    if role_meta:
         return True
     mod_meta = find_intro_quiz_mod_metadata(role, data)
-    return bool(mod_meta and (mod_meta.get("wiki_url") or mod_meta.get("label")))
+    return bool(mod_meta and (resolve_intro_quiz_wiki_url(role, data, role_meta, mod_meta) or mod_meta.get("label")))
 
 def filter_roles_for_intro_quiz(roles: list[Role], mod: str | None = None) -> list[Role]:
     selected_mod = normalize_mod_name(mod) if mod else None
@@ -1780,9 +1843,7 @@ def build_intro_quiz_embed(answer: Role, choices: list[Role], selected_mod: str 
     mod_meta = find_intro_quiz_mod_metadata(answer, metadata)   # ← ここを変更
     mod_label = mod_meta.get("label") if mod_meta else answer.mod
     intro_text = meta.get("intro_text") if meta else None
-    wiki_url = meta.get("wiki_url") if meta else None
-    if not wiki_url and mod_meta:
-        wiki_url = mod_meta.get("wiki_url")
+    wiki_url = resolve_intro_quiz_wiki_url(answer, metadata, meta, mod_meta)
 
     mod_line = f"対象MOD: `{selected_mod or mod_label}`\n" if selected_mod or mod_label else "対象MOD: `すべて`\n"
     description = (
@@ -2150,9 +2211,7 @@ class QuizView(discord.ui.View):
         metadata = load_intro_quiz_metadata()
         quiz_meta = find_intro_quiz_metadata(self.answer_role, metadata)
         mod_meta = find_intro_quiz_mod_metadata(self.answer_role, metadata)   # ← ここを変更
-        wiki_url = quiz_meta.get("wiki_url") if quiz_meta else None
-        if not wiki_url and mod_meta:
-            wiki_url = mod_meta.get("wiki_url")
+        wiki_url = resolve_intro_quiz_wiki_url(self.answer_role, metadata, quiz_meta, mod_meta)
         embed = discord.Embed(
             title="役職クイズ",
             description=(
