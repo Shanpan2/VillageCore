@@ -9,6 +9,7 @@ CATEGORIES = {
         "emoji": "🛠️",
         "prefixes": (
             "admin",
+            "auto_kick",
             "bot_status",
             "backup",
             "birthday",

@@ -922,7 +922,6 @@ class Community(commands.Cog):
 
     @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
     @app_commands.describe(member="【管理者のみ】別のメンバーの代わりに引く場合は指定してください")
-    @app_commands.default_permissions(manage_guild=True)
     async def penalty_gacha(self, interaction: discord.Interaction, member: discord.Member | None = None):
         # メンバーが指定されていない場合は、管理者は誰でも実行可能、非管理者は自分自身のみ
         if member is None:

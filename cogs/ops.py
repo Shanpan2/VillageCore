@@ -92,8 +92,7 @@ class SetupGuideView(discord.ui.View):
     async def diagnostics(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "`/settings_status`\n"
-            "`/permission_audit`\n"
-            "`/bot_status`",
+            "`/permission_audit`",
             ephemeral=True,
         )
 
@@ -176,6 +175,7 @@ class Ops(commands.Cog):
         embed.add_field(name="役職パネル数", value=str(role_panels), inline=True)
         embed.add_field(name="FAQ数", value=str(faq_count), inline=True)
         embed.add_field(name="メンテナンス", value="ON" if await db_get(maintenance_key(guild_id)) == "on" else "OFF", inline=True)
+        embed.add_field(name="自動Kick", value="ON" if await db_get(f"welcome_auto_kick_{guild_id}") == "on" else "OFF", inline=True)
         embed.add_field(name="将棋判定", value=shogi_library_status(), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -189,6 +189,7 @@ class Ops(commands.Cog):
         )
         embed.add_field(name="まず確認", value="`/permission_audit` と `/settings_status`", inline=False)
         embed.add_field(name="最低限", value="ログ、チケットログ、通知先、通報先", inline=False)
+        embed.add_field(name="参加制限", value="新規参加を止めたい時だけ `/auto_kick_mode mode:on`", inline=False)
         await db_set(setup_done_key(interaction.guild_id), datetime.now(timezone.utc).isoformat())
         await interaction.response.send_message(embed=embed, view=SetupGuideView(), ephemeral=True)
 
@@ -240,6 +241,7 @@ class Ops(commands.Cog):
             "チャンネル管理": guild_perms.manage_channels,
             "ロール管理": guild_perms.manage_roles,
             "メッセージ管理": guild_perms.manage_messages,
+            "メンバーKick": guild_perms.kick_members,
             "メンバー表示": guild_perms.view_channel,
             "VC接続": guild_perms.connect,
             "VC発言": guild_perms.speak,

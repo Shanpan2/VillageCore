@@ -5,7 +5,7 @@ import json
 import os
 import random
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -779,6 +779,14 @@ INTRO_QUIZ_WIKI_URL_KEYS = (
     "sourceUrl",
     "reference_url",
     "referenceUrl",
+    "wiki_page",
+    "wikiPage",
+    "wiki_link_url",
+    "wikiLinkUrl",
+    "page_url",
+    "pageUrl",
+    "source",
+    "reference",
 )
 
 INTRO_QUIZ_WIKI_PLACEHOLDERS = {
@@ -792,6 +800,29 @@ INTRO_QUIZ_WIKI_PLACEHOLDERS = {
     "(未登録)",
     "(譛ｪ逋ｻ骭ｲ)",
 }
+
+INTRO_QUIZ_MOD_ALIASES = {
+    "snr": ("SuperNewRoles", "SuperNewRole"),
+    "supernewroles": ("SNR", "SuperNewRole"),
+    "supernewrole": ("SNR", "SuperNewRoles"),
+    "tohk": ("TownOfHost-K", "TownOfHostK", "TownOfHost_K"),
+    "townofhostk": ("TOHK", "TownOfHost-K", "TownOfHost_K"),
+    "exr": ("ExtremeRoles", "Extreme Roles"),
+    "extremeroles": ("ExR", "Extreme Roles"),
+    "nos": ("NebulaOnTheShip", "Nebula on the Ship"),
+    "nebulaontheship": ("NOS", "Nebula on the Ship"),
+}
+
+INTRO_QUIZ_ROLE_MOD_KEYS = ("mod", "source_mod", "sourceMod", "game_mod", "gameMod")
+INTRO_QUIZ_ROLE_NAME_KEYS = (
+    "name",
+    "display_name",
+    "displayName",
+    "role",
+    "role_name",
+    "roleName",
+    "id",
+)
 
 
 def _normalize_intro_quiz_wiki_url(url: object) -> str | None:
@@ -811,18 +842,41 @@ def _normalize_intro_quiz_wiki_url(url: object) -> str | None:
     return None
 
 
-def _extract_intro_quiz_wiki_url(entry: Mapping[str, Any] | None) -> str | None:
-    if not isinstance(entry, Mapping):
+def _extract_intro_quiz_wiki_url(entry: object, seen: set[int] | None = None) -> str | None:
+    wiki_url = _normalize_intro_quiz_wiki_url(entry)
+    if wiki_url:
+        return wiki_url
+    if entry is None or isinstance(entry, (str, bytes)):
         return None
-    for key in INTRO_QUIZ_WIKI_URL_KEYS:
-        wiki_url = _normalize_intro_quiz_wiki_url(entry.get(key))
-        if wiki_url:
-            return wiki_url
+
+    if seen is None:
+        seen = set()
+    entry_id = id(entry)
+    if entry_id in seen:
+        return None
+    seen.add(entry_id)
+
+    if isinstance(entry, Mapping):
+        for key in INTRO_QUIZ_WIKI_URL_KEYS:
+            if key not in entry:
+                continue
+            wiki_url = _extract_intro_quiz_wiki_url(entry.get(key), seen)
+            if wiki_url:
+                return wiki_url
+        for value in entry.values():
+            wiki_url = _extract_intro_quiz_wiki_url(value, seen)
+            if wiki_url:
+                return wiki_url
+    elif isinstance(entry, (list, tuple, set)):
+        for value in entry:
+            wiki_url = _extract_intro_quiz_wiki_url(value, seen)
+            if wiki_url:
+                return wiki_url
     return None
 
 
 def _normalize_intro_quiz_entry(entry: object) -> dict | None:
-    if not isinstance(entry, dict):
+    if not isinstance(entry, Mapping):
         return None
     cleaned = dict(entry)
     wiki_url = _extract_intro_quiz_wiki_url(cleaned)
@@ -832,35 +886,73 @@ def _normalize_intro_quiz_entry(entry: object) -> dict | None:
     return cleaned
 
 
-def _intro_quiz_role_candidates(role: Role) -> list[str]:
-    candidates: list[str] = []
-    if role.mod and role.name:
-        candidates.append(f"{role.mod}_{role.name}")
-    if role.name:
-        candidates.append(role.name)
-    if role.display_name:
-        candidates.append(role.display_name)
-    if role.mod and role.display_name:
-        candidates.append(f"{role.mod}_{role.display_name}")
-    if role.name and "_" in role.name:
-        _, suffix = role.name.split("_", 1)
-        if suffix:
-            candidates.append(suffix)
-            if role.mod:
-                candidates.append(f"{role.mod}_{suffix}")
-    # preserve insertion order while removing duplicates
+def _normalize_lookup_key(value: object | None) -> str:
+    if value is None:
+        return ""
+    return "".join(ch for ch in str(value).strip().casefold() if ch.isalnum())
+
+
+def _dedupe_intro_quiz_candidates(candidates: Iterable[object | None]) -> list[str]:
     seen: set[str] = set()
     unique_candidates: list[str] = []
     for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            unique_candidates.append(candidate)
+        if candidate is None:
+            continue
+        text = str(candidate).strip()
+        if not text:
+            continue
+        lookup_key = _normalize_lookup_key(text)
+        if not lookup_key or lookup_key in seen:
+            continue
+        seen.add(lookup_key)
+        unique_candidates.append(text)
     return unique_candidates
 
-def _normalize_lookup_key(value: str | None) -> str:
-    if not value:
-        return ""
-    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
+
+def _intro_quiz_mod_candidates(mod: str | None) -> list[str]:
+    if not mod:
+        return []
+    candidates: list[object | None] = [mod]
+    candidates.extend(INTRO_QUIZ_MOD_ALIASES.get(_normalize_lookup_key(mod), ()))
+    return _dedupe_intro_quiz_candidates(candidates)
+
+
+def _split_intro_quiz_role_name(value: str | None) -> tuple[str | None, str | None]:
+    if not value or "_" not in value:
+        return None, None
+    prefix, suffix = value.split("_", 1)
+    return prefix or None, suffix or None
+
+
+def _intro_quiz_role_name_candidates(role: Role) -> list[str]:
+    candidates: list[object | None] = []
+    if role.name:
+        candidates.append(role.name)
+        _, suffix = _split_intro_quiz_role_name(role.name)
+        candidates.append(suffix)
+    candidates.append(role.display_name)
+    return _dedupe_intro_quiz_candidates(candidates)
+
+
+def _intro_quiz_role_candidates(role: Role) -> list[str]:
+    role_names = _intro_quiz_role_name_candidates(role)
+    if not role.mod:
+        return role_names
+
+    candidates: list[object | None] = []
+    mod_candidates = _intro_quiz_mod_candidates(role.mod)
+    for mod_candidate in mod_candidates:
+        for role_name in role_names:
+            candidates.append(f"{mod_candidate}_{role_name}")
+            candidates.append(f"{mod_candidate}{role_name}")
+
+    name_prefix, _ = _split_intro_quiz_role_name(role.name)
+    if name_prefix:
+        normalized_prefix = _normalize_lookup_key(name_prefix)
+        if any(_normalize_lookup_key(mod_candidate) == normalized_prefix for mod_candidate in mod_candidates):
+            candidates.append(role.name)
+
+    return _dedupe_intro_quiz_candidates(candidates)
 
 
 def _build_intro_quiz_role_index(data: dict) -> dict[str, dict]:
@@ -872,16 +964,47 @@ def _build_intro_quiz_role_index(data: dict) -> dict[str, dict]:
         lookup_key = _normalize_lookup_key(key)
         if lookup_key:
             index[lookup_key] = normalized_entry
+
+        entry_mod = next(
+            (
+                normalized_entry.get(mod_key)
+                for mod_key in INTRO_QUIZ_ROLE_MOD_KEYS
+                if normalized_entry.get(mod_key)
+            ),
+            None,
+        )
+        if not entry_mod:
+            continue
+
+        entry_names = _dedupe_intro_quiz_candidates(
+            [
+                key,
+                *(normalized_entry.get(name_key) for name_key in INTRO_QUIZ_ROLE_NAME_KEYS),
+            ]
+        )
+        for mod_candidate in _intro_quiz_mod_candidates(str(entry_mod)):
+            for entry_name in entry_names:
+                _, stripped_name = _split_intro_quiz_role_name(entry_name)
+                for role_name in _dedupe_intro_quiz_candidates([entry_name, stripped_name]):
+                    for lookup_value in (
+                        f"{mod_candidate}_{role_name}",
+                        f"{mod_candidate}{role_name}",
+                    ):
+                        qualified_key = _normalize_lookup_key(lookup_value)
+                        if qualified_key:
+                            index[qualified_key] = normalized_entry
     return index
 
 
 def _build_intro_quiz_mod_index(data: dict) -> dict[str, dict]:
     index: dict[str, dict] = {}
     for key, entry in data.get("mods", {}).items():
-        if isinstance(entry, dict):
-            lookup_key = _normalize_lookup_key(key)
-            if lookup_key:
-                index[lookup_key] = entry
+        normalized_entry = _normalize_intro_quiz_entry(entry)
+        if normalized_entry is None:
+            continue
+        lookup_key = _normalize_lookup_key(key)
+        if lookup_key:
+            index[lookup_key] = normalized_entry
     return index
 
 
@@ -905,15 +1028,12 @@ def find_intro_quiz_mod_metadata(role: Role, metadata: dict | None = None) -> di
     data = metadata or load_intro_quiz_metadata()
     mod_index = _build_intro_quiz_mod_index(data)
 
-    # 1) まずは通常通り mod 列の値で探す
-    found = mod_index.get(_normalize_lookup_key(role.mod))
-    if found:
-        return found
+    candidates: list[object | None] = []
+    candidates.extend(_intro_quiz_mod_candidates(role.mod))
+    candidates.extend(_intro_quiz_mod_candidates(_name_prefix_candidate(role.name)))
 
-    # 2) mod 列がズレていても拾えるよう、name のプレフィックスからも探す
-    name_prefix = _name_prefix_candidate(role.name)
-    if name_prefix:
-        found = mod_index.get(_normalize_lookup_key(name_prefix))
+    for candidate in _dedupe_intro_quiz_candidates(candidates):
+        found = mod_index.get(_normalize_lookup_key(candidate))
         if found:
             return found
 
@@ -940,6 +1060,17 @@ def resolve_intro_quiz_wiki_url(
     wiki_url = _extract_intro_quiz_wiki_url(resolved_role_meta)
     if wiki_url:
         return wiki_url
+
+    role_index = _build_intro_quiz_role_index(data)
+    checked_keys: set[str] = set()
+    for candidate in _intro_quiz_role_candidates(role):
+        lookup_key = _normalize_lookup_key(candidate)
+        if not lookup_key or lookup_key in checked_keys:
+            continue
+        checked_keys.add(lookup_key)
+        wiki_url = _extract_intro_quiz_wiki_url(role_index.get(lookup_key))
+        if wiki_url:
+            return wiki_url
 
     resolved_mod_meta = mod_meta if mod_meta is not None else find_intro_quiz_mod_metadata(role, data)
     return _extract_intro_quiz_wiki_url(resolved_mod_meta)

@@ -8,6 +8,9 @@ class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def _auto_kick_key(self, guild_id: int) -> str:
+        return f"welcome_auto_kick_{guild_id}"
+
     def _welcome_channel_key(self, guild_id: int) -> str:
         return f"welcome_channel_{guild_id}"
 
@@ -34,6 +37,9 @@ class Welcome(commands.Cog):
         if not raw:
             return None
         return raw
+
+    async def _auto_kick_enabled(self, guild_id: int) -> bool:
+        return await db_get(self._auto_kick_key(guild_id)) == "on"
 
     def _format_welcome_message(self, member: discord.Member, template: str | None) -> str:
         if template is None:
@@ -167,8 +173,70 @@ class Welcome(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="auto_kick_mode",
+        description="【管理者】新規参加メンバーの自動Kickモードを切り替えます。"
+    )
+    @app_commands.describe(mode="onで自動Kick、offで停止、statusで現在状態を確認します。")
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="on", value="on"),
+            app_commands.Choice(name="off", value="off"),
+            app_commands.Choice(name="status", value="status"),
+        ]
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    async def auto_kick_mode(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "❌ このコマンドを使うにはサーバー管理権限が必要です。",
+                ephemeral=True,
+            )
+            return
+
+        if mode.value == "status":
+            enabled = await self._auto_kick_enabled(interaction.guild.id)
+            await interaction.response.send_message(
+                f"自動Kickモード: **{'ON' if enabled else 'OFF'}**",
+                ephemeral=True,
+            )
+            return
+
+        if mode.value == "on":
+            me = interaction.guild.me
+            if not me or not me.guild_permissions.kick_members:
+                await interaction.response.send_message(
+                    "❌ Botに「メンバーをキック」権限がないため、自動KickモードをONにできません。",
+                    ephemeral=True,
+                )
+                return
+            await db_set(self._auto_kick_key(interaction.guild.id), "on")
+            await interaction.response.send_message(
+                "✅ 自動KickモードをONにしました。以後、新規参加した通常メンバーを自動でKickします。",
+                ephemeral=True,
+            )
+            return
+
+        await db_set(self._auto_kick_key(interaction.guild.id), "off")
+        await interaction.response.send_message(
+            "✅ 自動KickモードをOFFにしました。新規参加メンバーはKickされません。",
+            ephemeral=True,
+        )
+
     @commands.Cog.listener()
     async def on_member_join(self, member):
+        if not member.bot and await self._auto_kick_enabled(member.guild.id):
+            me = member.guild.me
+            if me and me.guild_permissions.kick_members:
+                try:
+                    await member.kick(reason="Auto kick mode is enabled")
+                    return
+                except Exception as e:
+                    print(f"⚠️ Auto kick failed: {e}")
+
         channel = await self._get_send_channel(member)
 
         if channel is None:

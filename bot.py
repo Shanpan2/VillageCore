@@ -90,7 +90,6 @@ DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "attend_status",
     "attend_warnings",
     "attend_notify",
-    "setup_wizard",
     "error_log_channel",
     "command_log_channel",
     "permission_audit",
