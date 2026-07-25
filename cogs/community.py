@@ -84,6 +84,14 @@ def coin_daily_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_daily:{guild_id}:{user_id}"
 
 
+def coin_work_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin_work:{guild_id}:{user_id}"
+
+
+def coin_role_shop_key(guild_id: int) -> str:
+    return f"community_coin_role_shop:{guild_id}"
+
+
 def coin_gamble_lock_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_gamble_lock:{guild_id}:{user_id}"
 
@@ -209,6 +217,34 @@ async def lock_coin_gamble_until(guild_id: int, user_id: int, locked_until: date
 async def lock_coin_gamble_for_24h(guild_id: int, user_id: int) -> datetime:
     locked_until = utc_now() + timedelta(hours=24)
     return await lock_coin_gamble_until(guild_id, user_id, locked_until, "0コインになったため")
+
+
+async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
+    last_work = parse_utc(await db_get(coin_work_key(guild.id, member.id)))
+    now = utc_now()
+    cooldown = timedelta(minutes=20)
+    if last_work and now - last_work < cooldown:
+        remaining = format_remaining(cooldown - (now - last_work))
+        return False, f"まだ働けません。あと **{remaining}** 待ってください。"
+
+    amount = random.randint(8, 18)
+    balance_key = coin_key(guild.id, member.id)
+    current = int(await db_get(balance_key) or "0")
+    new_balance = current + amount
+    await db_set(balance_key, str(new_balance))
+    await db_set(coin_work_key(guild.id, member.id), now.isoformat())
+    rewards = await apply_coin_rewards(guild, member, new_balance)
+    reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+    return True, f"{member.mention} は仕事をして **{amount}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
+
+
+async def get_coin_role_shop(guild_id: int) -> dict[str, dict]:
+    raw = await get_json(coin_role_shop_key(guild_id), {})
+    return raw if isinstance(raw, dict) else {}
+
+
+async def set_coin_role_shop(guild_id: int, data: dict[str, dict]):
+    await set_json(coin_role_shop_key(guild_id), data)
 
 
 async def get_or_create_real_gambler_role(guild: discord.Guild) -> discord.Role | None:
@@ -659,6 +695,29 @@ class Community(commands.Cog):
         coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
         await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
 
+    @commands.command(name="balance")
+    async def balance_prefix(self, ctx: commands.Context, member: discord.Member | None = None):
+        if not ctx.guild:
+            return
+        member = member or ctx.author
+        coins = int(await db_get(coin_key(ctx.guild.id, member.id)) or "0")
+        await ctx.reply(f"{member.mention} のコイン: **{coins}**", mention_author=False)
+
+    @app_commands.command(name="coin_work", description="20分に1回仕事をしてコインを獲得します")
+    async def coin_work(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        ok, message = await perform_coin_work(interaction.guild, interaction.user)
+        await interaction.response.send_message(message, ephemeral=not ok)
+
+    @commands.command(name="work")
+    async def work_prefix(self, ctx: commands.Context):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return
+        ok, message = await perform_coin_work(ctx.guild, ctx.author)
+        await ctx.reply(message, mention_author=False)
+
     @app_commands.command(name="coin_shop", description="コインでロール、称号、バッジを交換します")
     @app_commands.describe(item="交換する商品。未指定なら一覧を表示します")
     @app_commands.choices(
@@ -774,6 +833,125 @@ class Community(commands.Cog):
             f"{interaction.user.mention} が **{data['label']}** を交換しました。\n"
             f"消費: **{data['cost']}** コイン / 残高: **{balance - data['cost']}** コイン\n"
             f"{result_text}",
+        )
+
+    @app_commands.command(name="coin_role_set", description="【管理者】コインで交換できるロールと価格を設定します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def coin_role_set(self, interaction: discord.Interaction, role: discord.Role, cost: int):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if cost <= 0:
+            await interaction.response.send_message("必要コインは1以上にしてください。", ephemeral=True)
+            return
+        bot_member = interaction.guild.me
+        if role == interaction.guild.default_role or role.managed:
+            await interaction.response.send_message("そのロールはショップに登録できません。", ephemeral=True)
+            return
+        if not bot_member or not bot_member.guild_permissions.manage_roles or role >= bot_member.top_role:
+            await interaction.response.send_message(
+                "Botが付与できないロールです。Botのロールを対象ロールより上に置き、「ロールの管理」権限を付けてください。",
+                ephemeral=True,
+            )
+            return
+
+        shop = await get_coin_role_shop(interaction.guild.id)
+        shop[str(role.id)] = {"role_id": role.id, "cost": cost, "name": role.name}
+        await set_coin_role_shop(interaction.guild.id, shop)
+        await interaction.response.send_message(
+            f"{role.mention} を **{cost}** コインで交換できるように設定しました。",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="coin_role_remove", description="【管理者】コイン交換ロールをショップから削除します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def coin_role_remove(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        shop = await get_coin_role_shop(interaction.guild.id)
+        removed = shop.pop(str(role.id), None)
+        await set_coin_role_shop(interaction.guild.id, shop)
+        if removed:
+            await interaction.response.send_message(f"{role.mention} をコインロールショップから削除しました。", ephemeral=True)
+        else:
+            await interaction.response.send_message("そのロールはコインロールショップに登録されていません。", ephemeral=True)
+
+    @app_commands.command(name="coin_role_shop", description="コインで交換できるロール一覧を表示します")
+    async def coin_role_shop(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        shop = await get_coin_role_shop(interaction.guild.id)
+        lines = []
+        changed = False
+        for role_id, data in list(shop.items()):
+            role = interaction.guild.get_role(int(data.get("role_id", role_id)))
+            if not role:
+                shop.pop(role_id, None)
+                changed = True
+                continue
+            lines.append(f"- {role.mention}: **{int(data.get('cost', 0))}** コイン")
+        if changed:
+            await set_coin_role_shop(interaction.guild.id, shop)
+
+        embed = discord.Embed(
+            title="コインロールショップ",
+            description="\n".join(lines) if lines else "現在、交換できるロールは設定されていません。",
+            color=0xF1C40F,
+        )
+        embed.set_footer(text="/coin_role_buy role:@ロール で交換できます。")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="coin_role_buy", description="コインで設定済みロールを交換します")
+    async def coin_role_buy(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        shop = await get_coin_role_shop(interaction.guild.id)
+        data = shop.get(str(role.id))
+        if not data:
+            await interaction.response.send_message("そのロールはコイン交換対象に設定されていません。", ephemeral=True)
+            return
+
+        bot_member = interaction.guild.me
+        if not bot_member or not bot_member.guild_permissions.manage_roles or role >= bot_member.top_role:
+            await interaction.response.send_message(
+                "Botがそのロールを付与できません。Botのロール位置と権限を確認してください。",
+                ephemeral=True,
+            )
+            return
+
+        cost = int(data.get("cost", 0))
+        balance_key = coin_key(interaction.guild.id, interaction.user.id)
+        balance = int(await db_get(balance_key) or "0")
+        if balance < cost:
+            await interaction.response.send_message(
+                f"コインが足りません。必要: **{cost}** / 現在: **{balance}**",
+                ephemeral=True,
+            )
+            return
+        if role in interaction.user.roles:
+            await interaction.response.send_message(f"{role.mention} はすでに持っています。", ephemeral=True)
+            return
+
+        shop_role_ids = {int(item.get("role_id", 0)) for item in shop.values()}
+        removable_roles = [
+            member_role
+            for member_role in interaction.user.roles
+            if member_role.id in shop_role_ids and member_role != role and member_role < bot_member.top_role
+        ]
+        if removable_roles:
+            try:
+                await interaction.user.remove_roles(*removable_roles, reason="Coin role shop role replaced")
+            except discord.HTTPException:
+                pass
+
+        await interaction.user.add_roles(role, reason="Coin role shop purchase")
+        await db_set(balance_key, str(balance - cost))
+        await interaction.response.send_message(
+            f"{interaction.user.mention} が {role.mention} を交換しました。\n"
+            f"消費: **{cost}** コイン / 残高: **{balance - cost}** コイン"
         )
 
     @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")
