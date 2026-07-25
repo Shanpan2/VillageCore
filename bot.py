@@ -46,12 +46,20 @@ TARGET_GUILD_ID = parse_discord_id(GUILD_ID, "GUILD_ID")
 TARGET_LEGACY_GUILD_ID = parse_discord_id(LEGACY_GUILD_ID, "LEGACY_GUILD_ID")
 DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.backup",
+    "cogs.birthday",
     "cogs.bot_status",
     "cogs.music",
     "cogs.permission_check",
+    "cogs.reminder",
     "cogs.setup_guide",
 }
 DEFAULT_HIDDEN_SLASH_COMMANDS = {
+    "birthday_add",
+    "birthday_channel",
+    "birthday_check",
+    "birthday_list",
+    "birthday_remove",
+    "birthday_zodiac",
     "uno_join",
     "uno_begin",
     "uno_start",
@@ -78,6 +86,11 @@ DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "loop",
     "shuffle",
     "remove",
+    "remind",
+    "remind_cancel",
+    "remind_list",
+    "topic_channel",
+    "topic_now",
     "youtube_check",
     "youtube_notify_channel",
     "youtube_notify_keyword",
@@ -141,6 +154,7 @@ async def load_cogs():
         "cogs.ops",
         "cogs.ai_chat",
         "cogs.help",
+        "cogs.minutes",
         # Features/
         "Features.attendance",
         "Features.codenames",
@@ -740,9 +754,9 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "topic", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "minutes", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
-          {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "birthday", "welcome", "ng_word", "backup"))}
+          {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "welcome", "ng_word", "backup"))}
         </section>
       </main>
       <footer>むらびと君 / VillageCore Help</footer>

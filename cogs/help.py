@@ -12,7 +12,6 @@ CATEGORIES = {
             "auto_kick",
             "bot_status",
             "backup",
-            "birthday",
             "clean",
             "archive",
             "command_log",
@@ -29,7 +28,6 @@ CATEGORIES = {
             "settings_status",
             "setup_guide",
             "setup_wizard",
-            "topic_channel",
             "ticket",
             "welcome",
             "youtube",
@@ -49,7 +47,7 @@ CATEGORIES = {
     "utility": {
         "label": "便利機能",
         "emoji": "📌",
-        "prefixes": ("coin", "event", "faq", "google_search", "penalty", "profile", "quick", "reminder", "report", "rule", "title", "topic", "vote"),
+        "prefixes": ("coin", "event", "faq", "google_search", "minutes", "penalty", "profile", "quick", "report", "rule", "title", "vote"),
     },
     "ai": {
         "label": "AI",

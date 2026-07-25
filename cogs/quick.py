@@ -999,7 +999,6 @@ class QuickView(discord.ui.View):
         self.add_item(JankenButton())
         self.add_item(GuideButton("検索", "`/google_search query:検索したい内容` で検索できます。"))
         self.add_item(GuideButton("投票", "`/vote` で投票を作成できます。"))
-        self.add_item(GuideButton("リマインダー", "`/remind` で指定時間後の通知を作成できます。"))
         self.add_item(GuideButton("出席確認", "`/attend_status` で出席ポイント一覧を確認できます。"))
 
 
