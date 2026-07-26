@@ -155,6 +155,7 @@ async def load_cogs():
         "cogs.ai_chat",
         "cogs.help",
         "cogs.minutes",
+        "cogs.today",
         # Features/
         "Features.attendance",
         "Features.codenames",
@@ -754,7 +755,7 @@ async def handle_help_site(request):
           <h2>コマンド一覧</h2>
           <p class="muted">現在読み込まれているトップレベルコマンド数: {command_count}</p>
           <h3>よく使う</h3>
-          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "minutes", "event", "faq", "rule", "report"))}
+          {command_list(("quick", "youtube", "attendance", "admin", "profile", "coin", "penalty", "title", "minutes", "today", "event", "faq", "rule", "report"))}
           <h3>管理</h3>
           {command_list(("admin", "server_log", "ticket", "role_panel", "youtube", "attendance", "welcome", "ng_word", "backup"))}
         </section>

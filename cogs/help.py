@@ -47,7 +47,7 @@ CATEGORIES = {
     "utility": {
         "label": "便利機能",
         "emoji": "📌",
-        "prefixes": ("coin", "event", "faq", "google_search", "minutes", "penalty", "profile", "quick", "report", "rule", "title", "vote"),
+        "prefixes": ("coin", "event", "faq", "google_search", "minutes", "penalty", "profile", "quick", "report", "rule", "title", "today", "vote"),
     },
     "ai": {
         "label": "AI",
