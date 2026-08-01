@@ -168,6 +168,48 @@ def dynamic_today_events(year: int, month: int, day: int) -> list[dict]:
     return events
 
 
+DAILY_FOOD_THEMES = [
+    "おにぎり", "味噌汁", "カレー", "うどん", "そば", "ラーメン", "たこ焼き", "お好み焼き",
+    "寿司", "天ぷら", "唐揚げ", "焼き鳥", "ハンバーグ", "オムライス", "ナポリタン", "餃子",
+    "焼きそば", "親子丼", "牛丼", "お茶漬け", "卵かけご飯", "おでん", "鍋", "豚汁",
+    "コロッケ", "サンドイッチ", "ホットケーキ", "プリン", "団子", "たい焼き", "アイス",
+]
+
+DAILY_NATURE_THEMES = [
+    "朝日", "夕焼け", "星空", "月", "雲", "雨音", "虹", "風", "海", "川", "湖", "山",
+    "森", "草原", "花", "桜", "新緑", "紅葉", "雪", "霜", "雷", "木漏れ日", "野鳥",
+    "虫の声", "潮風", "青空", "夕立", "霧", "小川", "砂浜", "流れ星",
+]
+
+DAILY_FUN_THEMES = [
+    "カードゲーム", "ボードゲーム", "クイズ", "謎解き", "映画", "アニメ", "漫画", "読書",
+    "音楽", "カラオケ", "散歩", "写真", "料理", "お絵描き", "雑談", "ゲーム募集",
+    "Among Us", "作業通話", "動画編集", "短歌", "川柳", "しりとり", "心理テスト", "大喜利",
+    "おすすめ紹介", "ランキング作り", "思い出話", "豆知識", "ミニ企画", "今日の目標", "反省会",
+]
+
+
+def daily_theme_events(year: int, month: int, day: int) -> list[dict]:
+    day_index = datetime(year, month, day).timetuple().tm_yday - 1
+    food = DAILY_FOOD_THEMES[day_index % len(DAILY_FOOD_THEMES)]
+    nature = DAILY_NATURE_THEMES[(day_index * 3 + month) % len(DAILY_NATURE_THEMES)]
+    fun = DAILY_FUN_THEMES[(day_index * 5 + day) % len(DAILY_FUN_THEMES)]
+    return [
+        {
+            "name": f"今日の食べ物テーマ: {food}",
+            "description": f"今日は {food} を話題にしてみる日です。好きな食べ方や思い出を話すきっかけにできます。",
+        },
+        {
+            "name": f"今日の自然テーマ: {nature}",
+            "description": f"今日は {nature} に少し目を向ける日です。写真、天気、季節の話題にも使えます。",
+        },
+        {
+            "name": f"今日の娯楽テーマ: {fun}",
+            "description": f"今日は {fun} を楽しむきっかけの日です。サーバー内の雑談や募集ネタにどうぞ。",
+        },
+    ]
+
+
 def today_settings_key(guild_id: int) -> str:
     return f"today_settings:{guild_id}"
 
@@ -251,6 +293,7 @@ class Today(commands.Cog):
         events.extend(dynamic_today_events(year, month, day))
         custom = await self.get_custom_events(guild_id)
         events.extend(item for item in custom.get(key, []) if isinstance(item, dict))
+        events.extend(daily_theme_events(year, month, day))
         unique_events = []
         seen = set()
         for event in events:

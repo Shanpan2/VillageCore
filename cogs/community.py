@@ -194,11 +194,49 @@ def utc_now() -> datetime:
 
 def format_remaining(delta: timedelta) -> str:
     total_seconds = max(0, int(delta.total_seconds()))
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes = remainder // 60
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if days:
+        return f"{days}日{hours}時間{minutes}分{seconds}秒"
     if hours:
-        return f"{hours}時間{minutes}分"
-    return f"{minutes}分"
+        return f"{hours}時間{minutes}分{seconds}秒"
+    if minutes:
+        return f"{minutes}分{seconds}秒"
+    return f"{seconds}秒"
+
+
+def remaining_until_next_daily() -> timedelta:
+    now = datetime.now(JST)
+    next_day = (now + timedelta(days=1)).date()
+    next_reset = datetime(next_day.year, next_day.month, next_day.day, tzinfo=JST)
+    return next_reset - now
+
+
+async def coin_daily_remaining_text(guild_id: int, user_id: int) -> str:
+    if await db_get(coin_daily_key(guild_id, user_id)) == jst_today():
+        return f"受け取り済み / 次まで {format_remaining(remaining_until_next_daily())}"
+    return "受け取り可能"
+
+
+async def coin_work_remaining_text(guild_id: int, user_id: int) -> str:
+    last_work = parse_utc(await db_get(coin_work_key(guild_id, user_id)))
+    cooldown = timedelta(minutes=20)
+    now = utc_now()
+    if last_work and now - last_work < cooldown:
+        return f"あと {format_remaining(cooldown - (now - last_work))}"
+    return "実行可能"
+
+
+async def build_coin_balance_text(guild_id: int, member: discord.Member | discord.User) -> str:
+    coins = int(await db_get(coin_key(guild_id, member.id)) or "0")
+    daily = await coin_daily_remaining_text(guild_id, member.id)
+    work = await coin_work_remaining_text(guild_id, member.id)
+    return (
+        f"{member.mention} のコイン: **{coins}**\n"
+        f"デイリー: **{daily}**\n"
+        f"仕事: **{work}**"
+    )
 
 
 async def get_coin_gamble_lock_until(guild_id: int, user_id: int) -> datetime | None:
@@ -240,6 +278,23 @@ async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tup
     rewards = await apply_coin_rewards(guild, member, new_balance)
     reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
     return True, f"{member.mention} は仕事をして **{amount}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
+
+
+async def perform_coin_daily(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
+    key = coin_daily_key(guild.id, member.id)
+    if await db_get(key) == jst_today():
+        remaining = format_remaining(remaining_until_next_daily())
+        return False, f"今日のコインは受け取り済みです。次の受け取りまで **{remaining}** です。"
+
+    amount = random.randint(5, 15)
+    balance_key = coin_key(guild.id, member.id)
+    current = int(await db_get(balance_key) or "0")
+    new_balance = current + amount
+    await db_set(balance_key, str(new_balance))
+    await db_set(key, jst_today())
+    rewards = await apply_coin_rewards(guild, member, new_balance)
+    reward_text = "\n" + "\n".join(f"🎁 {message}" for message in rewards) if rewards else ""
+    return True, f"{member.mention} は **{amount}** コインを受け取りました。現在 **{new_balance}** コインです。{reward_text}"
 
 
 async def get_coin_role_shop(guild_id: int) -> dict[str, dict]:
@@ -722,16 +777,14 @@ class Community(commands.Cog):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
         member = member or interaction.user
-        coins = int(await db_get(coin_key(interaction.guild_id, member.id)) or "0")
-        await interaction.response.send_message(f"{member.mention} のコイン: **{coins}**")
+        await interaction.response.send_message(await build_coin_balance_text(interaction.guild_id, member))
 
-    @commands.command(name="balance")
+    @commands.command(name="balance", aliases=["bal", "coin_balance"])
     async def balance_prefix(self, ctx: commands.Context, member: discord.Member | None = None):
         if not ctx.guild:
             return
         member = member or ctx.author
-        coins = int(await db_get(coin_key(ctx.guild.id, member.id)) or "0")
-        await ctx.reply(f"{member.mention} のコイン: **{coins}**", mention_author=False)
+        await ctx.reply(await build_coin_balance_text(ctx.guild.id, member), mention_author=False)
 
     @app_commands.command(name="coin_work", description="20分に1回仕事をしてコインを獲得します")
     async def coin_work(self, interaction: discord.Interaction):
@@ -1022,23 +1075,18 @@ class Community(commands.Cog):
 
     @app_commands.command(name="coin_daily", description="1日1回コインを受け取ります")
     async def coin_daily(self, interaction: discord.Interaction):
-        if not interaction.guild_id:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
-        key = coin_daily_key(interaction.guild_id, interaction.user.id)
-        today = jst_today()
-        if await db_get(key) == today:
-            await interaction.response.send_message("今日のコインは受け取り済みです。", ephemeral=True)
+        ok, message = await perform_coin_daily(interaction.guild, interaction.user)
+        await interaction.response.send_message(message, ephemeral=not ok)
+
+    @commands.command(name="daily", aliases=["coin_daily"])
+    async def daily_prefix(self, ctx: commands.Context):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return
-        amount = random.randint(5, 15)
-        balance_key = coin_key(interaction.guild_id, interaction.user.id)
-        current = int(await db_get(balance_key) or "0")
-        new_balance = current + amount
-        await db_set(balance_key, str(new_balance))
-        await db_set(key, today)
-        rewards = await apply_coin_rewards(interaction.guild, interaction.user, new_balance)
-        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
-        await interaction.response.send_message(f"{interaction.user.mention} は **{amount}** コインを受け取りました。現在 **{new_balance}** コインです。{reward_text}")
+        ok, message = await perform_coin_daily(ctx.guild, ctx.author)
+        await ctx.reply(message, mention_author=False)
 
     @app_commands.command(name="coin_gamble", description="コインを賭けてギャンブルします")
     @app_commands.describe(amount="賭けるコイン数")
