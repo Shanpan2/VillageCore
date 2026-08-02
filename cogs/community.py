@@ -792,14 +792,14 @@ class Community(commands.Cog):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
         ok, message = await perform_coin_work(interaction.guild, interaction.user)
-        await interaction.response.send_message(message, ephemeral=not ok)
+        await interaction.response.send_message(message, delete_after=60 if not ok else None)
 
     @commands.command(name="work")
     async def work_prefix(self, ctx: commands.Context):
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return
         ok, message = await perform_coin_work(ctx.guild, ctx.author)
-        await ctx.reply(message, mention_author=False)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
 
     @app_commands.command(name="coin_shop", description="コインでロール、称号、バッジを交換します")
     @app_commands.describe(item="交換する商品。未指定なら一覧を表示します")
@@ -1079,14 +1079,14 @@ class Community(commands.Cog):
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
         ok, message = await perform_coin_daily(interaction.guild, interaction.user)
-        await interaction.response.send_message(message, ephemeral=not ok)
+        await interaction.response.send_message(message, delete_after=60 if not ok else None)
 
     @commands.command(name="daily", aliases=["coin_daily"])
     async def daily_prefix(self, ctx: commands.Context):
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return
         ok, message = await perform_coin_daily(ctx.guild, ctx.author)
-        await ctx.reply(message, mention_author=False)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
 
     @app_commands.command(name="coin_gamble", description="コインを賭けてギャンブルします")
     @app_commands.describe(amount="賭けるコイン数")
