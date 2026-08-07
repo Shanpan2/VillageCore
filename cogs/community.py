@@ -931,7 +931,7 @@ class Community(commands.Cog):
 
     @app_commands.command(name="coin_role_set", description="【管理者】コインで交換できるロールと価格を設定します")
     @app_commands.default_permissions(manage_guild=True)
-    async def coin_role_set(self, interaction: discord.Interaction, role: discord.Role, cost: int):
+    async def coin_role_set(self, interaction: discord.Interaction, role: discord.Role, cost: int, sell_enabled: bool = True):
         if not interaction.guild:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
@@ -950,12 +950,31 @@ class Community(commands.Cog):
             return
 
         shop = await get_coin_role_shop(interaction.guild.id)
-        shop[str(role.id)] = {"role_id": role.id, "cost": cost, "name": role.name}
+        shop[str(role.id)] = {"role_id": role.id, "cost": cost, "name": role.name, "sell_enabled": sell_enabled}
         await set_coin_role_shop(interaction.guild.id, shop)
+        sell_text = "売却可" if sell_enabled else "売却不可"
         await interaction.response.send_message(
-            f"{role.mention} を **{cost}** コインで交換できるように設定しました。",
+            f"{role.mention} を **{cost}** コインで交換できるように設定しました。\n売却設定: **{sell_text}**",
             ephemeral=True,
         )
+
+    @app_commands.command(name="coin_role_sell_enable", description="【管理者】コイン交換ロールの売却可否を切り替えます")
+    @app_commands.default_permissions(manage_guild=True)
+    async def coin_role_sell_enable(self, interaction: discord.Interaction, role: discord.Role, enabled: bool):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        shop = await get_coin_role_shop(interaction.guild.id)
+        data = shop.get(str(role.id))
+        if not data:
+            await interaction.response.send_message("そのロールはコインロールショップに登録されていません。", ephemeral=True)
+            return
+        data["sell_enabled"] = enabled
+        data["name"] = role.name
+        shop[str(role.id)] = data
+        await set_coin_role_shop(interaction.guild.id, shop)
+        sell_text = "売却可" if enabled else "売却不可"
+        await interaction.response.send_message(f"{role.mention} の売却設定を **{sell_text}** にしました。", ephemeral=True)
 
     @app_commands.command(name="coin_role_remove", description="【管理者】コイン交換ロールをショップから削除します")
     @app_commands.default_permissions(manage_guild=True)
@@ -985,7 +1004,10 @@ class Community(commands.Cog):
                 shop.pop(role_id, None)
                 changed = True
                 continue
-            lines.append(f"- {role.mention}: **{int(data.get('cost', 0))}** コイン")
+            cost = int(data.get("cost", 0))
+            sell_enabled = bool(data.get("sell_enabled", True))
+            sale_text = f"売却 **{max(1, cost // 4)}** コイン" if sell_enabled else "売却不可"
+            lines.append(f"- {role.mention}: **{cost}** コイン / {sale_text}")
         if changed:
             await set_coin_role_shop(interaction.guild.id, shop)
 
@@ -994,7 +1016,7 @@ class Community(commands.Cog):
             description="\n".join(lines) if lines else "現在、交換できるロールは設定されていません。",
             color=0xF1C40F,
         )
-        embed.set_footer(text="/coin_role_buy role:@ロール で交換、/coin_role_sell role:@ロール で売却できます。")
+        embed.set_footer(text="/coin_role_buy role:@ロール で交換、売却可のものは /coin_role_sell role:@ロール で売却できます。")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="coin_role_buy", description="コインで設定済みロールを交換します")
@@ -1057,6 +1079,9 @@ class Community(commands.Cog):
         data = shop.get(str(role.id))
         if not data:
             await interaction.response.send_message("そのロールはコイン交換対象に設定されていません。", ephemeral=True)
+            return
+        if not bool(data.get("sell_enabled", True)):
+            await interaction.response.send_message(f"{role.mention} は管理者設定により売却できません。", ephemeral=True)
             return
         if role not in interaction.user.roles:
             await interaction.response.send_message(f"{role.mention} を持っていないため売却できません。", ephemeral=True)
