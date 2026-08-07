@@ -143,6 +143,8 @@ REPORT_KIND_LABELS = {
 }
 REAL_GAMBLER_ROLE_NAME = os.getenv("REAL_GAMBLER_ROLE_NAME", "リアルギャンブラー")
 REAL_GAMBLER_ROLE_DAYS = int(os.getenv("REAL_GAMBLER_ROLE_DAYS", os.getenv("REAL_GAMBLER_LOCK_DAYS", "7")))
+LIMITED_WORK_ROLE_NAME = os.getenv("LIMITED_WORK_ROLE_NAME", "bot(笑)")
+LIMITED_WORK_FAIL_RATE = float(os.getenv("LIMITED_WORK_FAIL_RATE", "0.20"))
 
 COIN_SHOP_ITEMS = {
     "red": {"kind": "role", "label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
@@ -261,15 +263,24 @@ async def lock_coin_gamble_for_24h(guild_id: int, user_id: int) -> datetime:
     return await lock_coin_gamble_until(guild_id, user_id, locked_until, "0コインになったため")
 
 
+def has_limited_work_role(member: discord.Member) -> bool:
+    return any(role.name == LIMITED_WORK_ROLE_NAME for role in member.roles)
+
+
 async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
     last_work = parse_utc(await db_get(coin_work_key(guild.id, member.id)))
     now = utc_now()
-    cooldown = timedelta(minutes=20)
+    limited_work = has_limited_work_role(member)
+    cooldown = timedelta(minutes=1 if limited_work else 20)
     if last_work and now - last_work < cooldown:
         remaining = format_remaining(cooldown - (now - last_work))
         return False, f"まだ働けません。あと **{remaining}** 待ってください。"
 
-    amount = random.randint(8, 18)
+    if limited_work and random.random() < LIMITED_WORK_FAIL_RATE:
+        await db_set(coin_work_key(guild.id, member.id), now.isoformat())
+        return False, f"{member.mention} は働きすぎて体調不良です。1分ほど休んでから働いてください。"
+
+    amount = random.randint(1, 3) if limited_work else random.randint(8, 18)
     balance_key = coin_key(guild.id, member.id)
     current = int(await db_get(balance_key) or "0")
     new_balance = current + amount
@@ -983,7 +994,7 @@ class Community(commands.Cog):
             description="\n".join(lines) if lines else "現在、交換できるロールは設定されていません。",
             color=0xF1C40F,
         )
-        embed.set_footer(text="/coin_role_buy role:@ロール で交換できます。")
+        embed.set_footer(text="/coin_role_buy role:@ロール で交換、/coin_role_sell role:@ロール で売却できます。")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="coin_role_buy", description="コインで設定済みロールを交換します")
@@ -1035,6 +1046,42 @@ class Community(commands.Cog):
         await interaction.response.send_message(
             f"{interaction.user.mention} が {role.mention} を交換しました。\n"
             f"消費: **{cost}** コイン / 残高: **{balance - cost}** コイン"
+        )
+
+    @app_commands.command(name="coin_role_sell", description="コインで交換したロールを売却します")
+    async def coin_role_sell(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        shop = await get_coin_role_shop(interaction.guild.id)
+        data = shop.get(str(role.id))
+        if not data:
+            await interaction.response.send_message("そのロールはコイン交換対象に設定されていません。", ephemeral=True)
+            return
+        if role not in interaction.user.roles:
+            await interaction.response.send_message(f"{role.mention} を持っていないため売却できません。", ephemeral=True)
+            return
+
+        bot_member = interaction.guild.me
+        if not bot_member or not bot_member.guild_permissions.manage_roles or role >= bot_member.top_role:
+            await interaction.response.send_message(
+                "Botがそのロールを外せません。Botのロール位置と権限を確認してください。",
+                ephemeral=True,
+            )
+            return
+
+        cost = int(data.get("cost", 0))
+        refund = max(1, cost // 4)
+        balance_key = coin_key(interaction.guild.id, interaction.user.id)
+        balance = int(await db_get(balance_key) or "0")
+        new_balance = balance + refund
+
+        await interaction.user.remove_roles(role, reason="Coin role shop sale")
+        await db_set(balance_key, str(new_balance))
+        await interaction.response.send_message(
+            f"{interaction.user.mention} が {role.mention} を売却しました。\n"
+            f"売却額: **{refund}** コイン / 残高: **{new_balance}** コイン",
+            ephemeral=True,
         )
 
     @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")

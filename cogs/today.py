@@ -285,15 +285,20 @@ class Today(commands.Cog):
     async def save_custom_events(self, guild_id: int, data: dict):
         await set_json(today_custom_key(guild_id), data)
 
+    async def custom_events_for(self, guild_id: int, month: int, day: int) -> list[dict]:
+        custom = await self.get_custom_events(guild_id)
+        items = custom.get(date_key(month, day), [])
+        return [item for item in items if isinstance(item, dict)]
+
     async def events_for(self, guild_id: int, month: int, day: int, year: int | None = None) -> list[dict]:
         year = year or datetime.now(JST).year
         key = date_key(month, day)
         events = [dict(item) for item in DEFAULT_TODAY_EVENTS.get(key, [])]
         events.extend(dict(item) for item in EXTRA_FIXED_TODAY_EVENTS.get(key, []))
         events.extend(dynamic_today_events(year, month, day))
-        custom = await self.get_custom_events(guild_id)
-        events.extend(item for item in custom.get(key, []) if isinstance(item, dict))
-        events.extend(daily_theme_events(year, month, day))
+        events.extend(await self.custom_events_for(guild_id, month, day))
+        if not events:
+            events.extend(daily_theme_events(year, month, day))
         unique_events = []
         seen = set()
         for event in events:
@@ -431,6 +436,47 @@ class Today(commands.Cog):
         await self.save_custom_events(interaction.guild_id, data)
         await interaction.response.send_message(f"{month}月{day}日に **{item['name']}** を追加しました。", ephemeral=True)
 
+    @app_commands.command(name="today_edit", description="【管理者】独自の記念日を番号で編集します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def today_edit(
+        self,
+        interaction: discord.Interaction,
+        month: int,
+        day: int,
+        index: int,
+        name: str | None = None,
+        description: str | None = None,
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not validate_date(month, day):
+            await interaction.response.send_message("存在する日付を指定してください。", ephemeral=True)
+            return
+        if name is None and description is None:
+            await interaction.response.send_message("変更後の名前か内容を指定してください。", ephemeral=True)
+            return
+        key = date_key(month, day)
+        data = await self.get_custom_events(interaction.guild_id)
+        items = data.get(key, [])
+        if index < 1 or index > len(items):
+            await interaction.response.send_message("番号が範囲外です。`/today_list` で独自登録番号を確認してください。", ephemeral=True)
+            return
+
+        item = items[index - 1]
+        if name is not None:
+            new_name = name.strip()[:80]
+            if new_name:
+                item["name"] = new_name
+        if description is not None:
+            item["description"] = description.strip()[:300]
+        data[key] = items
+        await self.save_custom_events(interaction.guild_id, data)
+        await interaction.response.send_message(
+            f"{month}月{day}日の独自登録 {index} 番を **{item.get('name', '記念日')}** に更新しました。",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="today_remove", description="【管理者】独自の記念日を番号で削除します")
     @app_commands.default_permissions(manage_guild=True)
     async def today_remove(self, interaction: discord.Interaction, month: int, day: int, index: int):
@@ -464,6 +510,13 @@ class Today(commands.Cog):
             await interaction.response.send_message(f"{month}月{day}日の登録はありません。", ephemeral=True)
             return
         lines = []
+        custom_items = await self.custom_events_for(interaction.guild_id, month, day)
+        if custom_items:
+            lines.append("**独自登録（編集・削除用番号）**")
+            for index, event in enumerate(custom_items, start=1):
+                lines.append(f"{index}. **{event.get('name', '記念日')}** - {event.get('description', '')}")
+            lines.append("")
+            lines.append("**実際に表示される内容**")
         for index, event in enumerate(events, start=1):
             lines.append(f"{index}. **{event.get('name', '記念日')}** - {event.get('description', '')}")
         await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
