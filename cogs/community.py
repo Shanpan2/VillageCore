@@ -930,6 +930,7 @@ class Community(commands.Cog):
         )
 
     @app_commands.command(name="coin_role_set", description="【管理者】コインで交換できるロールと価格を設定します")
+    @app_commands.describe(sell_enabled="このロールを売却できるようにするか")
     @app_commands.default_permissions(manage_guild=True)
     async def coin_role_set(self, interaction: discord.Interaction, role: discord.Role, cost: int, sell_enabled: bool = True):
         if not interaction.guild:
@@ -959,8 +960,12 @@ class Community(commands.Cog):
         )
 
     @app_commands.command(name="coin_role_sell_enable", description="【管理者】コイン交換ロールの売却可否を切り替えます")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="売却可", value="on"),
+        app_commands.Choice(name="売却不可", value="off"),
+    ])
     @app_commands.default_permissions(manage_guild=True)
-    async def coin_role_sell_enable(self, interaction: discord.Interaction, role: discord.Role, enabled: bool):
+    async def coin_role_sell_enable(self, interaction: discord.Interaction, role: discord.Role, mode: app_commands.Choice[str]):
         if not interaction.guild:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
             return
@@ -969,6 +974,7 @@ class Community(commands.Cog):
         if not data:
             await interaction.response.send_message("そのロールはコインロールショップに登録されていません。", ephemeral=True)
             return
+        enabled = mode.value == "on"
         data["sell_enabled"] = enabled
         data["name"] = role.name
         shop[str(role.id)] = data
