@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from database.config_db import db_get, db_get_all_config, db_set
+from database.config_db import db_get, db_get_all_config, db_set, db_transfer_int
 
 
 JST = timezone(timedelta(hours=9))
@@ -238,6 +238,40 @@ async def build_coin_balance_text(guild_id: int, member: discord.Member | discor
         f"{member.mention} のコイン: **{coins}**\n"
         f"デイリー: **{daily}**\n"
         f"仕事: **{work}**"
+    )
+
+
+async def perform_coin_transfer(
+    guild: discord.Guild,
+    sender: discord.Member,
+    recipient: discord.Member,
+    amount: int,
+) -> tuple[bool, str]:
+    if amount <= 0:
+        return False, "送る金額は **1コイン以上** にしてください。"
+    if sender.id == recipient.id:
+        return False, "自分自身にはコインを送れません。"
+    if recipient.bot:
+        return False, "Botにはコインを送れません。"
+
+    success, sender_balance, recipient_balance = await db_transfer_int(
+        coin_key(guild.id, sender.id),
+        coin_key(guild.id, recipient.id),
+        amount,
+    )
+    if not success:
+        return False, (
+            f"コインが足りません。送金額: **{amount}** / "
+            f"現在の残高: **{sender_balance}**"
+        )
+
+    rewards = await apply_coin_rewards(guild, recipient, recipient_balance)
+    reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+    return True, (
+        f"🎁 {sender.mention} から {recipient.mention} へ **{amount}コイン** 送りました。\n"
+        f"{sender.mention} の残高: **{sender_balance}コイン**\n"
+        f"{recipient.mention} の残高: **{recipient_balance}コイン**"
+        f"{reward_text}"
     )
 
 
@@ -796,6 +830,22 @@ class Community(commands.Cog):
             return
         member = member or ctx.author
         await ctx.reply(await build_coin_balance_text(ctx.guild.id, member), mention_author=False)
+
+    @app_commands.command(name="coin_pay", description="他のメンバーへコインを送ります")
+    @app_commands.describe(member="コインを送る相手", amount="送るコイン数")
+    async def coin_pay(self, interaction: discord.Interaction, member: discord.Member, amount: int):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        ok, message = await perform_coin_transfer(interaction.guild, interaction.user, member, amount)
+        await interaction.response.send_message(message, ephemeral=not ok)
+
+    @commands.command(name="pay", aliases=["send", "gift"])
+    async def pay_prefix(self, ctx: commands.Context, member: discord.Member, amount: int):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return
+        ok, message = await perform_coin_transfer(ctx.guild, ctx.author, member, amount)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
 
     @app_commands.command(name="coin_work", description="20分に1回仕事をしてコインを獲得します")
     async def coin_work(self, interaction: discord.Interaction):
