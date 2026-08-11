@@ -115,6 +115,10 @@ def memory_key(guild_id: int | None, user_id: int) -> str:
     return f"ai_memory:{scope}:{user_id}"
 
 
+def ai_reply_enabled_key(guild_id: int) -> str:
+    return f"ai_reply_enabled:{guild_id}"
+
+
 def split_discord_message(text: str, limit: int = 1900) -> list[str]:
     chunks = []
     current = ""
@@ -412,6 +416,12 @@ class AIChat(commands.Cog):
     async def save_memory(self, guild_id: int | None, user_id: int, history: list[dict]):
         await db_set(memory_key(guild_id, user_id), json.dumps(history[-MAX_HISTORY_TURNS:], ensure_ascii=False))
 
+    async def is_reply_enabled(self, guild_id: int | None) -> bool:
+        if guild_id is None:
+            return True
+        raw = await db_get(ai_reply_enabled_key(guild_id))
+        return raw != "off"
+
     def cooldown_remaining(self, guild_id: int | None, user_id: int) -> int:
         now = time.monotonic()
         scope = guild_id if guild_id is not None else "dm"
@@ -506,6 +516,9 @@ class AIChat(commands.Cog):
             if isinstance(replied_message, discord.Message):
                 is_reply_to_bot = replied_message.author.id == self.bot.user.id
 
+        if is_reply_to_bot and not is_mentioned and not await self.is_reply_enabled(message.guild.id if message.guild else None):
+            return
+
         if not is_mentioned and not is_reply_to_bot:
             return
 
@@ -580,6 +593,19 @@ class AIChat(commands.Cog):
     async def ai_memory_status(self, interaction: discord.Interaction):
         history = await self.load_memory(interaction.guild_id, interaction.user.id)
         await interaction.response.send_message(f"保存されている会話履歴: {len(history)}件", ephemeral=True)
+
+    @app_commands.command(name="ai_reply_enable", description="【管理者】BotへのリプライでAIが反応するか切り替えます")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="ON", value="on"),
+        app_commands.Choice(name="OFF", value="off"),
+    ])
+    async def ai_reply_enable(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ai_reply_enabled_key(interaction.guild_id), mode.value)
+        await interaction.response.send_message(f"AIリプライ反応を **{mode.name}** にしました。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

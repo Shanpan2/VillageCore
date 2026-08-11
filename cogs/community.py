@@ -418,6 +418,143 @@ async def draw_penalty_gacha(guild_id: int) -> str:
     return random.choice(await get_penalty_items(guild_id))
 
 
+async def validate_coin_bet(interaction: discord.Interaction, amount: int) -> tuple[bool, int, str]:
+    if not interaction.guild_id:
+        return False, 0, "サーバー内で実行してください。"
+    return await validate_coin_bet_for(interaction.guild_id, interaction.user.id, amount)
+
+
+async def validate_coin_bet_for(guild_id: int, user_id: int, amount: int) -> tuple[bool, int, str]:
+    if amount <= 0:
+        return False, 0, "賭けるコイン数は1以上にしてください。"
+
+    locked_until = await get_coin_gamble_lock_until(guild_id, user_id)
+    if locked_until:
+        remaining = format_remaining(locked_until - utc_now())
+        reason = await get_coin_gamble_lock_reason(guild_id, user_id)
+        return False, 0, f"{reason}。ギャンブルはあと **{remaining}** できません。"
+
+    current = int(await db_get(coin_key(guild_id, user_id)) or "0")
+    if current <= 0:
+        return False, current, "現在の所持コインは **0** です。ギャンブルはできません。"
+    if current < amount:
+        return False, current, f"コインが足りません。現在の所持コインは **{current}** です。"
+    return True, current, ""
+
+
+async def build_zero_coin_penalty_text(guild: discord.Guild | None, member: discord.Member | discord.User, guild_id: int) -> str:
+    locked_until = await lock_coin_gamble_for_24h(guild_id, member.id)
+    remaining = format_remaining(locked_until - utc_now())
+    penalty = await draw_penalty_gacha(guild_id)
+    active_task = await get_penalty_task(guild_id, member.id)
+    if not active_task or active_task.get("completed"):
+        active_task = await save_penalty_task(guild_id, member.id, penalty)
+        penalty_text = (
+            f"\n強化罰ゲームが発生: **{penalty}**"
+            f"\n期限: **{format_datetime_jst(parse_utc(active_task.get('deadline_at', '')))}**"
+        )
+    else:
+        penalty_text = (
+            f"\n未完了の強化罰ゲームがあります: **{active_task.get('penalty', '不明')}**"
+            "\n新しい罰ゲームは追加しませんでした。"
+        )
+
+    role_text = ""
+    if isinstance(member, discord.Member) and guild:
+        role_expires_at, role_added = await apply_real_gambler_penalty(guild, member)
+        role_remaining = format_remaining(role_expires_at - utc_now())
+        if role_added:
+            role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** を **{role_remaining}** 付与しました。"
+        else:
+            role_text = f"\nロール **{REAL_GAMBLER_ROLE_NAME}** は付与済み、または権限不足で付与できませんでした。"
+
+    return (
+        f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
+        f"{role_text}"
+        f"{penalty_text}"
+        "\n`/penalty_status` で状態を確認できます。"
+    )
+
+
+async def run_coin_slot_game(guild: discord.Guild, user: discord.Member | discord.User, amount: int) -> tuple[bool, str]:
+    ok, current, error = await validate_coin_bet_for(guild.id, user.id, amount)
+    if not ok:
+        return False, error
+
+    symbols = [
+        ("🍒", 2.0),
+        ("🍋", 2.2),
+        ("🍇", 2.5),
+        ("⭐", 3.0),
+        ("💎", 4.0),
+        ("7️⃣", 5.0),
+    ]
+    rolls = [random.choice(symbols) for _ in range(3)]
+    faces = [item[0] for item in rolls]
+    key = coin_key(guild.id, user.id)
+
+    if faces[0] == faces[1] == faces[2]:
+        multiplier = rolls[0][1]
+        payout = max(1, int(amount * multiplier))
+        profit = payout - amount
+        new_balance = current - amount + payout
+        await db_set(key, str(new_balance))
+        rewards = await apply_coin_rewards(guild, user if isinstance(user, discord.Member) else None, new_balance)
+        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+        return True, (
+            f"🎰 {' '.join(faces)}\n"
+            f"大当たり！倍率 **x{multiplier:g}** / 獲得 **{payout}** コイン（利益 +{profit}）\n"
+            f"現在 **{new_balance}** コインです。{reward_text}"
+        )
+
+    new_balance = max(0, current - amount)
+    await db_set(key, str(new_balance))
+    zero_text = await build_zero_coin_penalty_text(guild, user, guild.id) if new_balance == 0 else ""
+    return True, (
+        f"🎰 {' '.join(faces)}\n"
+        f"外れです。**{amount}** コイン没収。\n"
+        f"現在 **{new_balance}** コインです。{zero_text}"
+    )
+
+
+async def run_coin_dice_game(guild: discord.Guild, user: discord.Member | discord.User, amount: int) -> tuple[bool, str]:
+    ok, current, error = await validate_coin_bet_for(guild.id, user.id, amount)
+    if not ok:
+        return False, error
+
+    player_dice = (random.randint(1, 6), random.randint(1, 6))
+    bot_dice = (random.randint(1, 6), random.randint(1, 6))
+    player_total = sum(player_dice)
+    bot_total = sum(bot_dice)
+    key = coin_key(guild.id, user.id)
+
+    if player_total > bot_total:
+        profit = amount
+        new_balance = current + profit
+        await db_set(key, str(new_balance))
+        rewards = await apply_coin_rewards(guild, user if isinstance(user, discord.Member) else None, new_balance)
+        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+        result = f"勝利！ **+{profit}** コイン"
+        tail = reward_text
+    elif player_total == bot_total:
+        new_balance = current
+        result = "引き分け。賭け金は返金です。"
+        tail = ""
+    else:
+        new_balance = max(0, current - amount)
+        await db_set(key, str(new_balance))
+        result = f"敗北。**{amount}** コイン没収。"
+        tail = await build_zero_coin_penalty_text(guild, user, guild.id) if new_balance == 0 else ""
+
+    return True, (
+        f"🎲 ダイス勝負\n"
+        f"{user.mention}: `{player_dice[0]} + {player_dice[1]} = {player_total}`\n"
+        f"むらびと君: `{bot_dice[0]} + {bot_dice[1]} = {bot_total}`\n"
+        f"{result}\n"
+        f"現在 **{new_balance}** コインです。{tail}"
+    )
+
+
 def format_penalty_items(items: list[str]) -> str:
     lines = [f"{index}. {item}" for index, item in enumerate(items, start=1)]
     return "\n".join(lines)[:1900]
@@ -1303,6 +1440,44 @@ class Community(commands.Cog):
             f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
             f"現在 **{new_balance}** コインです。{zero_lock_text}"
         )
+
+    @app_commands.command(name="coin_slot", description="コインを賭けてスロットを回します")
+    @app_commands.describe(amount="賭けるコイン数")
+    async def coin_slot(self, interaction: discord.Interaction, amount: int):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        ok, message = await run_coin_slot_game(interaction.guild, interaction.user, amount)
+        await interaction.response.send_message(message, ephemeral=not ok)
+
+    @commands.command(name="slot", aliases=["coin_slot"])
+    async def coin_slot_prefix(self, ctx: commands.Context, amount: int = 0):
+        if not ctx.guild:
+            return
+        if amount <= 0:
+            await ctx.reply("使い方: `!slot 10` のように賭けるコイン数を指定してください。", mention_author=False, delete_after=60)
+            return
+        ok, message = await run_coin_slot_game(ctx.guild, ctx.author, amount)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
+
+    @app_commands.command(name="coin_dice", description="コインを賭けて2個のサイコロで勝負します")
+    @app_commands.describe(amount="賭けるコイン数")
+    async def coin_dice(self, interaction: discord.Interaction, amount: int):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        ok, message = await run_coin_dice_game(interaction.guild, interaction.user, amount)
+        await interaction.response.send_message(message, ephemeral=not ok)
+
+    @commands.command(name="dice", aliases=["coin_dice"])
+    async def coin_dice_prefix(self, ctx: commands.Context, amount: int = 0):
+        if not ctx.guild:
+            return
+        if amount <= 0:
+            await ctx.reply("使い方: `!dice 10` のように賭けるコイン数を指定してください。", mention_author=False, delete_after=60)
+            return
+        ok, message = await run_coin_dice_game(ctx.guild, ctx.author, amount)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
 
     @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
     @app_commands.describe(member="【管理者のみ】別のメンバーの代わりに引く場合は指定してください")

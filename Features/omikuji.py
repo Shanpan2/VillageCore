@@ -191,6 +191,63 @@ async def run_omikuji(interaction: discord.Interaction, *, deferred: bool = Fals
     await interaction.followup.send(embed=embed)
 
 
+async def run_omikuji_prefix(ctx: commands.Context):
+    if not ctx.guild:
+        return
+
+    today = datetime.datetime.now(JST).date()
+    today_key = today.isoformat()
+    last_key = omikuji_last_key(ctx.guild.id, ctx.author.id)
+    last_draw = await db_get(last_key)
+    if last_draw == today_key:
+        await ctx.reply("今日はすでにおみくじを引いています。また明日引いてください。", mention_author=False, delete_after=60)
+        return
+
+    streak_data = await get_json(omikuji_streak_key(ctx.guild.id, ctx.author.id), {})
+    yesterday_key = (today - datetime.timedelta(days=1)).isoformat()
+    streak = int(streak_data.get("count", 0) or 0) + 1 if streak_data.get("last") == yesterday_key else 1
+
+    fortune = choose_fortune()
+    coin_bonus = int(fortune["coins"])
+    balance_key = coin_key(ctx.guild.id, ctx.author.id)
+    current = int(await db_get(balance_key) or "0")
+    new_balance = current + coin_bonus
+
+    await db_set(last_key, today_key)
+    await set_json(omikuji_streak_key(ctx.guild.id, ctx.author.id), {"last": today_key, "count": streak})
+    if coin_bonus:
+        await db_set(balance_key, str(new_balance))
+
+    notes = []
+    badge = fortune.get("badge")
+    if badge:
+        badges = await get_json(badges_key(ctx.guild.id, ctx.author.id), [])
+        if badge not in badges:
+            badges.append(badge)
+            await set_json(badges_key(ctx.guild.id, ctx.author.id), badges[:30])
+            notes.append(f"バッジ「{badge}」を獲得")
+
+    notes.extend(await grant_omikuji_streak_titles(ctx.guild.id, ctx.author.id, streak))
+
+    member = ctx.author if isinstance(ctx.author, discord.Member) else None
+    rewards = await apply_coin_rewards(ctx.guild, member, new_balance)
+    notes.extend(rewards)
+
+    embed = discord.Embed(
+        title="🎴 おみくじ",
+        description=f"**{fortune['name']}**\n{fortune['message']}",
+        color=fortune["color"],
+    )
+    embed.add_field(name="ラッキーカラー", value=random.choice(LUCKY_COLORS), inline=True)
+    embed.add_field(name="ラッキーアイテム", value=random.choice(LUCKY_ITEMS), inline=True)
+    embed.add_field(name="連続おみくじ", value=f"{streak}日目", inline=True)
+    embed.add_field(name="コイン", value=f"+{coin_bonus} / 現在 {new_balance}", inline=False)
+    if notes:
+        embed.add_field(name="獲得", value="\n".join(f"🎖 {note}" for note in notes)[:1024], inline=False)
+
+    await ctx.reply(embed=embed, mention_author=False)
+
+
 class Omikuji(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -211,6 +268,10 @@ class Omikuji(commands.Cog):
     @app_commands.command(name="omikuji", description="おみくじを引きます")
     async def omikuji(self, interaction: discord.Interaction):
         await run_omikuji(interaction)
+
+    @commands.command(name="omikuji")
+    async def omikuji_prefix(self, ctx: commands.Context):
+        await run_omikuji_prefix(ctx)
 
 
 async def setup(bot: commands.Bot):

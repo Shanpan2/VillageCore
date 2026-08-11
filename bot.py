@@ -635,7 +635,7 @@ async def handle_help_site(request):
           <div class="grid">
             <div class="tile"><strong>AI応答</strong>Botにメンション、またはBotの返信にリプライするとAIが答えます。</div>
             <div class="tile"><strong>プロフィール</strong><code>/profile_set</code> と <code>/profile</code> で自己紹介を管理できます。</div>
-            <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code> でコインを賭けられます。</div>
+            <div class="tile"><strong>コイン/称号</strong><code>/coin_daily</code> で毎日コイン、<code>/coin_gamble</code>、<code>/coin_slot</code>、<code>/coin_dice</code> でコインを賭けられます。</div>
             <div class="tile"><strong>誕生日</strong>登録済みの誕生日には通知と一緒に、年1回の誕生日コインボーナスが付与されます。</div>
             <div class="tile"><strong>Bot報告</strong><code>/report</code> でバグ、要望、不正利用、表示崩れなどをBot開発者へ送れます。</div>
           </div>
@@ -704,7 +704,7 @@ async def handle_help_site(request):
               村人陣営は人狼を全員追放すれば勝ち、人狼陣営は人狼の数が村人陣営以上になれば勝ちです。
             </p>
           </div>
-          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "gomoku", "gomoku_ai", "ito", "codenames", "werewolf", "janken", "omikuji", "dice"))}
+          {command_list(("uno", "sevens", "daifugo", "poker", "game", "othello", "gomoku", "gomoku_ai", "ito", "codenames", "werewolf", "janken", "omikuji", "dice", "coin_slot", "coin_dice"))}
         </section>
         <section id="coin-note">
           <h2>コイン遊びのメモ</h2>
