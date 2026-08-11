@@ -100,6 +100,10 @@ def coin_gamble_lock_reason_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_gamble_lock_reason:{guild_id}:{user_id}"
 
 
+def coin_gamble_cooldown_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin_gamble_cooldown:{guild_id}:{user_id}"
+
+
 def gamble_role_expirations_key(guild_id: int) -> str:
     return f"community_gamble_role_expirations:{guild_id}"
 
@@ -145,6 +149,7 @@ REAL_GAMBLER_ROLE_NAME = os.getenv("REAL_GAMBLER_ROLE_NAME", "リアルギャン
 REAL_GAMBLER_ROLE_DAYS = int(os.getenv("REAL_GAMBLER_ROLE_DAYS", os.getenv("REAL_GAMBLER_LOCK_DAYS", "7")))
 LIMITED_WORK_ROLE_NAME = os.getenv("LIMITED_WORK_ROLE_NAME", "bot(笑)")
 LIMITED_WORK_FAIL_RATE = float(os.getenv("LIMITED_WORK_FAIL_RATE", "0.20"))
+COIN_GAMBLE_COOLDOWN_SECONDS = int(os.getenv("COIN_GAMBLE_COOLDOWN_SECONDS", "45"))
 
 COIN_SHOP_ITEMS = {
     "red": {"kind": "role", "label": "赤カラー", "role_name": "カラー: 赤", "cost": 300, "days": 7, "color": 0xE74C3C},
@@ -284,6 +289,18 @@ async def get_coin_gamble_lock_until(guild_id: int, user_id: int) -> datetime | 
 
 async def get_coin_gamble_lock_reason(guild_id: int, user_id: int) -> str:
     return await db_get(coin_gamble_lock_reason_key(guild_id, user_id)) or "ギャンブル制限中です"
+
+
+async def get_coin_gamble_cooldown_until(guild_id: int, user_id: int) -> datetime | None:
+    started_at = parse_utc(await db_get(coin_gamble_cooldown_key(guild_id, user_id)))
+    if not started_at:
+        return None
+    until = started_at + timedelta(seconds=max(0, COIN_GAMBLE_COOLDOWN_SECONDS))
+    return until if until > utc_now() else None
+
+
+async def mark_coin_gamble_cooldown(guild_id: int, user_id: int):
+    await db_set(coin_gamble_cooldown_key(guild_id, user_id), utc_now().isoformat())
 
 
 async def lock_coin_gamble_until(guild_id: int, user_id: int, locked_until: datetime, reason: str) -> datetime:
@@ -434,6 +451,11 @@ async def validate_coin_bet_for(guild_id: int, user_id: int, amount: int) -> tup
         reason = await get_coin_gamble_lock_reason(guild_id, user_id)
         return False, 0, f"{reason}。ギャンブルはあと **{remaining}** できません。"
 
+    cooldown_until = await get_coin_gamble_cooldown_until(guild_id, user_id)
+    if cooldown_until:
+        remaining = format_remaining(cooldown_until - utc_now())
+        return False, 0, f"ギャンブルはクールダウン中です。あと **{remaining}** 待ってください。"
+
     current = int(await db_get(coin_key(guild_id, user_id)) or "0")
     if current <= 0:
         return False, current, "現在の所持コインは **0** です。ギャンブルはできません。"
@@ -480,6 +502,7 @@ async def run_coin_slot_game(guild: discord.Guild, user: discord.Member | discor
     ok, current, error = await validate_coin_bet_for(guild.id, user.id, amount)
     if not ok:
         return False, error
+    await mark_coin_gamble_cooldown(guild.id, user.id)
 
     symbols = [
         ("🍒", 2.0),
@@ -489,12 +512,13 @@ async def run_coin_slot_game(guild: discord.Guild, user: discord.Member | discor
         ("💎", 4.0),
         ("7️⃣", 5.0),
     ]
-    rolls = [random.choice(symbols) for _ in range(3)]
-    faces = [item[0] for item in rolls]
     key = coin_key(guild.id, user.id)
+    outcome = random.random()
 
-    if faces[0] == faces[1] == faces[2]:
-        multiplier = rolls[0][1]
+    if outcome < 0.08:
+        symbol = random.choice(symbols)
+        faces = [symbol[0], symbol[0], symbol[0]]
+        multiplier = symbol[1]
         payout = max(1, int(amount * multiplier))
         profit = payout - amount
         new_balance = current - amount + payout
@@ -507,6 +531,24 @@ async def run_coin_slot_game(guild: discord.Guild, user: discord.Member | discor
             f"現在 **{new_balance}** コインです。{reward_text}"
         )
 
+    if outcome < 0.30:
+        symbol = random.choice(symbols)
+        other_symbol = random.choice([item for item in symbols if item[0] != symbol[0]])
+        faces = [symbol[0], symbol[0], other_symbol[0]]
+        random.shuffle(faces)
+        profit = max(1, amount * 30 // 100)
+        payout = amount + profit
+        new_balance = current - amount + payout
+        await db_set(key, str(new_balance))
+        rewards = await apply_coin_rewards(guild, user if isinstance(user, discord.Member) else None, new_balance)
+        reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+        return True, (
+            f"🎰 {' '.join(faces)}\n"
+            f"小当たり！2つ揃いで **+{profit}** コイン。\n"
+            f"現在 **{new_balance}** コインです。{reward_text}"
+        )
+
+    faces = [item[0] for item in random.sample(symbols, 3)]
     new_balance = max(0, current - amount)
     await db_set(key, str(new_balance))
     zero_text = await build_zero_coin_penalty_text(guild, user, guild.id) if new_balance == 0 else ""
@@ -521,6 +563,7 @@ async def run_coin_dice_game(guild: discord.Guild, user: discord.Member | discor
     ok, current, error = await validate_coin_bet_for(guild.id, user.id, amount)
     if not ok:
         return False, error
+    await mark_coin_gamble_cooldown(guild.id, user.id)
 
     player_dice = (random.randint(1, 6), random.randint(1, 6))
     bot_dice = (random.randint(1, 6), random.randint(1, 6))
@@ -1374,6 +1417,15 @@ class Community(commands.Cog):
             )
             return
 
+        cooldown_until = await get_coin_gamble_cooldown_until(interaction.guild_id, interaction.user.id)
+        if cooldown_until:
+            remaining = format_remaining(cooldown_until - utc_now())
+            await interaction.response.send_message(
+                f"ギャンブルはクールダウン中です。あと **{remaining}** 待ってください。",
+                ephemeral=True,
+            )
+            return
+
         key = coin_key(interaction.guild_id, interaction.user.id)
         current = int(await db_get(key) or "0")
         if current <= 0:
@@ -1389,6 +1441,7 @@ class Community(commands.Cog):
                 ephemeral=True,
             )
             return
+        await mark_coin_gamble_cooldown(interaction.guild_id, interaction.user.id)
         if random.random() < 0.45:
             bonus_percent = random.randint(10, 100)
             profit = max(1, amount * bonus_percent // 100)
