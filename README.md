@@ -7,7 +7,7 @@ VillageCore は、Discord サーバー運営をまとめて支援する多機能
 English README: [README_EN.md](README_EN.md)
 
 ## Roles Guesser
-Among Usの役職アキネーター・クイズ:Roles Guesser Botは[こちら](https://github.com/Shanpan2/VillageCore/blob/main/role_guesser/README.md)から
+Among Usの役職アキネーター・クイズ「Roles Guesser Bot」は、[専用リポジトリ](https://github.com/Shanpan2/Role-Guesser-Bot)へ移動しました。
 
 ## リンク
 
