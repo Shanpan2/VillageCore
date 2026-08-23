@@ -249,6 +249,14 @@ def default_settings() -> dict:
     }
 
 
+def setting_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def validate_date(month: int, day: int) -> bool:
     try:
         datetime(2024, month, day)
@@ -331,30 +339,60 @@ class Today(commands.Cog):
     async def send_today(self, guild: discord.Guild, channel: discord.TextChannel):
         now = datetime.now(JST)
         events = await self.events_for(guild.id, now.month, now.day, now.year)
-        await channel.send(embed=self.build_embed(guild, events, now))
+        await channel.send(
+            embed=self.build_embed(guild, events, now),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def resolve_channel(self, guild: discord.Guild, channel_id: int) -> discord.TextChannel | None:
+        channel = guild.get_channel(channel_id) or self.bot.get_channel(channel_id)
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        try:
+            fetched = await self.bot.fetch_channel(channel_id)
+        except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+            return None
+        return fetched if isinstance(fetched, discord.TextChannel) and fetched.guild.id == guild.id else None
 
     @tasks.loop(minutes=1)
     async def today_loop(self):
         await self.bot.wait_until_ready()
         now = datetime.now(JST)
         for guild in self.bot.guilds:
-            settings = await self.get_settings(guild.id)
-            if not settings.get("enabled", True):
-                continue
-            if int(settings.get("hour", 12)) != now.hour or int(settings.get("minute", 0)) != now.minute:
-                continue
-            today = now.date().isoformat()
-            if settings.get("last_date") == today:
-                continue
-            channel = self.bot.get_channel(int(settings.get("channel_id") or 0))
-            if not isinstance(channel, discord.TextChannel):
-                continue
             try:
-                await self.send_today(guild, channel)
-                settings["last_date"] = today
-                await self.save_settings(guild.id, settings)
-            except discord.HTTPException as exc:
-                print(f"[today] failed to send: {type(exc).__name__}: {exc}", flush=True)
+                await self.send_today_if_due(guild, now)
+            except Exception as exc:
+                print(
+                    f"[today] guild check failed: guild={guild.id} {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+
+    async def send_today_if_due(self, guild: discord.Guild, now: datetime) -> bool:
+        settings = await self.get_settings(guild.id)
+        if not settings.get("enabled", True):
+            return False
+        scheduled_at = now.replace(
+            hour=setting_int(settings.get("hour"), 12, 0, 23),
+            minute=setting_int(settings.get("minute"), 0, 0, 59),
+            second=0,
+            microsecond=0,
+        )
+        today = now.date().isoformat()
+        if now < scheduled_at or settings.get("last_date") == today:
+            return False
+
+        channel_id = setting_int(settings.get("channel_id"), 0, 0, 2**63 - 1)
+        if not channel_id:
+            return False
+        channel = await self.resolve_channel(guild, channel_id)
+        if channel is None:
+            print(f"[today] configured channel not found: guild={guild.id} channel={channel_id}", flush=True)
+            return False
+
+        await self.send_today(guild, channel)
+        settings["last_date"] = today
+        await self.save_settings(guild.id, settings)
+        return True
 
     @today_loop.before_loop
     async def before_today_loop(self):

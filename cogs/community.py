@@ -213,6 +213,22 @@ def format_remaining(delta: timedelta) -> str:
     return f"{seconds}秒"
 
 
+def coin_user_name(member: discord.Member | discord.User) -> str:
+    """Return a readable name without creating a Discord notification."""
+    return discord.utils.escape_markdown(getattr(member, "display_name", member.name))
+
+
+def parse_coin_balance(raw: str | None) -> int:
+    try:
+        return max(0, int(str(raw or "0").strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def format_coins(amount: int) -> str:
+    return f"{max(0, int(amount)):,}コイン"
+
+
 def remaining_until_next_daily() -> timedelta:
     now = datetime.now(JST)
     next_day = (now + timedelta(days=1)).date()
@@ -236,11 +252,12 @@ async def coin_work_remaining_text(guild_id: int, user_id: int) -> str:
 
 
 async def build_coin_balance_text(guild_id: int, member: discord.Member | discord.User) -> str:
-    coins = int(await db_get(coin_key(guild_id, member.id)) or "0")
+    coins = parse_coin_balance(await db_get(coin_key(guild_id, member.id)))
     daily = await coin_daily_remaining_text(guild_id, member.id)
     work = await coin_work_remaining_text(guild_id, member.id)
     return (
-        f"{member.mention} のコイン: **{coins}**\n"
+        f"**{coin_user_name(member)} さんのコイン残高**\n"
+        f"残高: **{format_coins(coins)}**\n"
         f"デイリー: **{daily}**\n"
         f"仕事: **{work}**"
     )
@@ -273,9 +290,9 @@ async def perform_coin_transfer(
     rewards = await apply_coin_rewards(guild, recipient, recipient_balance)
     reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
     return True, (
-        f"🎁 {sender.mention} から {recipient.mention} へ **{amount}コイン** 送りました。\n"
-        f"{sender.mention} の残高: **{sender_balance}コイン**\n"
-        f"{recipient.mention} の残高: **{recipient_balance}コイン**"
+        f"🎁 **{coin_user_name(sender)}** から **{coin_user_name(recipient)}** へ **{format_coins(amount)}** 送りました。\n"
+        f"{coin_user_name(sender)} さんの残高: **{format_coins(sender_balance)}**\n"
+        f"{coin_user_name(recipient)} さんの残高: **{format_coins(recipient_balance)}**"
         f"{reward_text}"
     )
 
@@ -329,7 +346,7 @@ async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tup
 
     if limited_work and random.random() < LIMITED_WORK_FAIL_RATE:
         await db_set(coin_work_key(guild.id, member.id), now.isoformat())
-        return False, f"{member.mention} は働きすぎて体調不良です。1分ほど休んでから働いてください。"
+        return False, f"{coin_user_name(member)} さんは働きすぎて体調不良です。1分ほど休んでから働いてください。"
 
     amount = random.randint(1, 3) if limited_work else random.randint(8, 18)
     balance_key = coin_key(guild.id, member.id)
@@ -339,7 +356,7 @@ async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tup
     await db_set(coin_work_key(guild.id, member.id), now.isoformat())
     rewards = await apply_coin_rewards(guild, member, new_balance)
     reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
-    return True, f"{member.mention} は仕事をして **{amount}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
+    return True, f"{coin_user_name(member)} さんは仕事をして **{format_coins(amount)}** 獲得しました。現在 **{format_coins(new_balance)}** です。{reward_text}"
 
 
 async def perform_coin_daily(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
@@ -356,7 +373,7 @@ async def perform_coin_daily(guild: discord.Guild, member: discord.Member) -> tu
     await db_set(key, jst_today())
     rewards = await apply_coin_rewards(guild, member, new_balance)
     reward_text = "\n" + "\n".join(f"🎁 {message}" for message in rewards) if rewards else ""
-    return True, f"{member.mention} は **{amount}** コインを受け取りました。現在 **{new_balance}** コインです。{reward_text}"
+    return True, f"{coin_user_name(member)} さんは **{format_coins(amount)}** を受け取りました。現在 **{format_coins(new_balance)}** です。{reward_text}"
 
 
 async def get_coin_role_shop(guild_id: int) -> dict[str, dict]:
@@ -591,7 +608,7 @@ async def run_coin_dice_game(guild: discord.Guild, user: discord.Member | discor
 
     return True, (
         f"🎲 ダイス勝負\n"
-        f"{user.mention}: `{player_dice[0]} + {player_dice[1]} = {player_total}`\n"
+        f"{coin_user_name(user)}: `{player_dice[0]} + {player_dice[1]} = {player_total}`\n"
         f"むらびと君: `{bot_dice[0]} + {bot_dice[1]} = {bot_total}`\n"
         f"{result}\n"
         f"現在 **{new_balance}** コインです。{tail}"
@@ -1154,9 +1171,10 @@ class Community(commands.Cog):
         await db_set(balance_key, str(balance - data["cost"]))
 
         await interaction.response.send_message(
-            f"{interaction.user.mention} が **{data['label']}** を交換しました。\n"
-            f"消費: **{data['cost']}** コイン / 残高: **{balance - data['cost']}** コイン\n"
+            f"**{coin_user_name(interaction.user)}** さんが **{data['label']}** を交換しました。\n"
+            f"消費: **{format_coins(data['cost'])}** / 残高: **{format_coins(balance - data['cost'])}**\n"
             f"{result_text}",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @app_commands.command(name="coin_role_set", description="【管理者】コインで交換できるロールと価格を設定します")
@@ -1302,8 +1320,9 @@ class Community(commands.Cog):
         await interaction.user.add_roles(role, reason="Coin role shop purchase")
         await db_set(balance_key, str(balance - cost))
         await interaction.response.send_message(
-            f"{interaction.user.mention} が {role.mention} を交換しました。\n"
-            f"消費: **{cost}** コイン / 残高: **{balance - cost}** コイン"
+            f"**{coin_user_name(interaction.user)}** さんが **@{discord.utils.escape_markdown(role.name)}** を交換しました。\n"
+            f"消費: **{format_coins(cost)}** / 残高: **{format_coins(balance - cost)}**",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @app_commands.command(name="coin_role_sell", description="コインで交換したロールを売却します")
@@ -1340,9 +1359,10 @@ class Community(commands.Cog):
         await interaction.user.remove_roles(role, reason="Coin role shop sale")
         await db_set(balance_key, str(new_balance))
         await interaction.response.send_message(
-            f"{interaction.user.mention} が {role.mention} を売却しました。\n"
-            f"売却額: **{refund}** コイン / 残高: **{new_balance}** コイン",
+            f"**{coin_user_name(interaction.user)}** さんが **@{discord.utils.escape_markdown(role.name)}** を売却しました。\n"
+            f"売却額: **{format_coins(refund)}** / 残高: **{format_coins(new_balance)}**",
             ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @app_commands.command(name="coin_ranking", description="所持コインのランキングを表示します")
@@ -1373,13 +1393,13 @@ class Community(commands.Cog):
 
         lines = []
         for index, (coins, user_id, member) in enumerate(ranking[:10], start=1):
-            name = member.mention if member else f"<@{user_id}>"
-            lines.append(f"{index}. {name} - **{coins}** コイン")
+            name = coin_user_name(member) if member else f"ユーザーID {user_id}"
+            lines.append(f"{index}. {name} - **{format_coins(coins)}**")
         own_rank = next((index for index, (_, user_id, _) in enumerate(ranking, start=1) if user_id == interaction.user.id), None)
         footer = f"あなたの順位: {own_rank}位" if own_rank else "あなたはまだランキングに入っていません。"
         embed = discord.Embed(title="コインランキング", description="\n".join(lines), color=0xF1C40F)
         embed.set_footer(text=footer)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name="coin_daily", description="1日1回コインを受け取ります")
     async def coin_daily(self, interaction: discord.Interaction):
@@ -1450,8 +1470,9 @@ class Community(commands.Cog):
             rewards = await apply_coin_rewards(interaction.guild, interaction.user, new_balance)
             reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
             await interaction.response.send_message(
-                f"当たり！ {interaction.user.mention} は **{amount}** コインを賭けて "
-                f"**+{profit}** コイン獲得しました。現在 **{new_balance}** コインです。{reward_text}"
+                f"当たり！ **{coin_user_name(interaction.user)}** さんは **{format_coins(amount)}** を賭けて "
+                f"**+{format_coins(profit)}** 獲得しました。現在 **{format_coins(new_balance)}** です。{reward_text}",
+                allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
@@ -1490,8 +1511,9 @@ class Community(commands.Cog):
                 "\n`/penalty_status` で状態を確認できます。"
             )
         await interaction.response.send_message(
-            f"残念... {interaction.user.mention} は **{loss}** コイン失いました。"
-            f"現在 **{new_balance}** コインです。{zero_lock_text}"
+            f"残念... **{coin_user_name(interaction.user)}** さんは **{format_coins(loss)}** 失いました。"
+            f"現在 **{format_coins(new_balance)}** です。{zero_lock_text}",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @app_commands.command(name="coin_slot", description="コインを賭けてスロットを回します")
