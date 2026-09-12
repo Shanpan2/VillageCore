@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+__pycache__
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+*cookies*.txt
+role-guesser-work
+analysis

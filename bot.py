@@ -597,7 +597,6 @@ async def handle_help_site(request):
       <nav>
         <div class="wrap">
           <a href="#start">はじめに</a>
-          <a href="#roles-guesser">Roles Guesser</a>
           <a href="#daily">日常</a>
           <a href="#games">ゲーム</a>
           <a href="#coin-note">コイン遊び</a>
@@ -799,11 +798,10 @@ async def handle_dashboard(request: web.Request):
     command_count = len([c for c in bot.tree.walk_commands() if c.parent is None])
     sorted_guilds = sorted(bot.guilds, key=lambda item: item.name.casefold())
     total_members = sum(guild.member_count or 0 for guild in sorted_guilds)
-    role_guilds = sorted(role_bot.guilds, key=lambda item: item.name.casefold())
     guild_rows = dashboard_guild_rows(sorted_guilds, guild_records)
 
     env_rows = dashboard_env_rows(
-        ("DISCORD_TOKEN", "ROLE_GUESSER_TOKEN", "DATABASE_URL", "GEMINI_API_KEY", "YOUTUBE_API_KEY")
+        ("DISCORD_TOKEN", "DATABASE_URL", "GEMINI_API_KEY", "YOUTUBE_API_KEY")
     )
 
     html = f"""
@@ -854,11 +852,11 @@ async def handle_dashboard(request: web.Request):
         <section>
           <h2>Roles Guesser</h2>
           <div class="summary">
-            <div class="metric"><span>BOT</span><strong>{escape(str(role_bot.user)) if role_bot.user else "未起動または起動中"}</strong></div>
-            <div class="metric"><span>導入サーバー数</span><strong>{len(role_guilds)}</strong></div>
-            <div class="metric"><span>Slashコマンド数</span><strong>{len([c for c in role_bot.tree.walk_commands() if c.parent is None])}</strong></div>
+            <div class="metric"><span>BOT</span><strong>廃止済み</strong></div>
+            <div class="metric"><span>導入サーバー数</span><strong>0</strong></div>
+            <div class="metric"><span>Slashコマンド数</span><strong>0</strong></div>
           </div>
-          <p><a href="/roles-dashboard?token={escape(request.query.get('token', ''))}">Roles Guesser専用ダッシュボードを開く</a></p>
+          <p>Roles Guesserは現在使用していません。</p>
         </section>
         <section>
           <h2>環境変数</h2>
@@ -910,6 +908,10 @@ async def handle_dashboard(request: web.Request):
 
 
 async def handle_roles_dashboard(request: web.Request):
+    return web.Response(status=410, text="Roles Guesserは廃止されました。", content_type="text/plain")
+
+    # Legacy dashboard code below is intentionally unreachable until it is removed
+    # together with the archived role-guesser-work project.
     if not DASHBOARD_TOKEN:
         return web.Response(
             text=(
@@ -1034,7 +1036,6 @@ async def start_health_server():
     app.router.add_get("/", handle_ping)
     app.router.add_get("/help", handle_help_site)
     app.router.add_get("/dashboard", handle_dashboard)
-    app.router.add_get("/roles-dashboard", handle_roles_dashboard)
 
     runner = web.AppRunner(app)
     await runner.setup()
