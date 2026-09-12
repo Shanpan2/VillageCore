@@ -142,6 +142,7 @@ async def load_cogs():
         "cogs.reminder",
         "cogs.bot_status",
         "cogs.permission_check",
+        "cogs.role_admin",
         "cogs.quick",
         "cogs.server_logs",
         "cogs.setup_guide",

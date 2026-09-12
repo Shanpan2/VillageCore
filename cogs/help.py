@@ -22,7 +22,7 @@ CATEGORIES = {
             "permission_check",
             "permission_audit",
             "report_channel",
-            "role_panel",
+            "role_",
             "rule_set",
             "server_log",
             "settings_status",
