@@ -5,10 +5,11 @@ from datetime import timedelta
 import discord
 from discord.ext import commands
 
-from cogs.server_logs import send_server_log
+from cogs.server_logs import mark_command_deleted_messages, send_server_log, unmark_command_deleted_messages
 
 
 TIME_VALUE_RE = re.compile(r"(\d+)\s*(秒|分|時間|日)")
+MESSAGE_COUNT_RE = re.compile(r"(\d+)\s*件")
 ANALYZE_RE = re.compile(r"(?:この|今の)?チャンネル.*?(?:分析|要約)|(?:分析|要約).*?(?:この|今の)?チャンネル")
 
 
@@ -23,6 +24,7 @@ def is_admin_mention_command(text: str) -> bool:
         or "キック" in normalized
         or "BAN" in normalized.upper()
         or ("チャンネル" in normalized and "削除" in normalized)
+        or ("メッセージ" in normalized and "削除" in normalized)
         or ANALYZE_RE.search(normalized)
         or ("ロール" in normalized and any(word in normalized for word in ("付与", "付けて", "つけて", "解除", "外して", "削除")))
     )
@@ -53,6 +55,8 @@ class AdminCommandConfirmView(discord.ui.View):
         duration: timedelta | None = None,
         role: discord.Role | None = None,
         channel: discord.abc.GuildChannel | None = None,
+        amount: int | None = None,
+        before_message_id: int | None = None,
         reason: str | None = None,
     ):
         super().__init__(timeout=60)
@@ -63,6 +67,8 @@ class AdminCommandConfirmView(discord.ui.View):
         self.duration = duration
         self.role = role
         self.channel = channel
+        self.amount = amount
+        self.before_message_id = before_message_id
         self.reason = reason or "むらびと君へのメンション命令"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -86,6 +92,8 @@ class AdminCommandConfirmView(discord.ui.View):
             duration=self.duration,
             role=self.role,
             channel=self.channel,
+            amount=self.amount,
+            before_message_id=self.before_message_id,
             reason=self.reason,
         )
         for item in self.children:
@@ -131,8 +139,53 @@ class MentionCommands(commands.Cog):
         duration: timedelta | None,
         role: discord.Role | None,
         channel: discord.abc.GuildChannel | None,
+        amount: int | None,
+        before_message_id: int | None,
         reason: str,
     ) -> tuple[bool, str]:
+        if action == "message_delete":
+            if not actor.guild_permissions.manage_messages:
+                return False, "「メッセージの管理」権限が必要です。"
+            if target is None or not isinstance(channel, discord.TextChannel) or amount is None:
+                return False, "削除対象を取得できませんでした。"
+            me = guild.me
+            if not me or not channel.permissions_for(me).manage_messages:
+                return False, "むらびと君に、このチャンネルの「メッセージの管理」権限がありません。"
+
+            targets = []
+            before = discord.Object(id=before_message_id) if before_message_id else None
+            try:
+                async for item in channel.history(limit=1000, before=before):
+                    if item.author.id == target.id:
+                        targets.append(item)
+                        if len(targets) >= amount:
+                            break
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                return False, f"メッセージ履歴を取得できませんでした: {exc}"
+
+            mark_command_deleted_messages(targets)
+            deleted = []
+            for item in targets:
+                try:
+                    await item.delete(reason=f"{reason} / 実行者: {actor} ({actor.id})")
+                    deleted.append(item)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    unmark_command_deleted_messages([item])
+
+            embed = discord.Embed(
+                title="メンション命令: ユーザーメッセージ削除",
+                color=0xE74C3C,
+                timestamp=discord.utils.utcnow(),
+            )
+            embed.add_field(name="対象", value=f"{display_name(target)} (`{target.id}`)", inline=False)
+            embed.add_field(name="チャンネル", value=f"#{channel.name} (`{channel.id}`)", inline=False)
+            embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
+            embed.add_field(name="指定件数", value=str(amount), inline=True)
+            embed.add_field(name="削除件数", value=str(len(deleted)), inline=True)
+            embed.add_field(name="理由", value=reason[:1000], inline=False)
+            await send_server_log(self.bot, guild, embed, "command_delete")
+            return True, f"{display_name(target)} さんのメッセージを{len(deleted)}件削除しました。"
+
         if action == "channel_delete":
             if not actor.guild_permissions.manage_channels:
                 return False, "「チャンネルの管理」権限が必要です。"
@@ -286,10 +339,28 @@ class MentionCommands(commands.Cog):
         action = None
         duration = None
         role = message.role_mentions[0] if message.role_mentions else None
+        amount = None
         required_permission = None
         summary = ""
         timeout_match = TIME_VALUE_RE.search(text)
-        if "チャンネル" in text and "削除" in text:
+        if "メッセージ" in text and "削除" in text:
+            if target is None:
+                await message.reply("削除対象のユーザーをメンションしてください。", mention_author=False)
+                return
+            target_channel = channel or message.channel
+            if not isinstance(target_channel, discord.TextChannel):
+                await message.reply("削除対象にはテキストチャンネルを指定してください。", mention_author=False)
+                return
+            count_match = MESSAGE_COUNT_RE.search(text)
+            amount = int(count_match.group(1)) if count_match else 10
+            if not 1 <= amount <= 100:
+                await message.reply("削除件数は1～100件で指定してください。", mention_author=False)
+                return
+            channel = target_channel
+            action = "message_delete"
+            required_permission = message.author.guild_permissions.manage_messages
+            summary = f"#{channel.name} にある {display_name(target)} さんの直近メッセージを最大{amount}件削除"
+        elif "チャンネル" in text and "削除" in text:
             if channel is None:
                 await message.reply("削除するチャンネルをメンションしてください。例: `#チャンネルを削除して`", mention_author=False)
                 return
@@ -344,6 +415,8 @@ class MentionCommands(commands.Cog):
             duration=duration,
             role=role,
             channel=channel,
+            amount=amount,
+            before_message_id=message.id,
             reason=reason,
         )
         reason_text = f"\n理由: {reason}" if reason else ""
