@@ -28,6 +28,7 @@ CATEGORIES = {
             "settings_status",
             "setup_guide",
             "setup_wizard",
+            "spam_",
             "ticket",
             "welcome",
             "youtube",

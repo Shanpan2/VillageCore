@@ -152,6 +152,7 @@ class Ops(commands.Cog):
         all_config = await db_get_all_config()
         role_panels = len([key for key in all_config if key.startswith("role_panel:")])
         faq_count = len(read_json(await db_get(f"community_faq_index:{guild_id}"), []))
+        spam_settings = read_json(await db_get(f"spam_guard_settings:{guild_id}"), {})
 
         fields = {
             "サーバーログ": await db_get(f"server_log_channel:{guild_id}"),
@@ -170,6 +171,7 @@ class Ops(commands.Cog):
         embed.add_field(name="FAQ数", value=str(faq_count), inline=True)
         embed.add_field(name="メンテナンス", value="ON" if await db_get(maintenance_key(guild_id)) == "on" else "OFF", inline=True)
         embed.add_field(name="自動Kick", value="ON" if await db_get(f"welcome_auto_kick_{guild_id}") == "on" else "OFF", inline=True)
+        embed.add_field(name="スパム防止", value="ON" if spam_settings.get("enabled") else "OFF", inline=True)
         embed.add_field(name="将棋判定", value=shogi_library_status(), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
