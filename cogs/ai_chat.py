@@ -14,6 +14,7 @@ from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from cogs.server_logs import send_server_log
+from cogs.mention_commands import is_admin_mention_command
 from database.config_db import db_get, db_set
 
 try:
@@ -503,7 +504,7 @@ class AIChat(commands.Cog):
         if message.author.bot or not self.bot.user:
             return
 
-        is_mentioned = self.bot.user in message.mentions
+        is_mentioned = any(user.id == self.bot.user.id for user in message.mentions)
         is_reply_to_bot = False
         replied_message = None
         if message.reference:
@@ -523,6 +524,8 @@ class AIChat(commands.Cog):
             return
 
         question = MENTION_RE.sub("", message.content).strip()
+        if is_mentioned and message.guild and is_admin_mention_command(question):
+            return
         if is_mentioned and isinstance(replied_message, discord.Message) and not question:
             try:
                 card = await make_quote_card(replied_message)
