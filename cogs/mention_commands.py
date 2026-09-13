@@ -21,6 +21,8 @@ def is_admin_mention_command(text: str) -> bool:
     return bool(
         "タイムアウト" in normalized
         or "キック" in normalized
+        or "BAN" in normalized.upper()
+        or ("チャンネル" in normalized and "削除" in normalized)
         or ANALYZE_RE.search(normalized)
         or ("ロール" in normalized and any(word in normalized for word in ("付与", "付けて", "つけて", "解除", "外して", "削除")))
     )
@@ -46,10 +48,11 @@ class AdminCommandConfirmView(discord.ui.View):
         cog: "MentionCommands",
         requester_id: int,
         action: str,
-        target: discord.Member,
+        target: discord.Member | None = None,
         *,
         duration: timedelta | None = None,
         role: discord.Role | None = None,
+        channel: discord.abc.GuildChannel | None = None,
         reason: str | None = None,
     ):
         super().__init__(timeout=60)
@@ -59,6 +62,7 @@ class AdminCommandConfirmView(discord.ui.View):
         self.target = target
         self.duration = duration
         self.role = role
+        self.channel = channel
         self.reason = reason or "むらびと君へのメンション命令"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -81,6 +85,7 @@ class AdminCommandConfirmView(discord.ui.View):
             self.target,
             duration=self.duration,
             role=self.role,
+            channel=self.channel,
             reason=self.reason,
         )
         for item in self.children:
@@ -121,12 +126,41 @@ class MentionCommands(commands.Cog):
         guild: discord.Guild,
         actor: discord.Member,
         action: str,
-        target: discord.Member,
+        target: discord.Member | None,
         *,
         duration: timedelta | None,
         role: discord.Role | None,
+        channel: discord.abc.GuildChannel | None,
         reason: str,
     ) -> tuple[bool, str]:
+        if action == "channel_delete":
+            if not actor.guild_permissions.manage_channels:
+                return False, "「チャンネルの管理」権限が必要です。"
+            if not guild.me or not guild.me.guild_permissions.manage_channels:
+                return False, "むらびと君に「チャンネルの管理」権限がありません。"
+            if channel is None or channel.guild.id != guild.id:
+                return False, "削除対象のチャンネルを取得できませんでした。"
+
+            channel_name = channel.name
+            channel_id = channel.id
+            try:
+                await channel.delete(reason=f"{reason} / 実行者: {actor} ({actor.id})")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                return False, f"チャンネルを削除できませんでした: {exc}"
+            embed = discord.Embed(
+                title="メンション命令: チャンネル削除",
+                color=0xE74C3C,
+                timestamp=discord.utils.utcnow(),
+            )
+            embed.add_field(name="対象", value=f"#{channel_name} (`{channel_id}`)", inline=False)
+            embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
+            embed.add_field(name="理由", value=reason[:1000], inline=False)
+            await send_server_log(self.bot, guild, embed, "role_channel")
+            return True, f"#{channel_name} を削除しました。"
+
+        if target is None:
+            return False, "命令対象のメンバーを取得できませんでした。"
+
         if action in {"role_give", "role_delete"}:
             if not actor.guild_permissions.manage_roles:
                 return False, "「ロールの管理」権限が必要です。"
@@ -166,6 +200,16 @@ class MentionCommands(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as exc:
                 return False, f"キックできませんでした: {exc}"
             action_label = "キック"
+        elif action == "ban":
+            if not actor.guild_permissions.ban_members:
+                return False, "「メンバーをBAN」権限が必要です。"
+            if not guild.me or not guild.me.guild_permissions.ban_members:
+                return False, "むらびと君に「メンバーをBAN」権限がありません。"
+            try:
+                await guild.ban(target, reason=f"{reason} / 実行者: {actor} ({actor.id})")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                return False, f"BANできませんでした: {exc}"
+            action_label = "BAN"
         else:
             return False, "未対応の命令です。"
 
@@ -234,10 +278,8 @@ class MentionCommands(commands.Cog):
             return
 
         targets = [member for member in message.mentions if member.id != self.bot.user.id]
-        if not targets:
-            await message.reply("命令対象のメンバーもメンションしてください。", mention_author=False)
-            return
-        target = targets[0]
+        target = targets[0] if targets else None
+        channel = message.channel_mentions[0] if message.channel_mentions else None
         reason_match = re.search(r"理由\s*[:：]\s*(.+)$", text)
         reason = reason_match.group(1).strip()[:300] if reason_match else None
 
@@ -247,7 +289,17 @@ class MentionCommands(commands.Cog):
         required_permission = None
         summary = ""
         timeout_match = TIME_VALUE_RE.search(text)
-        if "タイムアウト" in text:
+        if "チャンネル" in text and "削除" in text:
+            if channel is None:
+                await message.reply("削除するチャンネルをメンションしてください。例: `#チャンネルを削除して`", mention_author=False)
+                return
+            action = "channel_delete"
+            required_permission = message.author.guild_permissions.manage_channels
+            summary = f"#{channel.name} を削除"
+        elif target is None:
+            await message.reply("命令対象のメンバーもメンションしてください。", mention_author=False)
+            return
+        elif "タイムアウト" in text:
             value = int(timeout_match.group(1)) if timeout_match else 10
             unit = timeout_match.group(2) if timeout_match else "分"
             duration = timeout_delta(value, unit)
@@ -261,6 +313,10 @@ class MentionCommands(commands.Cog):
             action = "kick"
             required_permission = message.author.guild_permissions.kick_members
             summary = f"{display_name(target)} さんをキック"
+        elif "BAN" in text.upper():
+            action = "ban"
+            required_permission = message.author.guild_permissions.ban_members
+            summary = f"{display_name(target)} さんをBAN"
         elif role and any(word in text for word in ("付与", "付けて", "つけて")):
             action = "role_give"
             required_permission = message.author.guild_permissions.manage_roles
@@ -287,6 +343,7 @@ class MentionCommands(commands.Cog):
             target,
             duration=duration,
             role=role,
+            channel=channel,
             reason=reason,
         )
         reason_text = f"\n理由: {reason}" if reason else ""
