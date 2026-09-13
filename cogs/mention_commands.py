@@ -469,8 +469,19 @@ class MentionCommands(commands.Cog):
         if "メッセージ" in text and "削除" in text:
             delete_all = any(
                 word in text
-                for word in ("すべて削除", "全部削除", "全削除", "すべてのメッセージ", "全メッセージ")
+                for word in (
+                    "すべて削除",
+                    "全て削除",
+                    "全部削除",
+                    "全削除",
+                    "すべてのメッセージ",
+                    "全てのメッセージ",
+                    "全メッセージ",
+                )
             )
+            count_match = MESSAGE_COUNT_RE.search(text)
+            if count_match is None:
+                delete_all = True
             delete_everyone = target is None and target_user_id is None and delete_all
             if target is None and target_user_id is None and not delete_everyone:
                 await message.reply(
@@ -478,13 +489,14 @@ class MentionCommands(commands.Cog):
                     mention_author=False,
                 )
                 return
-            all_channels = "すべてのチャンネル" in text or "全チャンネル" in text
+            all_channels = any(
+                word in text for word in ("すべてのチャンネル", "全てのチャンネル", "全チャンネル")
+            )
             target_channel = channel or message.channel
             if not all_channels and not isinstance(target_channel, discord.TextChannel):
                 await message.reply("削除対象にはテキストチャンネルを指定してください。", mention_author=False)
                 return
-            count_match = MESSAGE_COUNT_RE.search(text)
-            amount = int(count_match.group(1)) if count_match else (None if delete_all else 10)
+            amount = int(count_match.group(1)) if count_match else None
             if amount is not None and not 1 <= amount <= 100:
                 await message.reply("削除件数は1～100件で指定してください。", mention_author=False)
                 return
