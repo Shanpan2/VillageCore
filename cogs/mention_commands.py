@@ -11,6 +11,7 @@ from cogs.server_logs import mark_command_deleted_messages, send_server_log, unm
 TIME_VALUE_RE = re.compile(r"(\d+)\s*(秒|分|時間|日)")
 MESSAGE_COUNT_RE = re.compile(r"(\d+)\s*件")
 USER_ID_RE = re.compile(r"(?:ユーザー\s*)?ID\s*[:：]?\s*(\d{15,22})", re.IGNORECASE)
+MESSAGE_LINK_RE = re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
 ANALYZE_RE = re.compile(r"(?:この|今の)?チャンネル.*?(?:分析|要約)|(?:分析|要約).*?(?:この|今の)?チャンネル")
 
 
@@ -26,6 +27,7 @@ def is_admin_mention_command(text: str) -> bool:
         or "BAN" in normalized.upper()
         or ("チャンネル" in normalized and "削除" in normalized)
         or ("メッセージ" in normalized and "削除" in normalized)
+        or (MESSAGE_LINK_RE.search(normalized) and any(word in normalized for word in ("転送", "スレッド")))
         or ANALYZE_RE.search(normalized)
         or ("ロール" in normalized and any(word in normalized for word in ("付与", "付けて", "つけて", "解除", "外して", "削除")))
     )
@@ -62,6 +64,7 @@ class AdminCommandConfirmView(discord.ui.View):
         target_label: str | None = None,
         delete_all: bool = False,
         all_channels: bool = False,
+        delete_everyone: bool = False,
         reason: str | None = None,
     ):
         super().__init__(timeout=60)
@@ -78,6 +81,7 @@ class AdminCommandConfirmView(discord.ui.View):
         self.target_label = target_label
         self.delete_all = delete_all
         self.all_channels = all_channels
+        self.delete_everyone = delete_everyone
         self.reason = reason or "むらびと君へのメンション命令"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -107,6 +111,7 @@ class AdminCommandConfirmView(discord.ui.View):
             target_label=self.target_label,
             delete_all=self.delete_all,
             all_channels=self.all_channels,
+            delete_everyone=self.delete_everyone,
             reason=self.reason,
         )
         for item in self.children:
@@ -158,14 +163,19 @@ class MentionCommands(commands.Cog):
         target_label: str | None,
         delete_all: bool,
         all_channels: bool,
+        delete_everyone: bool,
         reason: str,
     ) -> tuple[bool, str]:
         if action == "message_delete":
             if not actor.guild_permissions.manage_messages:
                 return False, "「メッセージの管理」権限が必要です。"
             resolved_target_id = target.id if target else target_user_id
-            resolved_target_label = display_name(target) if target else (target_label or f"ユーザーID {resolved_target_id}")
-            if resolved_target_id is None or (not all_channels and not isinstance(channel, discord.TextChannel)):
+            resolved_target_label = "全ユーザー" if delete_everyone else (
+                display_name(target) if target else (target_label or f"ユーザーID {resolved_target_id}")
+            )
+            if (resolved_target_id is None and not delete_everyone) or (
+                not all_channels and not isinstance(channel, discord.TextChannel)
+            ):
                 return False, "削除対象を取得できませんでした。"
             me = guild.me
             if not me:
@@ -187,7 +197,7 @@ class MentionCommands(commands.Cog):
             try:
                 for target_channel in readable_channels:
                     async for item in target_channel.history(limit=None if delete_all else 1000, before=before):
-                        if item.author.id == resolved_target_id:
+                        if delete_everyone or item.author.id == resolved_target_id:
                             targets.append(item)
             except (discord.Forbidden, discord.HTTPException) as exc:
                 return False, f"メッセージ履歴を取得できませんでした: {exc}"
@@ -210,7 +220,8 @@ class MentionCommands(commands.Cog):
                 color=0xE74C3C,
                 timestamp=discord.utils.utcnow(),
             )
-            embed.add_field(name="対象", value=f"{resolved_target_label} (`{resolved_target_id}`)", inline=False)
+            target_value = resolved_target_label if delete_everyone else f"{resolved_target_label} (`{resolved_target_id}`)"
+            embed.add_field(name="対象", value=target_value, inline=False)
             channel_label = "すべてのテキストチャンネル" if all_channels else f"#{channel.name} (`{channel.id}`)"
             embed.add_field(name="チャンネル", value=channel_label, inline=False)
             embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
@@ -345,6 +356,75 @@ class MentionCommands(commands.Cog):
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
+    async def handle_message_link_command(self, message: discord.Message, text: str) -> bool:
+        match = MESSAGE_LINK_RE.search(text)
+        if not match or not isinstance(message.author, discord.Member):
+            return False
+        guild_id, channel_id, message_id = map(int, match.groups())
+        if not message.guild or guild_id != message.guild.id:
+            await message.reply("同じサーバー内のメッセージリンクを指定してください。", mention_author=False)
+            return True
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply("この命令には「メッセージの管理」権限が必要です。", mention_author=False)
+            return True
+
+        source_channel = message.guild.get_channel_or_thread(channel_id)
+        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+            await message.reply("リンク元のチャンネルを取得できませんでした。", mention_author=False)
+            return True
+        try:
+            source = await source_channel.fetch_message(message_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            await message.reply("リンク先のメッセージを取得できませんでした。", mention_author=False)
+            return True
+
+        if "転送" in text:
+            destination = message.channel_mentions[0] if message.channel_mentions else None
+            if not isinstance(destination, discord.TextChannel):
+                await message.reply("転送先のテキストチャンネルをメンションしてください。", mention_author=False)
+                return True
+            me = message.guild.me
+            if not me or not destination.permissions_for(me).send_messages:
+                await message.reply("むらびと君が転送先へメッセージを送信できません。", mention_author=False)
+                return True
+            embed = discord.Embed(
+                description=(source.content or "本文なし")[:4000],
+                color=0x3498DB,
+                timestamp=source.created_at,
+            )
+            embed.set_author(
+                name=f"{source.author} から転送",
+                icon_url=source.author.display_avatar.url,
+            )
+            links = [attachment.url for attachment in source.attachments]
+            if links:
+                embed.add_field(name="添付ファイル", value="\n".join(links)[:1024], inline=False)
+                if source.attachments[0].content_type and source.attachments[0].content_type.startswith("image/"):
+                    embed.set_image(url=source.attachments[0].url)
+            embed.add_field(name="元のメッセージ", value=f"[開く]({source.jump_url})", inline=False)
+            try:
+                forwarded = await destination.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                await message.reply(f"転送できませんでした: {exc}", mention_author=False)
+                return True
+            await message.reply(f"{destination.mention} に転送しました: {forwarded.jump_url}", mention_author=False)
+            return True
+
+        if "スレッド" in text:
+            if not isinstance(source.channel, discord.TextChannel):
+                await message.reply("通常のテキストチャンネルにあるメッセージを指定してください。", mention_author=False)
+                return True
+            name_match = re.search(r"[「『\"]([^」』\"]{1,100})[」』\"]", text)
+            thread_name = name_match.group(1).strip() if name_match else f"{source.author.display_name}のメッセージ"
+            try:
+                thread = await source.create_thread(name=thread_name[:100], reason=f"作成者: {message.author} ({message.author.id})")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                await message.reply(f"スレッドを作成できませんでした: {exc}", mention_author=False)
+                return True
+            await message.reply(f"スレッドを作成しました: {thread.mention}", mention_author=False)
+            return True
+        return False
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if (
@@ -358,6 +438,9 @@ class MentionCommands(commands.Cog):
         if not is_admin_mention_command(text):
             return
         if not isinstance(message.author, discord.Member):
+            return
+
+        if await self.handle_message_link_command(message, text):
             return
 
         if ANALYZE_RE.search(text):
@@ -379,11 +462,17 @@ class MentionCommands(commands.Cog):
         amount = None
         delete_all = False
         all_channels = False
+        delete_everyone = False
         required_permission = None
         summary = ""
         timeout_match = TIME_VALUE_RE.search(text)
         if "メッセージ" in text and "削除" in text:
-            if target is None and target_user_id is None:
+            delete_all = any(
+                word in text
+                for word in ("すべて削除", "全部削除", "全削除", "すべてのメッセージ", "全メッセージ")
+            )
+            delete_everyone = target is None and target_user_id is None and delete_all
+            if target is None and target_user_id is None and not delete_everyone:
                 await message.reply(
                     "削除対象をユーザーメンションまたは `ユーザーID:123456789012345678` で指定してください。",
                     mention_author=False,
@@ -395,15 +484,18 @@ class MentionCommands(commands.Cog):
                 await message.reply("削除対象にはテキストチャンネルを指定してください。", mention_author=False)
                 return
             count_match = MESSAGE_COUNT_RE.search(text)
-            delete_all = any(word in text for word in ("すべて削除", "全部削除", "全削除"))
             amount = int(count_match.group(1)) if count_match else (None if delete_all else 10)
             if amount is not None and not 1 <= amount <= 100:
                 await message.reply("削除件数は1～100件で指定してください。", mention_author=False)
                 return
             channel = target_channel
             action = "message_delete"
-            required_permission = message.author.guild_permissions.manage_messages
-            shown_target = display_name(target) if target else target_label
+            required_permission = (
+                message.author.guild_permissions.administrator
+                if delete_everyone
+                else message.author.guild_permissions.manage_messages
+            )
+            shown_target = "全ユーザー" if delete_everyone else (display_name(target) if target else target_label)
             scope = "すべてのテキストチャンネル" if all_channels else f"#{channel.name}"
             count_label = "すべて" if delete_all else f"最大{amount}件"
             summary = f"{scope}にある {shown_target} のメッセージを{count_label}削除"
@@ -468,6 +560,7 @@ class MentionCommands(commands.Cog):
             target_label=target_label,
             delete_all=delete_all,
             all_channels=all_channels,
+            delete_everyone=delete_everyone,
             reason=reason,
         )
         reason_text = f"\n理由: {reason}" if reason else ""
