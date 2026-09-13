@@ -1,6 +1,6 @@
 import io
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -12,6 +12,7 @@ TIME_VALUE_RE = re.compile(r"(\d+)\s*(秒|分|時間|日)")
 MESSAGE_COUNT_RE = re.compile(r"(\d+)\s*件")
 USER_ID_RE = re.compile(r"(?:ユーザー\s*)?ID\s*[:：]?\s*(\d{15,22})", re.IGNORECASE)
 MESSAGE_LINK_RE = re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
+DELETE_PERIOD_RE = re.compile(r"(?:過去|直近)\s*(\d+)\s*(日|週間|週|か月|ヶ月|ヵ月)")
 ANALYZE_RE = re.compile(r"(?:この|今の)?チャンネル.*?(?:分析|要約)|(?:分析|要約).*?(?:この|今の)?チャンネル")
 
 
@@ -26,6 +27,7 @@ def is_admin_mention_command(text: str) -> bool:
         or "キック" in normalized
         or "BAN" in normalized.upper()
         or ("チャンネル" in normalized and "削除" in normalized)
+        or ("スレッド" in normalized and "削除" in normalized)
         or ("メッセージ" in normalized and "削除" in normalized)
         or (MESSAGE_LINK_RE.search(normalized) and any(word in normalized for word in ("転送", "スレッド")))
         or ANALYZE_RE.search(normalized)
@@ -65,6 +67,7 @@ class AdminCommandConfirmView(discord.ui.View):
         delete_all: bool = False,
         all_channels: bool = False,
         delete_everyone: bool = False,
+        after_datetime: datetime | None = None,
         reason: str | None = None,
     ):
         super().__init__(timeout=60)
@@ -82,6 +85,7 @@ class AdminCommandConfirmView(discord.ui.View):
         self.delete_all = delete_all
         self.all_channels = all_channels
         self.delete_everyone = delete_everyone
+        self.after_datetime = after_datetime
         self.reason = reason or "むらびと君へのメンション命令"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -112,6 +116,7 @@ class AdminCommandConfirmView(discord.ui.View):
             delete_all=self.delete_all,
             all_channels=self.all_channels,
             delete_everyone=self.delete_everyone,
+            after_datetime=self.after_datetime,
             reason=self.reason,
         )
         for item in self.children:
@@ -164,6 +169,7 @@ class MentionCommands(commands.Cog):
         delete_all: bool,
         all_channels: bool,
         delete_everyone: bool,
+        after_datetime: datetime | None,
         reason: str,
     ) -> tuple[bool, str]:
         if action == "message_delete":
@@ -196,7 +202,12 @@ class MentionCommands(commands.Cog):
             before = discord.Object(id=before_message_id) if before_message_id else None
             try:
                 for target_channel in readable_channels:
-                    async for item in target_channel.history(limit=None if delete_all else 1000, before=before):
+                    async for item in target_channel.history(
+                        limit=None if delete_all else 1000,
+                        before=before,
+                        after=after_datetime,
+                        oldest_first=False,
+                    ):
                         if delete_everyone or item.author.id == resolved_target_id:
                             targets.append(item)
             except (discord.Forbidden, discord.HTTPException) as exc:
@@ -226,10 +237,33 @@ class MentionCommands(commands.Cog):
             embed.add_field(name="チャンネル", value=channel_label, inline=False)
             embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
             embed.add_field(name="指定件数", value="すべて" if delete_all else str(amount), inline=True)
+            if after_datetime:
+                embed.add_field(name="対象期間", value=f"<t:{int(after_datetime.timestamp())}:R>以降", inline=True)
             embed.add_field(name="削除件数", value=str(len(deleted)), inline=True)
             embed.add_field(name="理由", value=reason[:1000], inline=False)
             await send_server_log(self.bot, guild, embed, "command_delete")
             return True, f"{resolved_target_label} のメッセージを{len(deleted)}件削除しました。"
+
+        if action == "thread_delete":
+            if not actor.guild_permissions.manage_threads:
+                return False, "「スレッドの管理」権限が必要です。"
+            if not isinstance(channel, discord.Thread):
+                return False, "削除対象のスレッドを取得できませんでした。"
+            me = guild.me
+            if not me or not channel.permissions_for(me).manage_threads:
+                return False, "むらびと君に「スレッドの管理」権限がありません。"
+            thread_name = channel.name
+            thread_id = channel.id
+            try:
+                await channel.delete(reason=f"{reason} / 実行者: {actor} ({actor.id})")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                return False, f"スレッドを削除できませんでした: {exc}"
+            embed = discord.Embed(title="メンション命令: スレッド削除", color=0xE74C3C)
+            embed.add_field(name="対象", value=f"{thread_name} (`{thread_id}`)", inline=False)
+            embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
+            embed.add_field(name="理由", value=reason[:1000], inline=False)
+            await send_server_log(self.bot, guild, embed, "role_channel")
+            return True, f"スレッド「{thread_name}」を削除しました。"
 
         if action == "channel_delete":
             if not actor.guild_permissions.manage_channels:
@@ -452,7 +486,8 @@ class MentionCommands(commands.Cog):
         user_id_match = USER_ID_RE.search(text)
         target_user_id = int(user_id_match.group(1)) if user_id_match else None
         target_label = f"ユーザーID {target_user_id}" if target_user_id else None
-        channel = message.channel_mentions[0] if message.channel_mentions else None
+        channel_id = message.raw_channel_mentions[0] if message.raw_channel_mentions else None
+        channel = message.guild.get_channel_or_thread(channel_id) if channel_id else None
         reason_match = re.search(r"理由\s*[:：]\s*(.+)$", text)
         reason = reason_match.group(1).strip()[:300] if reason_match else None
 
@@ -463,6 +498,7 @@ class MentionCommands(commands.Cog):
         delete_all = False
         all_channels = False
         delete_everyone = False
+        after_datetime = None
         required_permission = None
         summary = ""
         timeout_match = TIME_VALUE_RE.search(text)
@@ -480,6 +516,17 @@ class MentionCommands(commands.Cog):
                 )
             )
             count_match = MESSAGE_COUNT_RE.search(text)
+            period_match = DELETE_PERIOD_RE.search(text)
+            period_label = None
+            if period_match:
+                period_value = int(period_match.group(1))
+                period_unit = period_match.group(2)
+                period_days = period_value * (7 if period_unit in ("週間", "週") else 30 if "月" in period_unit else 1)
+                if period_value <= 0 or period_days > 3650:
+                    await message.reply("削除期間は1日以上10年以内で指定してください。", mention_author=False)
+                    return
+                after_datetime = datetime.now(timezone.utc) - timedelta(days=period_days)
+                period_label = f"過去{period_value}{period_unit}"
             if count_match is None:
                 delete_all = True
             delete_everyone = target is None and target_user_id is None and delete_all
@@ -510,7 +557,15 @@ class MentionCommands(commands.Cog):
             shown_target = "全ユーザー" if delete_everyone else (display_name(target) if target else target_label)
             scope = "すべてのテキストチャンネル" if all_channels else f"#{channel.name}"
             count_label = "すべて" if delete_all else f"最大{amount}件"
-            summary = f"{scope}にある {shown_target} のメッセージを{count_label}削除"
+            period_text = f"（{period_label}）" if period_label else ""
+            summary = f"{scope}にある {shown_target} のメッセージを{count_label}削除{period_text}"
+        elif "スレッド" in text and "削除" in text:
+            if not isinstance(channel, discord.Thread):
+                await message.reply("削除するスレッドをメンションしてください。", mention_author=False)
+                return
+            action = "thread_delete"
+            required_permission = message.author.guild_permissions.manage_threads
+            summary = f"スレッド「{channel.name}」を削除"
         elif "チャンネル" in text and "削除" in text:
             if channel is None:
                 await message.reply("削除するチャンネルをメンションしてください。例: `#チャンネルを削除して`", mention_author=False)
@@ -573,6 +628,7 @@ class MentionCommands(commands.Cog):
             delete_all=delete_all,
             all_channels=all_channels,
             delete_everyone=delete_everyone,
+            after_datetime=after_datetime,
             reason=reason,
         )
         reason_text = f"\n理由: {reason}" if reason else ""
