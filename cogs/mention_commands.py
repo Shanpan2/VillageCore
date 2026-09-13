@@ -10,6 +10,7 @@ from cogs.server_logs import mark_command_deleted_messages, send_server_log, unm
 
 TIME_VALUE_RE = re.compile(r"(\d+)\s*(秒|分|時間|日)")
 MESSAGE_COUNT_RE = re.compile(r"(\d+)\s*件")
+USER_ID_RE = re.compile(r"(?:ユーザー\s*)?ID\s*[:：]?\s*(\d{15,22})", re.IGNORECASE)
 ANALYZE_RE = re.compile(r"(?:この|今の)?チャンネル.*?(?:分析|要約)|(?:分析|要約).*?(?:この|今の)?チャンネル")
 
 
@@ -57,6 +58,8 @@ class AdminCommandConfirmView(discord.ui.View):
         channel: discord.abc.GuildChannel | None = None,
         amount: int | None = None,
         before_message_id: int | None = None,
+        target_user_id: int | None = None,
+        target_label: str | None = None,
         reason: str | None = None,
     ):
         super().__init__(timeout=60)
@@ -69,6 +72,8 @@ class AdminCommandConfirmView(discord.ui.View):
         self.channel = channel
         self.amount = amount
         self.before_message_id = before_message_id
+        self.target_user_id = target_user_id
+        self.target_label = target_label
         self.reason = reason or "むらびと君へのメンション命令"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -94,6 +99,8 @@ class AdminCommandConfirmView(discord.ui.View):
             channel=self.channel,
             amount=self.amount,
             before_message_id=self.before_message_id,
+            target_user_id=self.target_user_id,
+            target_label=self.target_label,
             reason=self.reason,
         )
         for item in self.children:
@@ -141,12 +148,16 @@ class MentionCommands(commands.Cog):
         channel: discord.abc.GuildChannel | None,
         amount: int | None,
         before_message_id: int | None,
+        target_user_id: int | None,
+        target_label: str | None,
         reason: str,
     ) -> tuple[bool, str]:
         if action == "message_delete":
             if not actor.guild_permissions.manage_messages:
                 return False, "「メッセージの管理」権限が必要です。"
-            if target is None or not isinstance(channel, discord.TextChannel) or amount is None:
+            resolved_target_id = target.id if target else target_user_id
+            resolved_target_label = display_name(target) if target else (target_label or f"ユーザーID {resolved_target_id}")
+            if resolved_target_id is None or not isinstance(channel, discord.TextChannel) or amount is None:
                 return False, "削除対象を取得できませんでした。"
             me = guild.me
             if not me or not channel.permissions_for(me).manage_messages:
@@ -156,7 +167,7 @@ class MentionCommands(commands.Cog):
             before = discord.Object(id=before_message_id) if before_message_id else None
             try:
                 async for item in channel.history(limit=1000, before=before):
-                    if item.author.id == target.id:
+                    if item.author.id == resolved_target_id:
                         targets.append(item)
                         if len(targets) >= amount:
                             break
@@ -177,14 +188,14 @@ class MentionCommands(commands.Cog):
                 color=0xE74C3C,
                 timestamp=discord.utils.utcnow(),
             )
-            embed.add_field(name="対象", value=f"{display_name(target)} (`{target.id}`)", inline=False)
+            embed.add_field(name="対象", value=f"{resolved_target_label} (`{resolved_target_id}`)", inline=False)
             embed.add_field(name="チャンネル", value=f"#{channel.name} (`{channel.id}`)", inline=False)
             embed.add_field(name="実行者", value=f"{display_name(actor)} (`{actor.id}`)", inline=False)
             embed.add_field(name="指定件数", value=str(amount), inline=True)
             embed.add_field(name="削除件数", value=str(len(deleted)), inline=True)
             embed.add_field(name="理由", value=reason[:1000], inline=False)
             await send_server_log(self.bot, guild, embed, "command_delete")
-            return True, f"{display_name(target)} さんのメッセージを{len(deleted)}件削除しました。"
+            return True, f"{resolved_target_label} のメッセージを{len(deleted)}件削除しました。"
 
         if action == "channel_delete":
             if not actor.guild_permissions.manage_channels:
@@ -332,6 +343,9 @@ class MentionCommands(commands.Cog):
 
         targets = [member for member in message.mentions if member.id != self.bot.user.id]
         target = targets[0] if targets else None
+        user_id_match = USER_ID_RE.search(text)
+        target_user_id = int(user_id_match.group(1)) if user_id_match else None
+        target_label = f"ユーザーID {target_user_id}" if target_user_id else None
         channel = message.channel_mentions[0] if message.channel_mentions else None
         reason_match = re.search(r"理由\s*[:：]\s*(.+)$", text)
         reason = reason_match.group(1).strip()[:300] if reason_match else None
@@ -344,8 +358,11 @@ class MentionCommands(commands.Cog):
         summary = ""
         timeout_match = TIME_VALUE_RE.search(text)
         if "メッセージ" in text and "削除" in text:
-            if target is None:
-                await message.reply("削除対象のユーザーをメンションしてください。", mention_author=False)
+            if target is None and target_user_id is None:
+                await message.reply(
+                    "削除対象をユーザーメンションまたは `ユーザーID:123456789012345678` で指定してください。",
+                    mention_author=False,
+                )
                 return
             target_channel = channel or message.channel
             if not isinstance(target_channel, discord.TextChannel):
@@ -359,7 +376,8 @@ class MentionCommands(commands.Cog):
             channel = target_channel
             action = "message_delete"
             required_permission = message.author.guild_permissions.manage_messages
-            summary = f"#{channel.name} にある {display_name(target)} さんの直近メッセージを最大{amount}件削除"
+            shown_target = display_name(target) if target else target_label
+            summary = f"#{channel.name} にある {shown_target} の直近メッセージを最大{amount}件削除"
         elif "チャンネル" in text and "削除" in text:
             if channel is None:
                 await message.reply("削除するチャンネルをメンションしてください。例: `#チャンネルを削除して`", mention_author=False)
@@ -417,6 +435,8 @@ class MentionCommands(commands.Cog):
             channel=channel,
             amount=amount,
             before_message_id=message.id,
+            target_user_id=target_user_id,
+            target_label=target_label,
             reason=reason,
         )
         reason_text = f"\n理由: {reason}" if reason else ""
