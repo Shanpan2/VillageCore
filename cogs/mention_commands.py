@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 
 from cogs.server_logs import mark_command_deleted_messages, send_server_log, unmark_command_deleted_messages
+from cogs.role_admin import load_coin_role_shop, save_coin_role_shop, validate_role_operation
 
 
 TIME_VALUE_RE = re.compile(r"(\d+)\s*(秒|分|時間|日)")
@@ -13,6 +14,9 @@ MESSAGE_COUNT_RE = re.compile(r"(\d+)\s*件")
 USER_ID_RE = re.compile(r"(?:ユーザー\s*)?ID\s*[:：]?\s*(\d{15,22})", re.IGNORECASE)
 MESSAGE_LINK_RE = re.compile(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
 DELETE_PERIOD_RE = re.compile(r"(?:過去|直近)\s*(\d+)\s*(日|週間|週|か月|ヶ月|ヵ月)")
+ROLE_NATURAL_RE = re.compile(
+    r'(?:「([^」]+)」|『([^』]+)』|"([^"]+)"|([^\s]{1,100}))というロールを(作成|削除)'
+)
 ANALYZE_RE = re.compile(r"(?:この|今の)?チャンネル.*?(?:分析|要約)|(?:分析|要約).*?(?:この|今の)?チャンネル")
 
 
@@ -32,6 +36,7 @@ def is_admin_mention_command(text: str) -> bool:
         or (MESSAGE_LINK_RE.search(normalized) and any(word in normalized for word in ("転送", "スレッド")))
         or ANALYZE_RE.search(normalized)
         or ("ロール" in normalized and any(word in normalized for word in ("付与", "付けて", "つけて", "解除", "外して", "削除")))
+        or ROLE_NATURAL_RE.search(normalized)
     )
 
 
@@ -47,6 +52,96 @@ def timeout_delta(value: int, unit: str) -> timedelta:
 
 def display_name(value) -> str:
     return discord.utils.escape_markdown(getattr(value, "display_name", getattr(value, "name", str(value))))
+
+
+class NaturalRoleConfirmView(discord.ui.View):
+    def __init__(self, bot: commands.Bot, requester_id: int, action: str, role_name: str, members: list[discord.Member]):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.requester_id = requester_id
+        self.action = action
+        self.role_name = role_name
+        self.members = members
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message("命令を出した管理者だけが確定できます。", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="実行", style=discord.ButtonStyle.danger)
+    async def execute(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if self.action == "作成":
+            if discord.utils.get(guild.roles, name=self.role_name):
+                result = "同名のロールがすでに存在します。"
+            else:
+                try:
+                    role = await guild.create_role(
+                        name=self.role_name,
+                        reason=f"メンション命令 by {interaction.user} ({interaction.user.id})",
+                    )
+                    granted, failed = 0, []
+                    for member in self.members:
+                        error = validate_role_operation(guild, interaction.user, member, role)
+                        if error:
+                            failed.append(member.display_name)
+                            continue
+                        try:
+                            await member.add_roles(role, reason="ロール作成メンション命令")
+                            granted += 1
+                        except discord.HTTPException:
+                            failed.append(member.display_name)
+                    result = f"ロール「{self.role_name}」を作成し、{granted}人へ付与しました。"
+                    if failed:
+                        result += f" 付与失敗: {', '.join(failed[:10])}"
+                    embed = discord.Embed(title="メンション命令: ロール作成", color=role.color)
+                    embed.add_field(name="ロール", value=f"{role.mention} (`{role.id}`)", inline=False)
+                    embed.add_field(name="実行者", value=f"{interaction.user} (`{interaction.user.id}`)", inline=False)
+                    embed.add_field(name="付与人数", value=str(granted), inline=True)
+                    await send_server_log(self.bot, guild, embed, "role_channel")
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    result = f"ロールを作成できませんでした: {exc}"
+        else:
+            role = discord.utils.get(guild.roles, name=self.role_name)
+            me = guild.me
+            if role is None:
+                result = "指定された名前のロールが見つかりません。"
+            elif role == guild.default_role or role.managed or not me or role >= me.top_role:
+                result = "権限またはロール順位のため削除できません。"
+            elif interaction.user != guild.owner and role >= interaction.user.top_role:
+                result = "自分と同じか上位のロールは削除できません。"
+            else:
+                role_id = role.id
+                try:
+                    await role.delete(reason=f"メンション命令 by {interaction.user} ({interaction.user.id})")
+                    result = f"ロール「{self.role_name}」を削除しました。"
+                    shop = await load_coin_role_shop(guild.id)
+                    if shop.pop(str(role_id), None) is not None:
+                        await save_coin_role_shop(guild.id, shop)
+                    embed = discord.Embed(title="メンション命令: ロール削除", color=0xE74C3C)
+                    embed.add_field(name="ロール", value=f"{self.role_name} (`{role_id}`)", inline=False)
+                    embed.add_field(name="実行者", value=f"{interaction.user} (`{interaction.user.id}`)", inline=False)
+                    await send_server_log(self.bot, guild, embed, "role_channel")
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    result = f"ロールを削除できませんでした: {exc}"
+        for item in self.children:
+            item.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+        await interaction.followup.send(result, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="命令をキャンセルしました。", view=self)
 
 
 class AdminCommandConfirmView(discord.ui.View):
@@ -151,6 +246,29 @@ class MentionCommands(commands.Cog):
         if not me or target.top_role >= me.top_role:
             return "対象メンバーのロールがむらびと君以上のため実行できません。"
         return None
+
+    async def handle_natural_role_command(self, message: discord.Message, text: str) -> bool:
+        match = ROLE_NATURAL_RE.search(text)
+        if not match or not isinstance(message.author, discord.Member):
+            return False
+        if not message.author.guild_permissions.manage_roles:
+            await message.reply("この命令には「ロールの管理」権限が必要です。", mention_author=False)
+            return True
+        role_name = next((value for value in match.groups()[:4] if value), "").strip()
+        action = match.group(5)
+        if not role_name or len(role_name) > 100:
+            await message.reply("ロール名は1～100文字で指定してください。", mention_author=False)
+            return True
+        members = [member for member in message.mentions if not member.bot]
+        member_text = f"、{len(members)}人へ付与" if action == "作成" and members else ""
+        view = NaturalRoleConfirmView(self.bot, message.author.id, action, role_name, members)
+        await message.reply(
+            f"ロール「{discord.utils.escape_markdown(role_name)}」を{action}{member_text}しますか？",
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return True
 
     async def execute_action(
         self,
@@ -472,6 +590,9 @@ class MentionCommands(commands.Cog):
         if not is_admin_mention_command(text):
             return
         if not isinstance(message.author, discord.Member):
+            return
+
+        if await self.handle_natural_role_command(message, text):
             return
 
         if await self.handle_message_link_command(message, text):

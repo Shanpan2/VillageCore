@@ -48,25 +48,53 @@ class VoteButton(Button):
             return
 
         option = self.option
-        role_name = f"{PREFIX}{option}"
-        role = discord.utils.get(guild.roles, name=role_name)
-        if role is None:
-            role = await guild.create_role(name=role_name)
-
         votes_for_option = self.vote_view.votes.setdefault(option, set())
+        current_options = [name for name, voters in self.vote_view.votes.items() if user.id in voters]
+        if current_options and not self.vote_view.allow_change:
+            await interaction.response.send_message("この投票では投票後の変更・取消はできません。", ephemeral=True)
+            return
+
+        role = None
+        if self.vote_view.create_roles:
+            role_id = self.vote_view.role_ids.get(option)
+            role = guild.get_role(role_id) if role_id else None
+            if role is None:
+                role = discord.utils.get(guild.roles, name=f"{PREFIX}{option}")
+            if role is None:
+                try:
+                    role = await guild.create_role(name=f"{PREFIX}{option}", reason="投票選択肢ロール")
+                except discord.HTTPException:
+                    await interaction.response.send_message("投票ロールを作成できませんでした。", ephemeral=True)
+                    return
+            self.vote_view.role_ids[option] = role.id
+
         if user.id in votes_for_option:
             votes_for_option.discard(user.id)
-            try:
-                await user.remove_roles(role)
-            except discord.HTTPException:
-                pass
+            if role:
+                try:
+                    await user.remove_roles(role)
+                except discord.HTTPException:
+                    pass
             msg_text = f"↩️ **{option}** の投票を取り消しました。"
         else:
+            if not self.vote_view.multiple_choice:
+                for other_option, voters in self.vote_view.votes.items():
+                    if other_option == option or user.id not in voters:
+                        continue
+                    voters.discard(user.id)
+                    other_role_id = self.vote_view.role_ids.get(other_option)
+                    other_role = guild.get_role(other_role_id) if other_role_id else None
+                    if other_role:
+                        try:
+                            await user.remove_roles(other_role)
+                        except discord.HTTPException:
+                            pass
             votes_for_option.add(user.id)
-            try:
-                await user.add_roles(role)
-            except discord.HTTPException:
-                pass
+            if role:
+                try:
+                    await user.add_roles(role)
+                except discord.HTTPException:
+                    pass
             msg_text = f"🗳️ **{option}** に投票しました。"
 
         await self.vote_view.cog.persist_vote(self.vote_view)
@@ -81,12 +109,21 @@ class VoteView(View):
         message_id: int,
         cog: "Vote",
         votes: dict[str, set[int]] | None = None,
+        *,
+        create_roles: bool = False,
+        multiple_choice: bool = False,
+        allow_change: bool = True,
+        role_ids: dict[str, int] | None = None,
     ):
         super().__init__(timeout=None)
         self.options = options
         self.message_id = message_id
         self.cog = cog
         self.votes: dict[str, set[int]] = votes or {opt: set() for opt in options}
+        self.create_roles = create_roles
+        self.multiple_choice = multiple_choice
+        self.allow_change = allow_change
+        self.role_ids = role_ids or {}
 
         for index, opt in enumerate(options):
             self.add_item(VoteButton(opt, index, self))
@@ -155,7 +192,32 @@ class Vote(commands.Cog):
                 opt: {int(uid) for uid in vote_data.get("votes", {}).get(opt, [])}
                 for opt in options
             }
-            view = VoteView(options, message_id, self, votes=votes)
+            role_ids = {
+                key: int(value)
+                for key, value in vote_data.get("role_ids", {}).items()
+            }
+            guild = self.bot.get_guild(int(vote_data["guild_id"]))
+            if guild and bool(vote_data.get("create_roles", True)):
+                for opt in options:
+                    if opt in role_ids:
+                        continue
+                    legacy_role = discord.utils.get(guild.roles, name=f"{PREFIX}{opt}")
+                    if legacy_role:
+                        role_ids[opt] = legacy_role.id
+                serialized_role_ids = {key: str(value) for key, value in role_ids.items()}
+                if vote_data.get("role_ids", {}) != serialized_role_ids:
+                    vote_data["role_ids"] = serialized_role_ids
+                    changed = True
+            view = VoteView(
+                options,
+                message_id,
+                self,
+                votes=votes,
+                create_roles=bool(vote_data.get("create_roles", True)),
+                multiple_choice=bool(vote_data.get("multiple_choice", True)),
+                allow_change=bool(vote_data.get("allow_change", True)),
+                role_ids=role_ids,
+            )
             self.bot.add_view(view, message_id=message_id)
             self.active_votes[message_id] = {
                 **vote_data,
@@ -167,7 +229,6 @@ class Vote(commands.Cog):
             if end_at:
                 remaining = int(end_at) - now
                 if remaining <= 0:
-                    guild = self.bot.get_guild(int(vote_data["guild_id"]))
                     if guild:
                         await self._end_vote(guild, channel, message_id)
                     data.pop(message_id_str, None)
@@ -186,6 +247,7 @@ class Vote(commands.Cog):
             opt: [str(uid) for uid in view.votes.get(opt, set())]
             for opt in view.options
         }
+        current["role_ids"] = {opt: str(role_id) for opt, role_id in view.role_ids.items()}
         data[str(view.message_id)] = current
         await save_votes(data)
 
@@ -194,6 +256,9 @@ class Vote(commands.Cog):
         question="投票のタイトル・質問",
         options="選択肢をスペース区切りで入力 例: りんご バナナ みかん",
         duration="自動終了までの時間 例: 30s / 5m / 1h",
+        create_roles="選択肢ごとのロールを自動作成・付与するか",
+        multiple_choice="1人が複数の選択肢へ投票できるか",
+        allow_change="投票後に選択先の変更・取消を許可するか",
     )
     async def vote(
         self,
@@ -201,6 +266,9 @@ class Vote(commands.Cog):
         question: str,
         options: str,
         duration: str | None = None,
+        create_roles: bool = False,
+        multiple_choice: bool = False,
+        allow_change: bool = True,
     ):
         opts = options.split()
         if len(opts) < 2:
@@ -216,14 +284,46 @@ class Vote(commands.Cog):
             description="\n".join(f"{opt}: **0票**" for opt in opts),
             color=0x00FFCC,
         )
+        settings_text = (
+            f"ロール作成: {'ON' if create_roles else 'OFF'} / "
+            f"複数投票: {'ON' if multiple_choice else 'OFF'} / "
+            f"投票変更: {'ON' if allow_change else 'OFF'}"
+        )
         if seconds:
-            embed.set_footer(text=f"⏰ {duration} 後に自動終了")
+            settings_text += f" / ⏰ {duration} 後に自動終了"
+        embed.set_footer(text=settings_text)
 
         await interaction.response.send_message(embed=embed)
         msg = await interaction.original_response()
 
-        view = VoteView(opts, msg.id, self)
+        role_ids = {}
+        role_errors = []
+        if create_roles and interaction.guild:
+            for opt in opts:
+                try:
+                    role = await interaction.guild.create_role(
+                        name=f"{PREFIX}{opt}",
+                        reason=f"投票作成: {question[:100]}",
+                    )
+                    role_ids[opt] = role.id
+                except (discord.Forbidden, discord.HTTPException):
+                    role_errors.append(opt)
+
+        view = VoteView(
+            opts,
+            msg.id,
+            self,
+            create_roles=create_roles,
+            multiple_choice=multiple_choice,
+            allow_change=allow_change,
+            role_ids=role_ids,
+        )
         await msg.edit(view=view)
+        if role_errors:
+            await interaction.followup.send(
+                f"ロールを作成できなかった選択肢: {', '.join(role_errors)}",
+                ephemeral=True,
+            )
 
         end_at = int(time.time()) + seconds if seconds else None
         data = await load_votes()
@@ -234,6 +334,10 @@ class Vote(commands.Cog):
             "options": opts,
             "votes": {opt: [] for opt in opts},
             "end_at": end_at,
+            "create_roles": create_roles,
+            "multiple_choice": multiple_choice,
+            "allow_change": allow_change,
+            "role_ids": {opt: str(role_id) for opt, role_id in role_ids.items()},
         }
         await save_votes(data)
 
@@ -297,8 +401,9 @@ class Vote(commands.Cog):
             task.cancel()
 
         deleted = []
-        for opt in options:
-            role = discord.utils.get(guild.roles, name=f"{PREFIX}{opt}")
+        role_ids = view.role_ids if view else (persisted or {}).get("role_ids", {})
+        for opt, raw_role_id in role_ids.items():
+            role = guild.get_role(int(raw_role_id))
             if role:
                 try:
                     await role.delete()

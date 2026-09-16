@@ -1,8 +1,30 @@
+import json
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from cogs.server_logs import send_server_log
+from database.config_db import db_get, db_set
+
+
+def coin_role_shop_key(guild_id: int) -> str:
+    return f"community_coin_role_shop:{guild_id}"
+
+
+async def load_coin_role_shop(guild_id: int) -> dict:
+    raw = await db_get(coin_role_shop_key(guild_id))
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+async def save_coin_role_shop(guild_id: int, shop: dict):
+    await db_set(coin_role_shop_key(guild_id), json.dumps(shop, ensure_ascii=False))
 
 
 def safe_name(value: discord.Member | discord.User | discord.Role) -> str:
@@ -112,10 +134,10 @@ class RoleAdmin(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @app_commands.command(name="role_delete", description="【管理者】メンバーからロールを解除します")
+    @app_commands.command(name="role_remove", description="【管理者】メンバーからロールを解除します")
     @app_commands.describe(member="解除するメンバー", role="解除するロール", reason="理由（任意）")
     @app_commands.default_permissions(manage_roles=True)
-    async def role_delete(
+    async def role_remove(
         self,
         interaction: discord.Interaction,
         member: discord.Member,
@@ -156,10 +178,10 @@ class RoleAdmin(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @commands.command(name="role_delete")
+    @commands.command(name="role_remove")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_roles=True)
-    async def role_delete_prefix(
+    async def role_remove_prefix(
         self,
         ctx: commands.Context,
         member: discord.Member,
@@ -174,6 +196,110 @@ class RoleAdmin(commands.Cog):
             delete_after=60 if not ok else None,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    @app_commands.command(name="role_create", description="【管理者】新しいロールを作成します")
+    @app_commands.describe(
+        name="作成するロール名",
+        color_hex="色（例: FF0000、省略可）",
+        coin_exchange="コインショップで交換可能にするか",
+        coin_cost="交換に必要なコイン数",
+        sell_enabled="購入後に売却可能にするか",
+    )
+    @app_commands.default_permissions(manage_roles=True)
+    async def role_create(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        color_hex: str | None = None,
+        coin_exchange: bool = False,
+        coin_cost: int = 0,
+        sell_enabled: bool = True,
+    ):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("「ロールの管理」権限が必要です。", ephemeral=True)
+            return
+        role_name = name.strip()
+        if not role_name or len(role_name) > 100:
+            await interaction.response.send_message("ロール名は1～100文字で指定してください。", ephemeral=True)
+            return
+        if discord.utils.get(interaction.guild.roles, name=role_name):
+            await interaction.response.send_message("同名のロールがすでに存在します。", ephemeral=True)
+            return
+        if coin_exchange and coin_cost <= 0:
+            await interaction.response.send_message("コイン交換を有効にする場合は価格を1以上にしてください。", ephemeral=True)
+            return
+        color = discord.Color.default()
+        if color_hex:
+            try:
+                color = discord.Color(int(color_hex.strip().lstrip("#"), 16))
+            except ValueError:
+                await interaction.response.send_message("色は `FF0000` のような16進数で指定してください。", ephemeral=True)
+                return
+        try:
+            role = await interaction.guild.create_role(
+                name=role_name,
+                color=color,
+                reason=f"/role_create by {interaction.user} ({interaction.user.id})",
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await interaction.response.send_message(f"ロールを作成できませんでした: {exc}", ephemeral=True)
+            return
+        if coin_exchange:
+            shop = await load_coin_role_shop(interaction.guild.id)
+            shop[str(role.id)] = {
+                "role_id": role.id,
+                "cost": coin_cost,
+                "name": role.name,
+                "sell_enabled": sell_enabled,
+            }
+            await save_coin_role_shop(interaction.guild.id, shop)
+        embed = discord.Embed(title="ロール作成", color=role.color, timestamp=discord.utils.utcnow())
+        embed.add_field(name="ロール", value=f"{role.mention} (`{role.id}`)", inline=False)
+        embed.add_field(name="実行者", value=f"{safe_name(interaction.user)} (`{interaction.user.id}`)", inline=False)
+        embed.add_field(
+            name="コイン交換",
+            value=f"{coin_cost}コイン / {'売却可' if sell_enabled else '売却不可'}" if coin_exchange else "無効",
+            inline=False,
+        )
+        await send_server_log(self.bot, interaction.guild, embed, "role_channel")
+        await interaction.response.send_message(f"{role.mention} を作成しました。", ephemeral=True)
+
+    @app_commands.command(name="role_delete", description="【管理者】ロールそのものを削除します")
+    @app_commands.describe(role="削除するロール", reason="理由（任意）")
+    @app_commands.default_permissions(manage_roles=True)
+    async def role_delete(self, interaction: discord.Interaction, role: discord.Role, reason: str | None = None):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("「ロールの管理」権限が必要です。", ephemeral=True)
+            return
+        if role == interaction.guild.default_role or role.managed:
+            await interaction.response.send_message("このロールは削除できません。", ephemeral=True)
+            return
+        me = interaction.guild.me
+        if not me or role >= me.top_role or (interaction.user != interaction.guild.owner and role >= interaction.user.top_role):
+            await interaction.response.send_message("ロール順位のため削除できません。", ephemeral=True)
+            return
+        role_name, role_id = role.name, role.id
+        try:
+            await role.delete(reason=f"{reason or '指定なし'} / 実行者: {interaction.user} ({interaction.user.id})")
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await interaction.response.send_message(f"ロールを削除できませんでした: {exc}", ephemeral=True)
+            return
+        shop = await load_coin_role_shop(interaction.guild.id)
+        if shop.pop(str(role_id), None) is not None:
+            await save_coin_role_shop(interaction.guild.id, shop)
+        embed = discord.Embed(title="ロール削除", color=0xE74C3C, timestamp=discord.utils.utcnow())
+        embed.add_field(name="ロール", value=f"{role_name} (`{role_id}`)", inline=False)
+        embed.add_field(name="実行者", value=f"{safe_name(interaction.user)} (`{interaction.user.id}`)", inline=False)
+        if reason:
+            embed.add_field(name="理由", value=reason[:1000], inline=False)
+        await send_server_log(self.bot, interaction.guild, embed, "role_channel")
+        await interaction.response.send_message(f"ロール「{role_name}」を削除しました。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
