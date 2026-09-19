@@ -102,6 +102,14 @@ DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "attend_status",
     "attend_warnings",
     "attend_notify",
+    "attendance_panel",
+    "penalty_gacha",
+    "penalty_add",
+    "penalty_remove",
+    "penalty_list",
+    "penalty_reset",
+    "penalty_status",
+    "penalty_complete",
     "error_log_channel",
     "command_log_channel",
     "permission_audit",
@@ -722,7 +730,7 @@ async def handle_help_site(request):
           </div>
           <div class="notice">
             <p><strong>軽い罰ゲームにするなら</strong><br>
-              安全で短く、笑って終われる内容にしてください。<code>/penalty_gacha</code> で軽い罰ゲームをランダムに引けます。
+              安全で短く、笑って終われる内容にしてください。<code>/penalty gacha</code> で軽い罰ゲームをランダムに引けます。
             </p>
             <ul class="compact-list">
               <li>その日だけ軽い語尾を付ける</li>

@@ -48,6 +48,25 @@ def apply_point(current_pt: int, status: str) -> int:
     return min(10, current_pt + change)
 
 
+def clamp_pt(value: int) -> int:
+    return max(0, min(10, value))
+
+
+def record_attendance(entry: dict, date: str, status: str, *, allow_update: bool = True) -> tuple[bool, str | None, int, int]:
+    records = entry.setdefault("records", {})
+    old_status = records.get(date)
+    if old_status and not allow_update:
+        return False, old_status, 0, entry["pt"]
+    current_pt = int(entry.get("pt", 10))
+    if old_status:
+        current_pt = clamp_pt(current_pt - calc_point_change(current_pt, old_status))
+    change = calc_point_change(current_pt, status)
+    new_pt = clamp_pt(current_pt + change)
+    entry["pt"] = new_pt
+    records[date] = status
+    return True, old_status, change, new_pt
+
+
 def get_badge(pt: int) -> str:
     if pt <= 0:
         return "🚨 退出対象"
@@ -111,20 +130,12 @@ class AttendStatusSelect(discord.ui.Select):
         if entry is None:
             await interaction.followup.send("❌ メンバーが見つかりません。", ephemeral=True)
             return
-        if self.date in entry.get("records", {}):
-            await interaction.followup.send(
-                f"⚠️ **{entry['name']}** は **{self.date}** の出席記録がすでにあります。重複記録はできません。",
-                ephemeral=True,
-            )
-            return
-        change = calc_point_change(entry["pt"], status)
-        new_pt = apply_point(entry["pt"], status)
-        entry["pt"] = new_pt
-        entry["records"][self.date] = status
+        _, old_status, change, new_pt = record_attendance(entry, self.date, status, allow_update=True)
         await save_attend(self.attend_data)
         sign = f"+{change}" if change >= 0 else str(change)
+        prefix = f"🔁 {old_status} → " if old_status else ""
         await interaction.followup.send(
-            f"✅ **{entry['name']}** | {status} → {sign}pt → **{new_pt}pt**",
+            f"✅ **{entry['name']}** | {prefix}{status} → {sign}pt → **{new_pt}pt**",
             ephemeral=True,
         )
 
@@ -194,15 +205,10 @@ class BulkAttendView(discord.ui.View):
                 entry = self.attend_data["members"].get(uid)
                 if entry is None:
                     continue
-                if record_date in entry.get("records", {}):
-                    skipped.append(f"• **{entry['name']}** : すでに記録済み")
-                    continue
-                change = calc_point_change(entry["pt"], status)
-                new_pt = apply_point(entry["pt"], status)
-                entry["pt"] = new_pt
-                entry["records"][record_date] = status
+                _, old_status, change, new_pt = record_attendance(entry, record_date, status, allow_update=True)
                 sign = f"+{change}" if change >= 0 else str(change)
-                results.append(f"• **{entry['name']}** : {status} → {sign}pt → **{new_pt}pt**")
+                prefix = f"{old_status} → " if old_status else ""
+                results.append(f"• **{entry['name']}** : {prefix}{status} → {sign}pt → **{new_pt}pt**")
             await save_attend(self.attend_data)
             message = f"✅ **{record_date}** の記録が完了しました！\n\n"
             if results:
@@ -228,10 +234,12 @@ class BulkAttendView(discord.ui.View):
 # ============================================================
 
 class Attendance(commands.Cog):
+    attendance = app_commands.Group(name="attendance", description="出席管理コマンド")
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="attend_set_channel", description="【管理者】出席通知チャンネルを現在のチャンネルに設定します")
+    @attendance.command(name="set_channel", description="【管理者】出席通知チャンネルを現在のチャンネルに設定します")
     @app_commands.default_permissions(administrator=True)
     async def attend_set_channel(self, interaction: discord.Interaction):
         data = await load_attend()
@@ -241,7 +249,7 @@ class Attendance(commands.Cog):
             f"✅ 通知チャンネルを {interaction.channel.mention} に設定しました。", ephemeral=True
         )
 
-    @app_commands.command(name="attend_add_member", description="【管理者】出席管理にメンバーを追加します")
+    @attendance.command(name="add_member", description="【管理者】出席管理にメンバーを追加します")
     @app_commands.describe(member="追加するメンバー", initial_pt="初期ポイント（デフォルト: 10）")
     @app_commands.default_permissions(administrator=True)
     async def attend_add_member(self, interaction: discord.Interaction, member: discord.Member, initial_pt: int = 10):
@@ -254,7 +262,7 @@ class Attendance(commands.Cog):
         await save_attend(data)
         await interaction.response.send_message(f"✅ {member.display_name} を追加しました（{initial_pt}pt）", ephemeral=True)
 
-    @app_commands.command(name="attend_add_members_bulk", description="【管理者】メンバーを選択して一括追加します")
+    @attendance.command(name="add_members_bulk", description="【管理者】メンバーを選択して一括追加します")
     @app_commands.describe(initial_pt="初期ポイント（デフォルト: 10）")
     @app_commands.default_permissions(administrator=True)
     async def attend_add_members_bulk(self, interaction: discord.Interaction, initial_pt: int = 10):
@@ -295,7 +303,7 @@ class Attendance(commands.Cog):
         view.add_item(MemberMultiSelect())
         await interaction.response.send_message("追加するメンバーを選んでください：", view=view, ephemeral=True)
 
-    @app_commands.command(name="attend_remove_member", description="【管理者】出席管理からメンバーを削除します")
+    @attendance.command(name="remove_member", description="【管理者】出席管理からメンバーを削除します")
     @app_commands.describe(member="削除するメンバー")
     @app_commands.default_permissions(administrator=True)
     async def attend_remove_member(self, interaction: discord.Interaction, member: discord.Member):
@@ -308,7 +316,7 @@ class Attendance(commands.Cog):
         await save_attend(data)
         await interaction.response.send_message(f"🗑️ {member.display_name} を削除しました。", ephemeral=True)
 
-    @app_commands.command(name="attend_record", description="【管理者】メンバーを選択して出席を記録します")
+    @attendance.command(name="record", description="【管理者】メンバーを選択して出席を記録します")
     @app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
     @app_commands.default_permissions(administrator=True)
     async def attend_record(self, interaction: discord.Interaction, date: str = ""):
@@ -341,7 +349,7 @@ class Attendance(commands.Cog):
             f"📋 出席記録（{record_date}）\nメンバーを選んでください：", view=view, ephemeral=True
         )
 
-    @app_commands.command(name="attend_record_all", description="【管理者】全メンバーの出席を一括で記録します")
+    @attendance.command(name="record_all", description="【管理者】全メンバーの出席を一括で記録します")
     @app_commands.describe(date="記録日（省略すると今日）例: 2025-01-15")
     @app_commands.default_permissions(administrator=True)
     async def attend_record_all(self, interaction: discord.Interaction, date: str = ""):
@@ -355,7 +363,7 @@ class Attendance(commands.Cog):
         view = BulkAttendView(record_date, member_list, data, page=0)
         await interaction.response.send_message(view.content(), view=view, ephemeral=True)
 
-    @app_commands.command(name="attend_status", description="出席ポイント一覧を表示します")
+    @attendance.command(name="status", description="出席ポイント一覧を表示します")
     async def attend_status(self, interaction: discord.Interaction):
         data = await load_attend()
         members = data["members"]
@@ -369,7 +377,7 @@ class Attendance(commands.Cog):
             lines.append(f"{badge} <@{uid}>（**{entry['name']}**）: **{entry['pt']}pt**")
         await interaction.response.send_message("\n".join(lines))
 
-    @app_commands.command(name="attend_warnings", description="警告対象のメンバーを表示します")
+    @attendance.command(name="warnings", description="警告対象のメンバーを表示します")
     async def attend_warnings(self, interaction: discord.Interaction):
         data = await load_attend()
         warnings = [
@@ -382,7 +390,7 @@ class Attendance(commands.Cog):
         else:
             await interaction.response.send_message("✅ 現在、警告対象のメンバーはいません。")
 
-    @app_commands.command(name="attend_notify", description="【管理者】警告対象メンバーを通知チャンネルに送信します")
+    @attendance.command(name="notify", description="【管理者】警告対象メンバーを通知チャンネルに送信します")
     @app_commands.default_permissions(administrator=True)
     async def attend_notify(self, interaction: discord.Interaction):
         data = await load_attend()
@@ -402,7 +410,7 @@ class Attendance(commands.Cog):
                 return
         await interaction.response.send_message(msg)
 
-    @app_commands.command(name="attend_set_pt", description="【管理者】メンバーのポイントを直接設定します")
+    @attendance.command(name="set_pt", description="【管理者】メンバーのポイントを直接設定します")
     @app_commands.describe(member="対象メンバー", pt="設定するポイント")
     @app_commands.default_permissions(administrator=True)
     async def attend_set_pt(self, interaction: discord.Interaction, member: discord.Member, pt: int):
@@ -419,7 +427,7 @@ class Attendance(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="attend_history", description="メンバーの出席履歴を表示します")
+    @attendance.command(name="history", description="メンバーの出席履歴を表示します")
     @app_commands.describe(member="対象メンバー")
     async def attend_history(self, interaction: discord.Interaction, member: discord.Member):
         data = await load_attend()
@@ -436,6 +444,14 @@ class Attendance(commands.Cog):
         for d in sorted(records.keys(), reverse=True)[:20]:
             lines.append(f"• {d} : {records[d]}")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @attendance.command(name="panel", description="出席管理パネルを表示します")
+    async def attendance_panel(self, interaction: discord.Interaction):
+        panels = self.bot.get_cog("Panels")
+        if panels and hasattr(panels, "send_attendance_panel"):
+            await panels.send_attendance_panel(interaction)
+            return
+        await interaction.response.send_message("出席管理パネルを取得できませんでした。", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):

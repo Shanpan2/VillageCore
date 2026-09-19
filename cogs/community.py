@@ -511,7 +511,7 @@ async def build_zero_coin_penalty_text(guild: discord.Guild | None, member: disc
         f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
         f"{role_text}"
         f"{penalty_text}"
-        "\n`/penalty_status` で状態を確認できます。"
+        "\n`/penalty status` で状態を確認できます。"
     )
 
 
@@ -875,6 +875,8 @@ class EventRsvpView(discord.ui.View):
 
 
 class Community(commands.Cog):
+    penalty = app_commands.Group(name="penalty", description="罰ゲーム関連コマンド")
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
@@ -1508,7 +1510,7 @@ class Community(commands.Cog):
                 f"\n0コインになったため、ギャンブルは **{remaining}** できません。"
                 f"{role_text}"
                 f"{penalty_text}"
-                "\n`/penalty_status` で状態を確認できます。"
+                "\n`/penalty status` で状態を確認できます。"
             )
         await interaction.response.send_message(
             f"残念... **{coin_user_name(interaction.user)}** さんは **{format_coins(loss)}** 失いました。"
@@ -1554,7 +1556,7 @@ class Community(commands.Cog):
         ok, message = await run_coin_dice_game(ctx.guild, ctx.author, amount)
         await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
 
-    @app_commands.command(name="penalty_gacha", description="罰ゲームをランダムで引きます")
+    @penalty.command(name="gacha", description="罰ゲームをランダムで引きます")
     @app_commands.describe(member="【管理者のみ】別のメンバーの代わりに引く場合は指定してください")
     async def penalty_gacha(self, interaction: discord.Interaction, member: discord.Member | None = None):
         # メンバーが指定されていない場合は、管理者は誰でも実行可能、非管理者は自分自身のみ
@@ -1577,7 +1579,7 @@ class Community(commands.Cog):
         else:
             await interaction.response.send_message(f"{target_member.mention} の罰ゲームガチャ: **{penalty}**")
 
-    @app_commands.command(name="penalty_add", description="【管理者】罰ゲームガチャの内容を追加します")
+    @penalty.command(name="add", description="【管理者】罰ゲームガチャの内容を追加します")
     @app_commands.default_permissions(manage_guild=True)
     async def penalty_add(self, interaction: discord.Interaction, text: str):
         if not interaction.guild_id:
@@ -1595,7 +1597,7 @@ class Community(commands.Cog):
         await set_penalty_items(interaction.guild_id, items)
         await interaction.response.send_message(f"罰ゲームを追加しました。\n**{item}**", ephemeral=True)
 
-    @app_commands.command(name="penalty_remove", description="【管理者】罰ゲームガチャの内容を番号で削除します")
+    @penalty.command(name="remove", description="【管理者】罰ゲームガチャの内容を番号で削除します")
     @app_commands.default_permissions(manage_guild=True)
     async def penalty_remove(self, interaction: discord.Interaction, index: int):
         if not interaction.guild_id:
@@ -1603,13 +1605,13 @@ class Community(commands.Cog):
             return
         items = await get_penalty_items(interaction.guild_id)
         if index < 1 or index > len(items):
-            await interaction.response.send_message("番号が範囲外です。`/penalty_list` で番号を確認してください。", ephemeral=True)
+            await interaction.response.send_message("番号が範囲外です。`/penalty list` で番号を確認してください。", ephemeral=True)
             return
         removed = items.pop(index - 1)
         await set_penalty_items(interaction.guild_id, items)
         await interaction.response.send_message(f"罰ゲームを削除しました。\n**{removed}**", ephemeral=True)
 
-    @app_commands.command(name="penalty_list", description="登録済みの罰ゲームガチャ内容を表示します")
+    @penalty.command(name="list", description="登録済みの罰ゲームガチャ内容を表示します")
     async def penalty_list(self, interaction: discord.Interaction):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -1621,7 +1623,7 @@ class Community(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="penalty_reset", description="【管理者】罰ゲームガチャ内容を初期状態に戻します")
+    @penalty.command(name="reset", description="【管理者】罰ゲームガチャ内容を初期状態に戻します")
     @app_commands.default_permissions(manage_guild=True)
     async def penalty_reset(self, interaction: discord.Interaction):
         if not interaction.guild_id:
@@ -1630,7 +1632,7 @@ class Community(commands.Cog):
         await set_penalty_items(interaction.guild_id, PENALTY_GACHA_ITEMS[:])
         await interaction.response.send_message("罰ゲーム一覧を初期状態に戻しました。", ephemeral=True)
 
-    @app_commands.command(name="penalty_status", description="現在の強化罰ゲームを確認します")
+    @penalty.command(name="status", description="現在の強化罰ゲームを確認します")
     async def penalty_status(self, interaction: discord.Interaction, member: discord.Member | None = None):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -1656,7 +1658,7 @@ class Community(commands.Cog):
             embed.add_field(name="完了日時", value=format_datetime_jst(completed_at), inline=True)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="penalty_complete", description="【管理者】メンバーの強化罰ゲームを完了にします")
+    @penalty.command(name="complete", description="【管理者】メンバーの強化罰ゲームを完了にします")
     @app_commands.default_permissions(manage_guild=True)
     async def penalty_complete(self, interaction: discord.Interaction, member: discord.Member):
         if not interaction.guild_id:

@@ -191,6 +191,14 @@ class Panels(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def send_attendance_panel(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="出席管理パネル",
+            description="出席記録、一覧、警告確認などをボタンで操作できます。",
+            color=0x3498DB,
+        )
+        await interaction.response.send_message(embed=embed, view=AttendancePanelView(), ephemeral=True)
+
     @app_commands.command(name="music", description="音楽操作パネルを表示します")
     async def music(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -209,14 +217,9 @@ class Panels(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, view=YoutubePanelView(), ephemeral=True)
 
-    @app_commands.command(name="attendance", description="出席管理パネルを表示します")
+    @app_commands.command(name="attendance_panel", description="出席管理パネルを表示します")
     async def attendance(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="出席管理パネル",
-            description="出席記録、一覧、警告確認などをボタンで操作できます。",
-            color=0x3498DB,
-        )
-        await interaction.response.send_message(embed=embed, view=AttendancePanelView(), ephemeral=True)
+        await self.send_attendance_panel(interaction)
 
     @app_commands.command(name="admin", description="管理者向け設定パネルを表示します")
     @app_commands.default_permissions(manage_guild=True)
