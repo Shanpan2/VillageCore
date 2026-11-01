@@ -79,7 +79,7 @@ class Minutes(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        self.model = os.getenv("GEMINI_MINUTES_MODEL", os.getenv("GEMINI_MODEL", "gemini-3.8-flash-lite"))
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
 
     async def get_session(self, guild_id: int, channel_id: int) -> dict | None:
@@ -88,6 +88,37 @@ class Minutes(commands.Cog):
     async def set_session(self, guild_id: int, channel_id: int, session: dict | None):
         value = json.dumps(session, ensure_ascii=False) if session else ""
         await db_set(minutes_session_key(guild_id, channel_id), value)
+
+    async def start_from_message(self, message: discord.Message, title: str = "話し合い") -> str:
+        if not message.guild or not isinstance(message.channel, discord.TextChannel):
+            return "サーバーの通常テキストチャンネルで実行してください。"
+        existing = await self.get_session(message.guild.id, message.channel.id)
+        if existing:
+            return "このチャンネルではすでに議事録を記録中です。"
+        session = {"title": title.strip()[:100] or "話し合い", "started_by": message.author.id, "started_at": utc_now().isoformat()}
+        await self.set_session(message.guild.id, message.channel.id, session)
+        return f"議事録を開始しました。議題: **{session['title']}**"
+
+    async def stop_from_message(self, message: discord.Message) -> str:
+        if not message.guild or not isinstance(message.channel, discord.TextChannel):
+            return "サーバーの通常テキストチャンネルで実行してください。"
+        session = await self.get_session(message.guild.id, message.channel.id)
+        if not session:
+            return "このチャンネルでは議事録を記録していません。"
+        if not (isinstance(message.author, discord.Member) and (message.author.guild_permissions.manage_messages or int(session.get("started_by", 0)) == message.author.id)):
+            return "議事録を終了できるのは、開始者かメッセージ管理権限を持つ人だけです。"
+        started_at = parse_utc(session.get("started_at"))
+        if not started_at:
+            await self.set_session(message.guild.id, message.channel.id, None)
+            return "開始時刻が壊れていたため、議事録をリセットしました。"
+        messages = await self.collect_messages(message.channel, started_at)
+        await self.set_session(message.guild.id, message.channel.id, None)
+        if not messages:
+            return "議事録を終了しました。記録対象の発言はありませんでした。"
+        title = session.get("title", "話し合い")
+        source, participants = self.build_source_text(messages)
+        summary = await self.summarize(title, source, participants, len(messages))
+        return f"**議事録を終了しました: {title}**\n記録メッセージ数: **{len(messages)}**\n\n{summary}"
 
     async def collect_messages(self, channel: discord.TextChannel, started_at: datetime) -> list[discord.Message]:
         messages = []

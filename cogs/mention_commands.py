@@ -1,5 +1,6 @@
 import io
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -24,10 +25,39 @@ def clean_command_text(bot_user: discord.ClientUser, message: discord.Message) -
     return re.sub(rf"<@!?{bot_user.id}>", "", message.content).strip()
 
 
+def normalize_admin_command_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).replace("　", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    replacements = (
+        ("追放して", "キック"),
+        ("追放", "キック"),
+        ("蹴って", "キック"),
+        ("蹴る", "キック"),
+        ("kick", "キック"),
+        ("タイムアウトして", "タイムアウト"),
+        ("タイムアウトにして", "タイムアウト"),
+        ("消して", "削除"),
+        ("消去して", "削除"),
+        ("消去", "削除"),
+        ("ロールを作って", "ロールを作成"),
+        ("ロール作って", "ロール作成"),
+        ("ロールをつくって", "ロールを作成"),
+    )
+    for source, target in replacements:
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
 def is_admin_mention_command(text: str) -> bool:
-    normalized = text.replace("　", " ")
+    normalized = normalize_admin_command_text(text)
+    operation_words = (
+        "タイムアウト", "キック", "BAN", "削除", "付与", "付けて", "つけて",
+        "解除", "外して", "作成", "分析", "要約", "転送", "スレッド",
+        "議事録", "記録開始", "記録終了",
+    )
     return bool(
-        "タイムアウト" in normalized
+        ("命令" in normalized and any(word in normalized for word in operation_words))
+        or "タイムアウト" in normalized
         or "キック" in normalized
         or "BAN" in normalized.upper()
         or ("チャンネル" in normalized and "削除" in normalized)
@@ -586,11 +616,26 @@ class MentionCommands(commands.Cog):
             or not any(user.id == self.bot.user.id for user in message.mentions)
         ):
             return
-        text = clean_command_text(self.bot.user, message).replace("　", " ")
+        text = normalize_admin_command_text(clean_command_text(self.bot.user, message))
         if not is_admin_mention_command(text):
             return
         if not isinstance(message.author, discord.Member):
             return
+
+        if "議事録" in text and any(word in text for word in ("開始", "スタート", "記録開始")):
+            minutes_cog = self.bot.get_cog("Minutes")
+            if minutes_cog:
+                title_match = re.search(r"[「『\"]([^」』\"]{1,100})[」』\"]", text)
+                result = await minutes_cog.start_from_message(message, title_match.group(1) if title_match else "話し合い")
+                await message.reply(result, mention_author=False)
+                return
+
+        if "議事録" in text and any(word in text for word in ("終了", "停止", "終わり")):
+            minutes_cog = self.bot.get_cog("Minutes")
+            if minutes_cog:
+                result = await minutes_cog.stop_from_message(message)
+                await message.reply(result[:1900], mention_author=False)
+                return
 
         if await self.handle_natural_role_command(message, text):
             return

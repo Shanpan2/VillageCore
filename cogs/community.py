@@ -88,8 +88,20 @@ def coin_work_key(guild_id: int, user_id: int) -> str:
     return f"community_coin_work:{guild_id}:{user_id}"
 
 
+def coin_collect_key(guild_id: int, user_id: int) -> str:
+    return f"community_coin_collect:{guild_id}:{user_id}"
+
+
 def coin_role_shop_key(guild_id: int) -> str:
     return f"community_coin_role_shop:{guild_id}"
+
+
+def role_income_key(guild_id: int) -> str:
+    return f"community_role_income:{guild_id}"
+
+
+def boost_role_key(guild_id: int) -> str:
+    return f"community_boost_role:{guild_id}"
 
 
 def coin_gamble_lock_key(guild_id: int, user_id: int) -> str:
@@ -357,6 +369,51 @@ async def perform_coin_work(guild: discord.Guild, member: discord.Member) -> tup
     rewards = await apply_coin_rewards(guild, member, new_balance)
     reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
     return True, f"{coin_user_name(member)} さんは仕事をして **{format_coins(amount)}** 獲得しました。現在 **{format_coins(new_balance)}** です。{reward_text}"
+
+
+async def perform_role_collect(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
+    now = utc_now()
+    configured = await get_json(role_income_key(guild.id), {})
+    collected_at = await get_json(coin_collect_key(guild.id, member.id), {})
+    if not isinstance(collected_at, dict):
+        collected_at = {}
+    total = 0
+    sources = []
+    claimable_role_ids = []
+    next_remaining: list[timedelta] = []
+    for role in member.roles:
+        data = configured.get(str(role.id))
+        if not data:
+            continue
+        amount = max(0, int(data.get("amount", 0)))
+        days = max(1, int(data.get("days", 1)))
+        last_collect = parse_utc(collected_at.get(str(role.id)))
+        cooldown = timedelta(days=days)
+        if last_collect and now - last_collect < cooldown:
+            next_remaining.append(cooldown - (now - last_collect))
+            continue
+        if amount:
+            total += amount
+            sources.append(f"{role.name}: +{amount} ({days}日ごと)")
+            claimable_role_ids.append(str(role.id))
+    if total <= 0:
+        if next_remaining:
+            return False, f"まだロール収入を受け取れません。あと **{format_remaining(min(next_remaining))}** 待ってください。"
+        return False, "収入が設定されたロールを所持していません。"
+
+    balance_key = coin_key(guild.id, member.id)
+    current = parse_coin_balance(await db_get(balance_key))
+    new_balance = current + total
+    await db_set(balance_key, str(new_balance))
+    for role_id in claimable_role_ids:
+        collected_at[role_id] = now.isoformat()
+    await set_json(coin_collect_key(guild.id, member.id), collected_at)
+    rewards = await apply_coin_rewards(guild, member, new_balance)
+    reward_text = "\n" + "\n".join(f"🎖 {message}" for message in rewards) if rewards else ""
+    return True, (
+        f"{coin_user_name(member)} さんはロール収入 **+{format_coins(total)}** コインを受け取りました。\n"
+        f"{', '.join(sources)}\n現在 **{format_coins(new_balance)}** コインです。{reward_text}"
+    )
 
 
 async def perform_coin_daily(guild: discord.Guild, member: discord.Member) -> tuple[bool, str]:
@@ -1060,6 +1117,90 @@ class Community(commands.Cog):
             return
         ok, message = await perform_coin_work(ctx.guild, ctx.author)
         await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
+
+    @app_commands.command(name="role-collect", description="所持ロールの収入を受け取ります")
+    async def role_collect_user(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        ok, message = await perform_role_collect(interaction.guild, interaction.user)
+        await interaction.response.send_message(message, delete_after=60 if not ok else None)
+
+    @commands.command(name="collect", aliases=["coin_collect"])
+    async def collect_prefix(self, ctx: commands.Context):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return
+        ok, message = await perform_role_collect(ctx.guild, ctx.author)
+        await ctx.reply(message, mention_author=False, delete_after=60 if not ok else None)
+
+    @app_commands.command(name="role-collect-admin-setting", description="【管理者】ロール所持者の収入を設定します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def role_collect_admin_setting(self, interaction: discord.Interaction, role: discord.Role, amount: int, days: int = 1):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        if amount <= 0:
+            await interaction.response.send_message("収入は1コイン以上にしてください。", ephemeral=True)
+            return
+        if days <= 0:
+            await interaction.response.send_message("受取間隔は1日以上にしてください。", ephemeral=True)
+            return
+        configured = await get_json(role_income_key(interaction.guild.id), {})
+        configured[str(role.id)] = {"role_id": role.id, "name": role.name, "amount": amount, "days": days}
+        await set_json(role_income_key(interaction.guild.id), configured)
+        await interaction.response.send_message(
+            f"{role.mention} の収入を **{amount}コイン / {days}日ごと** に設定しました。", ephemeral=True
+        )
+
+    @app_commands.command(name="role-collect-admin-remove", description="【管理者】ロール収入の設定を削除します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def role_collect_admin_remove(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        configured = await get_json(role_income_key(interaction.guild_id), {})
+        removed = configured.pop(str(role.id), None)
+        await set_json(role_income_key(interaction.guild_id), configured)
+        await interaction.response.send_message(
+            f"{role.mention} のロール収入設定を削除しました。" if removed else "そのロールに収入設定はありません。",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="boost_role_set", description="【管理者】サーバーブースト時に付与するロールを設定します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def boost_role_set(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        bot_member = interaction.guild.me
+        if role == interaction.guild.default_role or role.managed or not bot_member or role >= bot_member.top_role:
+            await interaction.response.send_message("Botが付与できないロールです。", ephemeral=True)
+            return
+        await db_set(boost_role_key(interaction.guild.id), str(role.id))
+        await interaction.response.send_message(f"ブースター用ロールを {role.mention} に設定しました。", ephemeral=True)
+
+    @app_commands.command(name="boost_role_remove", description="【管理者】サーバーブースト時の自動ロールを解除します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def boost_role_remove(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(boost_role_key(interaction.guild_id), "")
+        await interaction.response.send_message("ブースト時の自動ロール設定を解除しました。", ephemeral=True)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if before.premium_since is not None or after.premium_since is None:
+            return
+        role_id = int(await db_get(boost_role_key(after.guild.id)) or "0")
+        role = after.guild.get_role(role_id)
+        bot_member = after.guild.me
+        if not role or not bot_member or role >= bot_member.top_role or role in after.roles:
+            return
+        try:
+            await after.add_roles(role, reason="Server boost reward")
+        except discord.HTTPException:
+            pass
 
     @app_commands.command(name="coin_shop", description="コインでロール、称号、バッジを交換します")
     @app_commands.describe(item="交換する商品。未指定なら一覧を表示します")

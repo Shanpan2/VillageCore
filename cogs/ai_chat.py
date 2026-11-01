@@ -26,7 +26,7 @@ except ModuleNotFoundError:
 
 
 MENTION_RE = re.compile(r"<@!?\d+>")
-MAX_HISTORY_TURNS = 10
+MAX_HISTORY_TURNS = 6
 DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
 DEFAULT_QUOTA_BACKOFF_SECONDS = 600
@@ -118,6 +118,14 @@ def memory_key(guild_id: int | None, user_id: int) -> str:
 
 def ai_reply_enabled_key(guild_id: int) -> str:
     return f"ai_reply_enabled:{guild_id}"
+
+
+def ai_knowledge_key(guild_id: int) -> str:
+    return f"ai_knowledge:{guild_id}"
+
+
+def ai_command_enabled_key(guild_id: int) -> str:
+    return f"ai_command_enabled:{guild_id}"
 
 
 def split_discord_message(text: str, limit: int = 1900) -> list[str]:
@@ -388,7 +396,7 @@ class AIChat(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
         self.ai_bot_name = os.getenv("AI_BOT_NAME", "むらびとくん")
         self.ai_developer_name = os.getenv("AI_DEVELOPER_NAME", "シャンパン2号")
@@ -398,7 +406,6 @@ class AIChat(commands.Cog):
         self.server_backoff_seconds = int(os.getenv("AI_SERVER_BACKOFF_SECONDS", str(DEFAULT_SERVER_BACKOFF_SECONDS)))
         self.user_next_allowed: dict[tuple[int | str, int], float] = {}
         self.global_next_allowed = 0.0
-        self.request_lock = asyncio.Lock()
 
     async def cog_load(self):
         if not self.client:
@@ -423,6 +430,29 @@ class AIChat(commands.Cog):
         raw = await db_get(ai_reply_enabled_key(guild_id))
         return raw != "off"
 
+    async def load_knowledge(self, guild_id: int | None) -> list[dict]:
+        if guild_id is None:
+            return []
+        raw = await db_get(ai_knowledge_key(guild_id))
+        try:
+            data = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+        knowledge = data if isinstance(data, list) else []
+        rule = await db_get(f"community_rule:{guild_id}")
+        if rule:
+            knowledge.append({"title": "サーバールール", "content": rule[:1800]})
+        faq_index_raw = await db_get(f"community_faq_index:{guild_id}")
+        try:
+            faq_names = json.loads(faq_index_raw or "[]")
+        except json.JSONDecodeError:
+            faq_names = []
+        for name in faq_names[:20] if isinstance(faq_names, list) else []:
+            answer = await db_get(f"community_faq:{guild_id}:{name}")
+            if answer:
+                knowledge.append({"title": f"FAQ: {name}", "content": answer[:1800]})
+        return knowledge
+
     def cooldown_remaining(self, guild_id: int | None, user_id: int) -> int:
         now = time.monotonic()
         scope = guild_id if guild_id is not None else "dm"
@@ -443,7 +473,7 @@ class AIChat(commands.Cog):
         self.global_next_allowed = max(self.global_next_allowed, time.monotonic() + self.server_backoff_seconds)
         print(f"[ai_chat] Gemini server backoff active for {self.server_backoff_seconds} seconds.", flush=True)
 
-    def build_prompt(self, message: discord.Message, question: str, history: list[dict]) -> str:
+    def build_prompt(self, message: discord.Message, question: str, history: list[dict], knowledge: list[dict]) -> str:
         display_name = getattr(message.author, "display_name", message.author.name)
         guild_name = message.guild.name if message.guild else "DM"
         history_lines = []
@@ -456,6 +486,10 @@ class AIChat(commands.Cog):
                 history_lines.append(f"Assistant: {assistant_text}")
 
         history_text = "\n".join(history_lines) if history_lines else "No previous conversation."
+        knowledge_text = "\n".join(
+            f"- {item.get('title', '情報')}: {item.get('content', '')}"
+            for item in knowledge[-20:]
+        ) or "登録情報なし"
         bot_identity = self.ai_bot_name or getattr(self.bot.user, "display_name", "むらびとくん")
         developer_identity = self.ai_developer_name or "シャンパン2号"
         return (
@@ -464,6 +498,7 @@ class AIChat(commands.Cog):
             f"Developer name: {developer_identity}\n"
             f"User: {display_name}\n\n"
             f"Recent conversation with this user:\n{history_text}\n\n"
+            f"Server-specific knowledge (use only when relevant):\n{knowledge_text}\n\n"
             f"Current question:\n{question}"
         )
 
@@ -559,9 +594,9 @@ class AIChat(commands.Cog):
         async with message.channel.typing():
             try:
                 history = await self.load_memory(guild_id, message.author.id)
-                prompt = self.build_prompt(message, question, history)
-                async with self.request_lock:
-                    reply = await asyncio.to_thread(self.generate_reply, prompt)
+                knowledge = await self.load_knowledge(guild_id)
+                prompt = self.build_prompt(message, question, history, knowledge)
+                reply = await asyncio.to_thread(self.generate_reply, prompt)
                 history.append(
                     {
                         "at": datetime.now(timezone.utc).isoformat(),
@@ -609,6 +644,52 @@ class AIChat(commands.Cog):
             return
         await db_set(ai_reply_enabled_key(interaction.guild_id), mode.value)
         await interaction.response.send_message(f"AIリプライ反応を **{mode.name}** にしました。", ephemeral=True)
+
+    @app_commands.command(name="ai_source", description="AIが参照できるサーバー固有情報を表示します")
+    async def ai_source(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        knowledge = await self.load_knowledge(interaction.guild_id)
+        lines = [f"- `{item.get('title', '情報')}`" for item in knowledge]
+        lines.extend(["- 登録済みFAQ・ルール（該当する場合）"])
+        await interaction.response.send_message(
+            "AIの参照情報:\n" + ("\n".join(lines) if lines else "登録情報はありません。"),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="ai_knowledge_add", description="【管理者】AI用のサーバー固有情報を追加します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def ai_knowledge_add(self, interaction: discord.Interaction, title: str, content: str):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        knowledge = await self.load_knowledge(interaction.guild_id)
+        knowledge.append({"title": title.strip()[:80], "content": content.strip()[:1200]})
+        await db_set(ai_knowledge_key(interaction.guild_id), json.dumps(knowledge[-50:], ensure_ascii=False))
+        await interaction.response.send_message(f"AI用情報「{title.strip()[:80]}」を登録しました。", ephemeral=True)
+
+    @app_commands.command(name="ai_knowledge_remove", description="【管理者】AI用の登録情報を番号で削除します")
+    @app_commands.default_permissions(manage_guild=True)
+    async def ai_knowledge_remove(self, interaction: discord.Interaction, number: int):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        knowledge = await self.load_knowledge(interaction.guild_id)
+        if number < 1 or number > len(knowledge):
+            await interaction.response.send_message("指定した番号の情報がありません。", ephemeral=True)
+            return
+        removed = knowledge.pop(number - 1)
+        await db_set(ai_knowledge_key(interaction.guild_id), json.dumps(knowledge, ensure_ascii=False))
+        await interaction.response.send_message(f"AI用情報「{removed.get('title', '情報')}」を削除しました。", ephemeral=True)
+
+    @app_commands.command(name="ai_command_status", description="AIのメンション命令判定状態を確認します")
+    async def ai_command_status(self, interaction: discord.Interaction):
+        enabled = await db_get(ai_command_enabled_key(interaction.guild_id)) != "off" if interaction.guild_id else True
+        await interaction.response.send_message(
+            f"メンション命令判定: **{'ON' if enabled else 'OFF'}**\n"
+            "管理操作は安全確認ボタンを経由して実行されます。", ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):
