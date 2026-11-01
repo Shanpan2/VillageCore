@@ -10,6 +10,7 @@ from Features.codenames import (
     begin_codenames,
     codenames_games,
     delete_codenames_game,
+    load_codenames_games_for_guild,
     lobby_text as codenames_lobby_text,
     save_codenames_game,
 )
@@ -18,33 +19,36 @@ from Features.daifugo import (
     DaifugoLobbyView,
     daifugo_games,
     delete_daifugo_game,
+    load_daifugo_games_for_guild,
     rules_text,
     save_daifugo_game,
     start_daifugo_game,
 )
-from Features.ito import ItoLobbyView, DEFAULT_TOPICS, begin_ito, delete_ito_game, ito_games, lobby_text as ito_lobby_text, save_ito_game
+from Features.ito import ItoLobbyView, DEFAULT_TOPICS, begin_ito, delete_ito_game, ito_games, load_ito_games_for_guild, lobby_text as ito_lobby_text, save_ito_game
 from Features.omikuji import run_omikuji
-from Features.gomoku import GomokuModeView, delete_gomoku_game, gomoku_games, gomoku_mode_embed
+from Features.gomoku import GomokuModeView, delete_gomoku_game, gomoku_games, gomoku_mode_embed, load_gomoku_games_for_guild
 from Features.othello import (
     AI_DIFFICULTIES,
     AI_PLAYER_ID,
     generate_othello_image,
     delete_othello_game,
     get_valid_moves,
+    load_othello_games_for_guild,
     new_board,
     othello_games,
     run_ai_turns,
     save_othello_game,
     send_othello_state,
 )
-from Features.poker import PokerLobbyView, delete_poker_game, poker_games, save_poker_game, set_poker_bet_amount, start_poker_game
+from Features.poker import PokerLobbyView, delete_poker_game, load_poker_games_for_guild, poker_games, save_poker_game, set_poker_bet_amount, start_poker_game
 from Features.sevens import SUITS as SEVENS_SUITS
-from Features.sevens import SevensLobbyView, delete_sevens_game, save_sevens_game, sevens_games, start_sevens_game
+from Features.sevens import SevensLobbyView, delete_sevens_game, load_sevens_games_for_guild, save_sevens_game, sevens_games, start_sevens_game
 from Features.shogi_puzzle import ShogiPuzzleLevelView, shogi_puzzle_embed
-from Features.uno import UnoLobbyView, delete_uno_game, save_uno_game, uno_games, start_uno_game
+from Features.uno import UnoLobbyView, delete_uno_game, load_uno_games_for_guild, save_uno_game, uno_games, start_uno_game
 from Features.werewolf import (
     WerewolfLobbyView,
     delete_werewolf_game,
+    load_werewolf_games_for_guild,
     lobby_text as werewolf_lobby_text,
     save_werewolf_game,
     start_match,
@@ -1005,6 +1009,25 @@ class QuickView(discord.ui.View):
 class Quick(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_load(self):
+        loaders = (
+            load_uno_games_for_guild,
+            load_sevens_games_for_guild,
+            load_daifugo_games_for_guild,
+            load_poker_games_for_guild,
+            load_othello_games_for_guild,
+            load_gomoku_games_for_guild,
+            load_ito_games_for_guild,
+            load_codenames_games_for_guild,
+            load_werewolf_games_for_guild,
+        )
+        for guild in self.bot.guilds:
+            for loader in loaders:
+                try:
+                    await loader(self.bot, guild)
+                except Exception as exc:
+                    print(f"[game restore] {loader.__name__}: {type(exc).__name__}: {exc}", flush=True)
 
     @app_commands.command(name="quick", description="日頃よく使う機能をボタンで表示します")
     async def quick(self, interaction: discord.Interaction):

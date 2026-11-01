@@ -51,6 +51,17 @@ DEFAULT_DISABLED_EXTENSIONS = {
     "cogs.permission_check",
     "cogs.reminder",
     "cogs.setup_guide",
+    # ゲームの個別スラッシュコマンドは /game パネルへ統合する。
+    # ロジックと保存状態の復元は cogs.quick が担当する。
+    "Features.uno",
+    "Features.sevens",
+    "Features.daifugo",
+    "Features.poker",
+    "Features.othello",
+    "Features.gomoku",
+    "Features.ito",
+    "Features.codenames",
+    "Features.werewolf",
 }
 DEFAULT_HIDDEN_SLASH_COMMANDS = {
     "birthday_add",
