@@ -27,6 +27,7 @@ except ModuleNotFoundError:
 
 MENTION_RE = re.compile(r"<@!?\d+>")
 MAX_HISTORY_TURNS = 6
+KNOWLEDGE_CACHE_SECONDS = 30
 DEFAULT_USER_COOLDOWN_SECONDS = 30
 DEFAULT_GLOBAL_COOLDOWN_SECONDS = 4
 DEFAULT_QUOTA_BACKOFF_SECONDS = 600
@@ -126,6 +127,14 @@ def ai_knowledge_key(guild_id: int) -> str:
 
 def ai_command_enabled_key(guild_id: int) -> str:
     return f"ai_command_enabled:{guild_id}"
+
+
+def ai_confirm_required_key(guild_id: int) -> str:
+    return f"ai_confirm_required:{guild_id}"
+
+
+def ai_provider_key(guild_id: int) -> str:
+    return f"ai_provider:{guild_id}"
 
 
 def split_discord_message(text: str, limit: int = 1900) -> list[str]:
@@ -393,6 +402,8 @@ class QuoteCardView(discord.ui.View):
 
 
 class AIChat(commands.Cog):
+    ai = app_commands.Group(name="ai", description="AIの会話・知識・命令設定")
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -406,6 +417,7 @@ class AIChat(commands.Cog):
         self.server_backoff_seconds = int(os.getenv("AI_SERVER_BACKOFF_SECONDS", str(DEFAULT_SERVER_BACKOFF_SECONDS)))
         self.user_next_allowed: dict[tuple[int | str, int], float] = {}
         self.global_next_allowed = 0.0
+        self.knowledge_cache: dict[int, tuple[float, list[dict]]] = {}
 
     async def cog_load(self):
         if not self.client:
@@ -433,6 +445,9 @@ class AIChat(commands.Cog):
     async def load_knowledge(self, guild_id: int | None) -> list[dict]:
         if guild_id is None:
             return []
+        cached = self.knowledge_cache.get(guild_id)
+        if cached and time.monotonic() - cached[0] < KNOWLEDGE_CACHE_SECONDS:
+            return list(cached[1])
         raw = await db_get(ai_knowledge_key(guild_id))
         try:
             data = json.loads(raw or "[]")
@@ -451,7 +466,8 @@ class AIChat(commands.Cog):
             answer = await db_get(f"community_faq:{guild_id}:{name}")
             if answer:
                 knowledge.append({"title": f"FAQ: {name}", "content": answer[:1800]})
-        return knowledge
+        self.knowledge_cache[guild_id] = (time.monotonic(), knowledge)
+        return list(knowledge)
 
     def cooldown_remaining(self, guild_id: int | None, user_id: int) -> int:
         now = time.monotonic()
@@ -527,7 +543,7 @@ class AIChat(commands.Cog):
                 last_error = e
                 status = getattr(e, "code", None) or getattr(e, "status_code", None)
                 if attempt == 0 and status and int(status) >= 500:
-                    time.sleep(2)
+                    time.sleep(0.5)
                     continue
                 raise
         else:
@@ -596,7 +612,10 @@ class AIChat(commands.Cog):
                 history = await self.load_memory(guild_id, message.author.id)
                 knowledge = await self.load_knowledge(guild_id)
                 prompt = self.build_prompt(message, question, history, knowledge)
-                reply = await asyncio.to_thread(self.generate_reply, prompt)
+                reply = await asyncio.wait_for(
+                    asyncio.to_thread(self.generate_reply, prompt),
+                    timeout=25,
+                )
                 history.append(
                     {
                         "at": datetime.now(timezone.utc).isoformat(),
@@ -622,17 +641,17 @@ class AIChat(commands.Cog):
             for chunk in chunks[1:]:
                 await message.channel.send(chunk)
 
-    @app_commands.command(name="ai_memory_clear", description="自分のAI会話履歴を削除します")
+    @ai.command(name="memory_clear", description="自分のAI会話履歴を削除します")
     async def ai_memory_clear(self, interaction: discord.Interaction):
         await db_set(memory_key(interaction.guild_id, interaction.user.id), "[]")
         await interaction.response.send_message("AI会話履歴を削除しました。", ephemeral=True)
 
-    @app_commands.command(name="ai_memory_status", description="自分のAI会話履歴の保存件数を表示します")
+    @ai.command(name="memory_status", description="自分のAI会話履歴の保存件数を表示します")
     async def ai_memory_status(self, interaction: discord.Interaction):
         history = await self.load_memory(interaction.guild_id, interaction.user.id)
         await interaction.response.send_message(f"保存されている会話履歴: {len(history)}件", ephemeral=True)
 
-    @app_commands.command(name="ai_reply_enable", description="【管理者】BotへのリプライでAIが反応するか切り替えます")
+    @ai.command(name="reply", description="【管理者】AIの返信条件を設定します")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.choices(mode=[
         app_commands.Choice(name="ON", value="on"),
@@ -645,7 +664,7 @@ class AIChat(commands.Cog):
         await db_set(ai_reply_enabled_key(interaction.guild_id), mode.value)
         await interaction.response.send_message(f"AIリプライ反応を **{mode.name}** にしました。", ephemeral=True)
 
-    @app_commands.command(name="ai_source", description="AIが参照できるサーバー固有情報を表示します")
+    @ai.command(name="source", description="AIが参照できるサーバー固有情報を表示します")
     async def ai_source(self, interaction: discord.Interaction):
         if not interaction.guild_id:
             await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -658,7 +677,7 @@ class AIChat(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="ai_knowledge_add", description="【管理者】AI用のサーバー固有情報を追加します")
+    @ai.command(name="knowledge_add", description="【管理者】AI用のサーバー固有情報を追加します")
     @app_commands.default_permissions(manage_guild=True)
     async def ai_knowledge_add(self, interaction: discord.Interaction, title: str, content: str):
         if not interaction.guild_id:
@@ -667,9 +686,10 @@ class AIChat(commands.Cog):
         knowledge = await self.load_knowledge(interaction.guild_id)
         knowledge.append({"title": title.strip()[:80], "content": content.strip()[:1200]})
         await db_set(ai_knowledge_key(interaction.guild_id), json.dumps(knowledge[-50:], ensure_ascii=False))
+        self.knowledge_cache.pop(interaction.guild_id, None)
         await interaction.response.send_message(f"AI用情報「{title.strip()[:80]}」を登録しました。", ephemeral=True)
 
-    @app_commands.command(name="ai_knowledge_remove", description="【管理者】AI用の登録情報を番号で削除します")
+    @ai.command(name="knowledge_remove", description="【管理者】AI用の登録情報を番号で削除します")
     @app_commands.default_permissions(manage_guild=True)
     async def ai_knowledge_remove(self, interaction: discord.Interaction, number: int):
         if not interaction.guild_id:
@@ -681,14 +701,67 @@ class AIChat(commands.Cog):
             return
         removed = knowledge.pop(number - 1)
         await db_set(ai_knowledge_key(interaction.guild_id), json.dumps(knowledge, ensure_ascii=False))
+        self.knowledge_cache.pop(interaction.guild_id, None)
         await interaction.response.send_message(f"AI用情報「{removed.get('title', '情報')}」を削除しました。", ephemeral=True)
 
-    @app_commands.command(name="ai_command_status", description="AIのメンション命令判定状態を確認します")
+    @ai.command(name="status", description="AIの設定状態を確認します")
     async def ai_command_status(self, interaction: discord.Interaction):
-        enabled = await db_get(ai_command_enabled_key(interaction.guild_id)) != "off" if interaction.guild_id else True
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        enabled = await db_get(ai_command_enabled_key(interaction.guild_id)) != "off"
+        confirm = await db_get(ai_confirm_required_key(interaction.guild_id)) != "off"
+        provider = await db_get(ai_provider_key(interaction.guild_id)) or "gemini"
+        reply = await db_get(ai_reply_enabled_key(interaction.guild_id)) or "on"
         await interaction.response.send_message(
+            f"AI提供元: **{provider}**\n"
+            f"AIリプライ: **{reply.upper()}**\n"
             f"メンション命令判定: **{'ON' if enabled else 'OFF'}**\n"
-            "管理操作は安全確認ボタンを経由して実行されます。", ephemeral=True
+            f"危険操作の確認: **{'ON' if confirm else 'OFF'}**", ephemeral=True
+        )
+
+    @ai.command(name="command", description="【管理者】AIのメンション命令判定を切り替えます")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="ON", value="on"),
+        app_commands.Choice(name="OFF", value="off"),
+    ])
+    async def ai_command(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ai_command_enabled_key(interaction.guild_id), mode.value)
+        await interaction.response.send_message(f"AIの命令判定を **{mode.name}** にしました。", ephemeral=True)
+
+    @ai.command(name="confirm", description="【管理者】危険操作の実行前確認を切り替えます")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="ON", value="on"),
+        app_commands.Choice(name="OFF", value="off"),
+    ])
+    async def ai_confirm(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ai_confirm_required_key(interaction.guild_id), mode.value)
+        await interaction.response.send_message(f"危険操作の確認を **{mode.name}** にしました。", ephemeral=True)
+
+    @ai.command(name="provider", description="【管理者】AIの優先提供元を記録します")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(provider=[
+        app_commands.Choice(name="Gemini", value="gemini"),
+        app_commands.Choice(name="Groq", value="groq"),
+        app_commands.Choice(name="OpenRouter", value="openrouter"),
+    ])
+    async def ai_provider(self, interaction: discord.Interaction, provider: app_commands.Choice[str]):
+        if not interaction.guild_id:
+            await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+            return
+        await db_set(ai_provider_key(interaction.guild_id), provider.value)
+        await interaction.response.send_message(
+            f"AIの優先提供元を **{provider.name}** として保存しました。\n"
+            "実際の接続先を切り替えるには、対応するAPIキー設定も必要です。",
+            ephemeral=True,
         )
 
 
