@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -407,6 +408,8 @@ class AIChat(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         self.model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
         self.ai_bot_name = os.getenv("AI_BOT_NAME", "むらびとくん")
@@ -550,6 +553,47 @@ class AIChat(commands.Cog):
             raise last_error
         return (getattr(response, "text", None) or "").strip() or "すみません、うまく回答を生成できませんでした。"
 
+    async def generate_reply_with_fallback(self, prompt: str) -> str:
+        """Use Gemini first and switch to Groq when Gemini is unavailable or slow."""
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self.generate_reply, prompt),
+                timeout=25,
+            )
+        except Exception as primary_error:
+            if not self.groq_api_key:
+                raise primary_error
+
+            system_text = (
+                "あなたはDiscordサーバー内で動く親切な日本語アシスタントです。"
+                f"あなたのBot名は「{self.ai_bot_name}」です。"
+                f"開発者名は「{self.ai_developer_name or 'シャンパン2号'}」です。"
+                "簡潔で自然に答え、不確かなことは断定しないでください。"
+            )
+            payload = {
+                "model": self.groq_model,
+                "messages": [
+                    {"role": "system", "content": system_text},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 700,
+            }
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {self.groq_api_key}"},
+                    json=payload,
+                ) as response:
+                    data = await response.json(content_type=None)
+                    if response.status >= 400:
+                        detail = data.get("error", {}).get("message", "Groq API error") if isinstance(data, dict) else "Groq API error"
+                        raise RuntimeError(f"Groq {response.status}: {detail}") from primary_error
+                    choices = data.get("choices", []) if isinstance(data, dict) else []
+                    text = choices[0].get("message", {}).get("content", "") if choices else ""
+                    return text.strip() or "すみません、うまく回答を生成できませんでした。"
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not self.bot.user:
@@ -612,10 +656,7 @@ class AIChat(commands.Cog):
                 history = await self.load_memory(guild_id, message.author.id)
                 knowledge = await self.load_knowledge(guild_id)
                 prompt = self.build_prompt(message, question, history, knowledge)
-                reply = await asyncio.wait_for(
-                    asyncio.to_thread(self.generate_reply, prompt),
-                    timeout=25,
-                )
+                reply = await self.generate_reply_with_fallback(prompt)
                 history.append(
                     {
                         "at": datetime.now(timezone.utc).isoformat(),
