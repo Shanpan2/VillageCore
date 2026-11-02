@@ -410,7 +410,7 @@ class AIChat(commands.Cog):
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         self.client = genai.Client(api_key=self.api_key) if genai and self.api_key else None
         self.ai_bot_name = os.getenv("AI_BOT_NAME", "むらびとくん")
         self.ai_developer_name = os.getenv("AI_DEVELOPER_NAME", "シャンパン2号")
